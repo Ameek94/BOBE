@@ -1,5 +1,6 @@
 # Convert to JAX
 
+from tabnanny import verbose
 import time
 from typing import Any,List
 import numpyro
@@ -24,11 +25,12 @@ from functools import partial
 # 2. test speed vs standard botorch
 # 3. Matern kernal
 # 4. methods to load and save from dict
-# 5. 
+# 5. make posterior eval fast for nested sampler/ EI - single vs vmap balance - may be better to vmap rather than batch posterior to avoid involving large matrices in the computation
+# 6. separate mean and var predictions
 
 def cdist(x, y):
     # x, y are n1 x d and n2 x d
-  return jnp.sum(jnp.square(x[:,None,:] - y),axis=-1)
+  return jnp.sum(jnp.square(x[:,None,:] - y),axis=-1) # can use vmap here?
 
 @jit
 def rbf_kernel(xa,
@@ -72,7 +74,8 @@ class numpyro_model:
         # loglike = numpyro.deterministic("loglike",jnp.log(ll)) # replace with loglike or use another method for ll
 
    def run_mcmc(self,rng_key,dense_mass=True,max_tree_depth=6,
-                warmup_steps=512,num_samples=512,num_chains=1,thinning=16,progbar=True,
+                warmup_steps=512,num_samples=512,num_chains=1,thinning=16,
+                progbar=True,verbose=False,
                 ) -> dict:
         start = time.time()
         kernel = NUTS(self.model,
@@ -87,14 +90,15 @@ class numpyro_model:
                 thinning=thinning,
                 )
         mcmc.run(rng_key,extra_fields=("potential_energy",))
-        mcmc.print_summary(exclude_deterministic=False)
+        if verbose:
+            mcmc.print_summary(exclude_deterministic=False)
         extras = mcmc.get_extra_fields()
         # print(extras.keys())
         print(f"\nMCMC elapsed time: {time.time() - start:.2f}s")
         return mcmc.get_samples(), extras # type: ignore
 
    def fit_gp_NUTS(self,rng_key,dense_mass=True,max_tree_depth=6,
-                warmup_steps=512,num_samples=512,num_chains=1,progbar=True,thinning=16):
+                warmup_steps=512,num_samples=512,num_chains=1,progbar=True,thinning=16,verbose=False):
         samples, extras = self.run_mcmc(rng_key=rng_key,
                 dense_mass=dense_mass,
                 max_tree_depth=max_tree_depth,
@@ -102,7 +106,8 @@ class numpyro_model:
                 num_samples=num_samples,
                 num_chains=num_chains,
                 progbar=progbar,
-                thinning=thinning)
+                thinning=thinning,
+                verbose=verbose)
         samples["minus_log_prob"] = extras["potential_energy"]  # see also numpyro.infer.util.log_likelihood
         # numpyro already thins samples and keeps deterministic params
         # samples["lengthscales"] = (samples["kernel_tausq"].unsqueeze(-1)*samples["_kernel_inv_length_sq"])
@@ -149,14 +154,15 @@ class saas_fbgp: #jit.ScriptModule):
         pass
 
     def fit(self,rng_key,dense_mass=True,max_tree_depth=6,
-                warmup_steps=512,num_samples=512,num_chains=1,progbar=True,thinning=16):
+                warmup_steps=512,num_samples=512,num_chains=1,progbar=True,thinning=16,verbose=False):
         self.samples = self.numpyro_model.fit_gp_NUTS(rng_key,dense_mass=dense_mass,
                                                    max_tree_depth=max_tree_depth,
                                                    warmup_steps=warmup_steps,
                                                    num_samples=num_samples,
                                                    num_chains=num_chains,
                                                    progbar=progbar,
-                                                   thinning=thinning)
+                                                   thinning=thinning,
+                                                   verbose=verbose)
         self.num_samples = self.samples["kernel_length"].shape[0]
         lengthscales = self.samples["kernel_length"]
         outputscales = self.samples["kernel_var"]
@@ -218,6 +224,7 @@ class saas_fbgp: #jit.ScriptModule):
         return mean, var
 
     def _fantasy_var_fb(self,x_new,lengthscales,outputscales,mc_points):
+        # print(self.train_x.shape,x_new.shape)
         x_new = jnp.atleast_2d(x_new)
         new_x = jnp.concatenate([self.train_x,x_new])
         k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales)+self.noise*jnp.eye(new_x.shape[0])

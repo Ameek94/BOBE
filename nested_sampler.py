@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import jax.random as random
 import numpy as np
 import jax
-from jax import config
+from jax import config, vmap
 config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
@@ -32,11 +32,15 @@ class gp_likelihood:
         mu, var = self.gp.posterior(X,single=True,unstandardize=True)
         mu = mu.squeeze(-1)
         var = var.squeeze(-1)
+        # print(mu.shape)
+        blob = np.zeros(2)
         if logz_std:
             std = jnp.sqrt(var)
             ul = mu + std
             ll = mu - std
-            return mu, (ll, ul)
+            blob[0] = ll
+            blob[1] = ul
+            return mu, blob
         else:
             return mu 
 
@@ -94,7 +98,7 @@ def nested_sampling_Dy(gp: saas_fbgp
     else:
         sampler = NestedSampler(loglike,prior_transform,ndim=ndim,blob=logz_std,logl_args={'logz_std': logz_std}) # type: ignore
         sampler.run_nested(print_progress=False,dlogz=dlogz,maxcall=maxcall) # type: ignore #tune? ,maxcall=20000
-    print(f"Nested Sampling took {time.time() - start:.4f}s")
+    print(f"Nested Sampling took {time.time() - start:.2f}s")
     res = sampler.results  # type: ignore # grab our results
     logl = res['logl']
     print("Log Z evaluated using {} points".format(np.shape(logl))) 
@@ -120,10 +124,12 @@ def nested_sampling_jaxns(gp: saas_fbgp
                        ,maxcall: int = 1e5 # type: ignore
                         ,boost_maxcall: int = 1
                         ,num_samples_equal=1000
+                        ,difficult_model = False
                        ) -> tuple[np.ndarray,Dict]:
         
     def log_likelihood(x):
-        mu, var = gp.posterior(x,single=True,unstandardize=True)
+        # f = lambda x: 
+        mu, var = gp.posterior(x,single=True,unstandardize=True) # vmap(f,in_axes=(0),out_axes=(0,0))(x)
         mu = mu.squeeze(-1)
         return mu
 
@@ -135,18 +141,18 @@ def nested_sampling_jaxns(gp: saas_fbgp
               log_likelihood=log_likelihood)
     
     start = time.time()
-    ns = NestedSampler(model=model, max_samples=1e5)
+    ns = NestedSampler(model=model, max_samples=1e5,parameter_estimation=True,difficult_model=difficult_model)
     # Run the sampler
     term_cond = TerminationCondition(dlogZ=dlogz,evidence_uncert=0.05)
     # currently always stops around dlogz~0.1, need to figure out how to decrease it further
     termination_reason, state = ns(jax.random.PRNGKey(42),term_cond=term_cond)
     # Get the results
     results = ns.to_results(termination_reason=termination_reason, state=state)
-    print(f"Nested Sampling took {time.time() - start:.4f}s")
-    print(f"jaxns made {results.total_num_likelihood_evaluations} likelihood evaluations")
+    print(f"Nested Sampling took {time.time() - start:.2f}s")
+    print(f"jaxns did {results.total_num_likelihood_evaluations} likelihood evaluations")
     logz_dict = {"logz_mean": results.log_Z_mean, "dlogz": results.log_Z_uncert}
 
-    print(results.samples['x'].shape)
+    # print(results.samples['x'].shape)
 
     samples = resample(key=jax.random.PRNGKey(0),
                     samples=results.samples,

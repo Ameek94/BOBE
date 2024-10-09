@@ -80,6 +80,7 @@ class IPV(Acquisition):
 
     def __call__(self, X) -> Any:
         # return super().__call__(*args, **kwds)
+        X = jnp.atleast_2d(X)
         return self.variance(X)
 
     def variance(self,X):
@@ -96,10 +97,19 @@ class IPV(Acquisition):
 
 # effectively a local optimizer with multiple restarts
 def optim_scipy_bh(acq_func,x0,minimizer_kwargs,stepsize=1/4,niter=15):
+    start = time.time()
     results = scipy.optimize.basinhopping(acq_func,x0=x0,stepsize=stepsize,
                                       niter=niter,minimizer_kwargs=minimizer_kwargs) # minimizer_kwargs is for the choice of the local optimizer, bounds and to provide gradient if necessary
-
+    print(f"Acquisition optimization took {time.time() - start:.2f} s")
     return results
 
 
-# add here jax based optax optimizers
+# add here jax based optax optimizers - stochastic gradient descent
+
+
+
+# some gradient free optimizer (e.g. from iminuit or pybobyqa)
+
+def optim_cma(acq_func,x0,):
+    pass
+
