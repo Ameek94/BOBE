@@ -30,13 +30,14 @@ from functools import partial
 
 def cdist(x, y):
     # x, y are n1 x d and n2 x d
-  return jnp.sum(jnp.square(x[:,None,:] - y),axis=-1) # can use vmap here?
+    # print(x.shape,y.shape)
+    return jnp.sum(jnp.square(x[:,None,:] - y),axis=-1) 
 
 @jit
 def rbf_kernel(xa,
                xb,
                lengthscales,
-               outputscale):
+               outputscale): # can use vmap for rbf/cdist? possibly faster in high dim or when large number of xa already accumulated
     c_dist = cdist(xa/lengthscales,xb/lengthscales) 
     c_dist = jnp.exp(-0.5*c_dist)
     return outputscale*c_dist
@@ -48,23 +49,32 @@ def matern_kernel(xa,xb,lengthscales,outputscale):
 
 class numpyro_model:
    # Note - train_x and train_y received here are already transformed, npoints x ndim and npoints x 1
-   def __init__(self, train_x,  train_y, train_yvar, kernel_func) -> None:
+   def __init__(self, train_x,  train_y, train_yvar, kernel_func,noise=1e-4) -> None:
       self.train_x = train_x 
       self.train_y = train_y
       self.train_yvar = train_yvar
       self.ndim = train_x.shape[-1]
       self.npoints = train_x.shape[-2]
       self.kernel_func = kernel_func
+      self.noise = noise
     #   print(self.npoints,self.ndim)
  
    
    def model(self):
         outputscale = numpyro.sample("kernel_var", dist.Gamma(concentration=2.,rate=0.15))
         tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(0.1))
+        # def trunc_HC(scale=tausq,low=None,high=None,validate_args=None):
+        #         return dist.TruncatedDistribution(base_dist=dist.HalfCauchy(scale*jnp.ones(self.ndim)),
+        #                                         low=low,
+        #                                         high=high,
+        #                                         validate_args=validate_args,)
         inv_length_sq = numpyro.sample("_kernel_inv_length_sq",dist.HalfCauchy(jnp.ones(self.ndim))) # type: ignore
+        # inv_lengthscales = numpyro.sample("_kernel_inv_length_sq",trunc_HC(scale=tausq,low=0.1,high=100.))
         lengthscales = numpyro.deterministic("kernel_length",1/jnp.sqrt(tausq*inv_length_sq)) # type: ignore
-        k = rbf_kernel(self.train_x,self.train_x,lengthscales,outputscale) + jnp.diag(self.train_yvar) #self.train_yvar * jnp.eye(self.train_x.shape[0])
-        ll = numpyro.sample(
+        # lengthscales = numpyro.deterministic("kernel_length",1/jnp.sqrt(inv_length_sq)) # type: ignore
+        # truncated_lengthscales = numpyro.sample("trunc_lengths",lengthscales)
+        k = rbf_kernel(self.train_x,self.train_x,lengthscales,outputscale) + self.noise*jnp.eye(self.train_x.shape[0]) #self.train_yvar * jnp.eye(self.train_x.shape[0])
+        mll = numpyro.sample(
                 "Y",
                 dist.MultivariateNormal(
                     loc=jnp.zeros(self.train_x.shape[0]), # type: ignore
@@ -73,6 +83,9 @@ class numpyro_model:
                 obs=self.train_y.squeeze(-1),)
         # loglike = numpyro.deterministic("loglike",jnp.log(ll)) # replace with loglike or use another method for ll
 
+    # add method to start from previous samples
+
+    # how can we speed up the MCMC when we already have a large number of samples? main bottleneck -> inversion of kernel
    def run_mcmc(self,rng_key,dense_mass=True,max_tree_depth=6,
                 warmup_steps=512,num_samples=512,num_chains=1,thinning=16,
                 progbar=True,verbose=False,
@@ -116,7 +129,7 @@ class numpyro_model:
 
 class saas_fbgp: #jit.ScriptModule):
 
-    def __init__(self,train_x,train_y,train_yvar=None,standardise_y=True,noise=1e-6,kernel_func=rbf_kernel) -> None:
+    def __init__(self,train_x,train_y,train_yvar=None,standardise_y=True,noise=1e-4,kernel_func=rbf_kernel) -> None:
         """
         train_x: size (N x D), assumed to be standardised by the main sampler module
         train_y: size (N x 1)
@@ -126,6 +139,7 @@ class saas_fbgp: #jit.ScriptModule):
         # check train_x and train_y dims are N x D and N x 1
 
         self.train_x = train_x
+        # train_y = jnp.atleast_2d(train_y).T
 
         if standardise_y:
             self.y_mean = jnp.mean(train_y,axis=-2)
@@ -280,6 +294,21 @@ class saas_fbgp: #jit.ScriptModule):
         l = self.samples["kernel_length"][map_idx,:]
         o = self.samples["kernel_var"][map_idx]
         return l, o
+    
+    def get_median_lengthscales(self):
+        lengthscales = self.samples["kernel_length"]
+        median_lengths = jnp.median(lengthscales,axis=0)
+        return median_lengths
+    
+    def get_median_outputscales(self):
+        outputscales = self.samples["kernel_var"]
+        median_out = jnp.median(outputscales,axis=0)
+        return median_out
+    
+    def get_median_mll(self):
+        mlls = self.samples["minus_log_prob"]
+        median_mll = jnp.median(mlls)
+        return median_mll
 
     # Use JAX NS for this
     def get_evidence(self):
