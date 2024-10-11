@@ -1,5 +1,6 @@
 # Convert to JAX
 
+import stat
 from tabnanny import verbose
 import time
 from typing import Any,List
@@ -33,6 +34,7 @@ def cdist(x, y):
     # print(x.shape,y.shape)
     return jnp.sum(jnp.square(x[:,None,:] - y),axis=-1) 
 
+# @partial(jit,static_argnums=4)
 @jit
 def rbf_kernel(xa,
                xb,
@@ -110,6 +112,7 @@ class numpyro_model:
         print(f"\nMCMC elapsed time: {time.time() - start:.2f}s")
         return mcmc.get_samples(), extras # type: ignore
 
+    # add method to start from previous map hyperparams
    def fit_gp_NUTS(self,rng_key,dense_mass=True,max_tree_depth=6,
                 warmup_steps=512,num_samples=512,num_chains=1,progbar=True,thinning=16,verbose=False):
         samples, extras = self.run_mcmc(rng_key=rng_key,
@@ -186,7 +189,22 @@ class saas_fbgp: #jit.ScriptModule):
         # print(self.cholesky.size())
         self.map_lengthscales, self.map_outputscales = self.get_map_hyperparams()
         self.fitted = True
-    
+
+    # can make this faster with quicker update of cholesky
+    def quick_update(self,x_new,y_new):
+        self.train_x = jnp.concatenate([self.train_x,x_new])
+        self.train_y = self.train_y*self.y_std + self.y_mean 
+        self.train_y = jnp.concatenate([self.train_y,y_new])
+        self.y_mean = jnp.mean(self.train_y,axis=-2)
+        self.y_std = jnp.std(self.train_y,axis=-2)
+        self.train_y = (self.train_y - self.y_mean) / self.y_std
+        lengthscales = self.samples["kernel_length"]
+        outputscales = self.samples["kernel_var"]
+        # print(lengthscales.size(),outputscales.size())
+        kernel = lambda l,o : jnp.linalg.cholesky(self.noise*jnp.eye(self.train_x.shape[0]) + self.kernel_func(self.train_x,self.train_x,l,o))
+        self.cholesky = vmap(kernel,in_axes=(0,0),out_axes=(0))(lengthscales,outputscales)        
+        return None
+
     def get_mean_var(self,X,k11_cho,lengthscales,outputscales):
         """
         Algorithm 2.1 of R&W (2006)

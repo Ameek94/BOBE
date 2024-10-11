@@ -108,13 +108,16 @@ def optim_scipy_bh(acq_func,x0,minimizer_kwargs,stepsize=1/4,niter=15):
     print(f"Acquisition optimization took {time.time() - start:.2f} s")
     return results
 
-
 # add here jax based optax optimizers - stochastic gradient descent
 
-
+def optim_adam():
+    pass
 
 # some gradient free optimizer (e.g. from iminuit or pybobyqa)
 
 def optim_cma(acq_func,x0,):
     pass
 
+
+def optim_bobyqa(acq_func,x0,):
+    pass
