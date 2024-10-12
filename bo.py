@@ -64,7 +64,7 @@ class sampler:
         self.ndim = ndim # check consistency of provided quantities
         self.param_list = param_list if param_list is not None else ['x_%i'%(i+1) for i in range(ndim)]
         self.param_labels = param_labels if param_labels is not None else ['x_%i'%(i+1) for i in range(ndim)]
-        self.param_bounds = param_bounds if param_bounds is not None else np.array(ndim*[[0,1]]).T
+        self.param_bounds = np.array(param_bounds) if param_bounds is not None else np.array(ndim*[[0,1]]).T
         log.info(f"\tRunning the sampler with params {self.param_labels}")
         log.info(f"\tParameter bounds {self.param_bounds.T}")
 
