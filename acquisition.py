@@ -19,7 +19,8 @@ from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
 import scipy.optimize
-
+import logging
+log = logging.getLogger("[AQ]")
 
 
 #------------------The acqusition functions-------------------------
@@ -105,7 +106,7 @@ def optim_scipy_bh(acq_func,x0,minimizer_kwargs,stepsize=1/4,niter=15):
                                         stepsize=stepsize,
                                         niter=niter,
                                         minimizer_kwargs=minimizer_kwargs) # minimizer_kwargs is for the choice of the local optimizer, bounds and to provide gradient if necessary
-    print(f"Acquisition optimization took {time.time() - start:.2f} s")
+    log.info(f"\tAcquisition optimization took {time.time() - start:.2f} s")
     return results
 
 # add here jax based optax optimizers - stochastic gradient descent

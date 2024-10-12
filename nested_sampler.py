@@ -20,6 +20,9 @@ tfpd = tfp.distributions
 from jaxns.framework.model import Model
 from jaxns.framework.prior import Prior
 from jaxns import NestedSampler, TerminationCondition, resample
+import logging
+log = logging.getLogger("[NS]")
+
 
 class gp_likelihood:
 
@@ -98,11 +101,11 @@ def nested_sampling_Dy(gp: saas_fbgp
     else:
         sampler = NestedSampler(loglike,prior_transform,ndim=ndim,blob=logz_std,logl_args={'logz_std': logz_std}) # type: ignore
         sampler.run_nested(print_progress=False,dlogz=dlogz,maxcall=maxcall) # type: ignore #tune? ,maxcall=20000
-    print(f"Nested Sampling took {time.time() - start:.2f}s")
+    log.info(f"\tNested Sampling took {time.time() - start:.2f}s")
     res = sampler.results  # type: ignore # grab our results
     logl = res['logl']
-    print("Log Z evaluated using {} points".format(np.shape(logl))) 
-    print(f"Dynesty made {np.sum(res['ncall'])} function calls")
+    log.info("\tLog Z evaluated using {} points".format(np.shape(logl))) 
+    log.info(f"\tDynesty made {np.sum(res['ncall'])} function calls")
     logl_lower,logl_upper = res['blob'].T
     logvol = res['logvol']
     logl = res['logl']
@@ -148,8 +151,8 @@ def nested_sampling_jaxns(gp: saas_fbgp
     termination_reason, state = ns(jax.random.PRNGKey(42),term_cond=term_cond)
     # Get the results
     results = ns.to_results(termination_reason=termination_reason, state=state)
-    print(f"Nested Sampling took {time.time() - start:.2f}s")
-    print(f"jaxns did {results.total_num_likelihood_evaluations} likelihood evaluations")
+    log.info(f"\tNested Sampling took {time.time() - start:.2f}s")
+    log.info(f"\tjaxns did {results.total_num_likelihood_evaluations} likelihood evaluations")
     logz_dict = {"logz_mean": results.log_Z_mean, "dlogz": results.log_Z_uncert}
 
     # print(results.samples['x'].shape)
@@ -157,7 +160,7 @@ def nested_sampling_jaxns(gp: saas_fbgp
     samples = resample(key=jax.random.PRNGKey(0),
                     samples=results.samples,
                     log_weights=results.log_dp_mean, # type: ignore
-                    S=num_samples_equal*ndim, # type: ignore
-                    replace=True,)
+                    S=num_samples_equal*ndim, # type: ignore # check with effective sample size...
+                    replace=True,) 
     
     return np.array(samples['x']), logz_dict

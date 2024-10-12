@@ -1,7 +1,5 @@
 # Convert to JAX
 
-import stat
-from tabnanny import verbose
 import time
 from typing import Any,List
 import numpyro
@@ -20,9 +18,11 @@ config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
+import logging
+log = logging.getLogger("[GP]")
 
 # todo
-# 1. check works in n>1 dim cases
+# 1. method to reuse previous mcmc samples if HMC runs into issues
 # 2. test speed vs standard botorch
 # 3. Matern kernal
 # 4. methods to load and save from dict
@@ -109,7 +109,9 @@ class numpyro_model:
             mcmc.print_summary(exclude_deterministic=False)
         extras = mcmc.get_extra_fields()
         # print(extras.keys())
-        print(f"\nMCMC elapsed time: {time.time() - start:.2f}s")
+        # print(f"\nMCMC elapsed time: {time.time() - start:.2f}s")
+        log.info(f"\tMCMC elapsed time: {time.time() - start:.2f}s")
+
         return mcmc.get_samples(), extras # type: ignore
 
     # add method to start from previous map hyperparams
