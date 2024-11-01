@@ -5,8 +5,10 @@ import pandas as pd
 import numpy as np
 from getdist import plots,MCSamples,loadMCSamples
 import matplotlib.pyplot as plt
+import jax.numpy as jnp
+from jax import vmap
 
-# use this to suppress most of the unecessary polychord output, https://stackoverflow.com/questions/2125702/how-to-suppress-console-output-in-python
+# use this to suppress unecessary output, https://stackoverflow.com/questions/2125702/how-to-suppress-console-output-in-python
 @contextmanager
 def suppress_stdout_stderr():
     """A context manager that redirects stdout and stderr to devnull"""
@@ -14,6 +16,17 @@ def suppress_stdout_stderr():
         with redirect_stderr(fnull) as err, redirect_stdout(fnull) as out:
             yield (err, out)
 
+# this will mainly be used for the GP prediction so func will return mean and var, each with shape num_samples x num_test_points
+# from https://github.com/martinjankowiak/saasbo/blob/main/util.py
+def split_vmap(func,input_arrays,batch_size=10):
+    num_inputs = input_arrays[0].shape[0]
+    num_batches = (num_inputs + batch_size - 1 ) // batch_size
+    batch_idxs = [jnp.arange( i*batch_size, min( (i+1)*batch_size,num_inputs  )) for i in range(num_batches)]
+    res = [vmap(func)(*tuple([arr[idx] for arr in input_arrays])) for idx in batch_idxs]
+    nres = len(res[0])
+    # now combine results across batches and function outputs to return a tuple (noutputs, num_inputs, ...)
+    results = tuple( jnp.concatenate([x[i] for x in res]) for i in range(nres))
+    return results
 
 def input_standardize(x,param_bounds):
     """

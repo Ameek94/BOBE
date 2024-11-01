@@ -12,7 +12,10 @@ from numpyro.util import enable_x64
 enable_x64()
 from fb_gp import saas_fbgp
 
-from dynesty import NestedSampler,DynamicNestedSampler
+try:
+    from dynesty import NestedSampler,DynamicNestedSampler
+except ModuleNotFoundError:
+    print("Proceeding without dynesty since not installed")
 import math
 
 import tensorflow_probability.substrates.jax as tfp
@@ -101,11 +104,11 @@ def nested_sampling_Dy(gp: saas_fbgp
     else:
         sampler = NestedSampler(loglike,prior_transform,ndim=ndim,blob=logz_std,logl_args={'logz_std': logz_std}) # type: ignore
         sampler.run_nested(print_progress=False,dlogz=dlogz,maxcall=maxcall) # type: ignore #tune? ,maxcall=20000
-    log.info(f"\tNested Sampling took {time.time() - start:.2f}s")
+    log.info(f" Nested Sampling took {time.time() - start:.2f}s")
     res = sampler.results  # type: ignore # grab our results
     logl = res['logl']
-    log.info("\tLog Z evaluated using {} points".format(np.shape(logl))) 
-    log.info(f"\tDynesty made {np.sum(res['ncall'])} function calls")
+    log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
+    log.info(f" Dynesty made {np.sum(res['ncall'])} function calls")
     logl_lower,logl_upper = res['blob'].T
     logvol = res['logvol']
     logl = res['logl']
@@ -151,8 +154,8 @@ def nested_sampling_jaxns(gp: saas_fbgp
     termination_reason, state = ns(jax.random.PRNGKey(42),term_cond=term_cond)
     # Get the results
     results = ns.to_results(termination_reason=termination_reason, state=state)
-    log.info(f"\tNested Sampling took {time.time() - start:.2f}s")
-    log.info(f"\tjaxns did {results.total_num_likelihood_evaluations} likelihood evaluations")
+    log.info(f" Nested Sampling took {time.time() - start:.2f}s")
+    log.info(f" jaxns did {results.total_num_likelihood_evaluations} likelihood evaluations")
     logz_dict = {"logz_mean": results.log_Z_mean, "dlogz": results.log_Z_uncert}
 
     # print(results.samples['x'].shape)

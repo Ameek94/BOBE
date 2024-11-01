@@ -19,8 +19,13 @@ from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
 import scipy.optimize
+import optax, pybobyqa
 import logging
 log = logging.getLogger("[AQ]")
+
+
+
+# Implement optimizer call within the acquisition class?
 
 
 #------------------The acqusition functions-------------------------
@@ -50,10 +55,10 @@ class EI(Acquisition):
                  best_f,
                  zeta: float = 0.1,) -> None:
         super().__init__(gp)
-        self.best_f = best_f
+        self.best_f =  gp.train_y.max() #best_f
         self.zeta = zeta
 
-    # @jit needs static argnums or similar
+    # @jit ?
     def __call__(self, X) -> Any:
         mu, var = self.gp.predict(X)
         mu  = mu.mean(axis=0)
@@ -65,31 +70,31 @@ class EI(Acquisition):
         return np.reshape(-ei,()) # ei # can we make it directly a scalar without reshape
         # -ve so that we can minimize it
 
-    # def grad_fn(self,X):
-    #     return grad(self.__call__(X))
+# implement the more stable logEI 
     
 
 class IPV(Acquisition):
     """
-    Integrated (mean) posterior variance over the over a set of test points (mc_points).
+    Integrated (mean) posterior variance over the over a set of test points (mc_points). 
+    Can do joint optimization here with batch size > 1
     """
 
     def __init__(self, gp: saas_fbgp,
-                 mc_points,) -> None:
+                 mc_points,batch_size=1) -> None:
         super().__init__(gp)
         self.mc_points = mc_points
-
+        self.batch_size = batch_size
+    
+    # @jit ?
     def __call__(self, X) -> Any:
-        # return super().__call__(*args, **kwds)
-        X = jnp.atleast_2d(X)
+        X = jnp.atleast_2d(X) # new_x
         return self.variance(X)
 
     def variance(self,X):
         var = self.gp.fantasy_var_fb(X,self.mc_points)
         var = var.mean(axis=-1)
         var = var.mean(axis=-1)
-        # mu, _ = self.gp.predict(X,standardize=False)
-        return np.reshape(var,()) #*mu
+        return var #np.reshape(var,()) #*mu
         # +ve can be directly minimized
 
 
@@ -100,25 +105,65 @@ class IPV(Acquisition):
 def optim_scipy_bh(acq_func,x0,minimizer_kwargs,stepsize=1/4,niter=15):
     start = time.time()
     # ideally stepsize should be ~ max(delta,distance between sampled points)
-    # with delta some small number to ensure that step size does not become too large
+    # with delta some small number to ensure that step size does not become too small
     results = scipy.optimize.basinhopping(acq_func,
                                         x0=x0,
                                         stepsize=stepsize,
                                         niter=niter,
                                         minimizer_kwargs=minimizer_kwargs) # minimizer_kwargs is for the choice of the local optimizer, bounds and to provide gradient if necessary
-    log.info(f"\tAcquisition optimization took {time.time() - start:.2f} s")
+    log.info(f" Acquisition optimization took {time.time() - start:.2f} s")
     return results
 
 # add here jax based optax optimizers - stochastic gradient descent
 
-def optim_adam():
-    pass
+def optim_optax(acq_func,x0,iters=100): # needs more work
+    acq_grad = grad(acq_func)
+    start_learning_rate = 1e-1
+    optimizer = optax.adam(start_learning_rate)
+    params = jnp.array(x0)
+    opt_state = optimizer.init(params)
+    start = time.time()
+    for _ in range(iters):
+        grads = acq_grad(params)
+        updates, opt_state = optimizer.update(grads, opt_state)
+        params = optax.apply_updates(params, updates)
+        params = optax.projections.projection_hypercube(params)
+    print(f"Optax optimizer took {time.time() - start:.4f}s")
+    # print(params)
+    return params
 
-# some gradient free optimizer (e.g. from iminuit or pybobyqa)
+
+# some gradient free optimizers (e.g. from iminuit or pybobyqa)
 
 def optim_cma(acq_func,x0,):
     pass
 
 
-def optim_bobyqa(acq_func,x0,):
-    pass
+def optim_bobyqa(acq_func
+                 ,x0: np.ndarray
+                 ,dim: int = 1
+                 ,batch_size: int = 1):
+    # set up bounds for the solver
+    upper = np.ones(dim*batch_size)
+    lower = np.zeros_like(upper)
+    start = time.time()
+    x0 = np.atleast_1d(x0) # tweak for batched acquisition
+    soln = pybobyqa.solve(acq_func,x0,bounds=(lower,upper)
+                          ,seek_global_minimum=True,print_progress=False,do_logging=False)
+
+    # # convert acq_func output to numpy output
+    # def wrap_acq_func(x):
+    #     with torch.no_grad():
+    #         x = np.array(x).reshape(batch_size,dim) # optimizer cannot do joint optimization but can get batched points by converting to batch_size*ndim shaped arrays
+    #         X = torch.tensor(x,**tkwargs)        
+    #         Y = -acq_func(X)
+    #         del X
+    #         y = Y.view(-1).double().numpy()
+    #         return y
+    # run the solver
+    # xs = soln.x # xs is 1D array of size dim*batch_size
+    # best_x  = np.array(xs).reshape(batch_size,dim)
+    # best_x = torch.tensor(best_x,**tkwargs)
+    # best_val = torch.tensor(soln.f,**tkwargs)
+    print(f"Py-Bobyqa took {time.time()-start:.4f} s")
+    return soln.x, soln.f

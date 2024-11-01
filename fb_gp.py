@@ -1,5 +1,6 @@
 # Convert to JAX
 
+from math import sqrt
 import time
 from typing import Any,List
 import numpyro
@@ -14,6 +15,7 @@ from numpyro.diagnostics import summary
 from numpyro.infer import MCMC, NUTS
 # from util import chunk_vmap
 from jax import config
+from sympy import false
 config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
@@ -26,35 +28,56 @@ log = logging.getLogger("[GP]")
 # 2. test speed vs standard botorch
 # 3. Matern kernal
 # 4. methods to load and save from dict
-# 5. make posterior eval fast for nested sampler/ EI - single vs vmap balance - may be better to vmap rather than batch posterior to avoid involving large matrices in the computation
+# 5. vmap memory efficiency - chunk/split vmap
 # 6. separate mean and var predictions
+# 7. stability of cholesky when points are very close together 
+
+sqrt5 = jnp.sqrt(5.)
 
 def cdist(x, y):
-    # x, y are n1 x d and n2 x d
-    # print(x.shape,y.shape)
+    """
+    Compute squared Euclidean distance between two points x, y. If x is n1 x d and y is n2 x d returns a n1 x n2 matrix of distances.
+    """
     return jnp.sum(jnp.square(x[:,None,:] - y),axis=-1) 
 
 # @partial(jit,static_argnums=4)
-@jit
+@partial(jit,static_argnames='include_noise')
 def rbf_kernel(xa,
                xb,
                lengthscales,
-               outputscale): # can use vmap for rbf/cdist? possibly faster in high dim or when large number of xa already accumulated
+               outputscale,
+               noise,include_noise=True): # can use vmap for rbf/cdist? possibly faster in high dim or when large number of xa already accumulated
+    """
+    The RBF kernel
+    """
     c_dist = cdist(xa/lengthscales,xb/lengthscales) 
     c_dist = jnp.exp(-0.5*c_dist)
-    return outputscale*c_dist
+    k = outputscale*c_dist
+    if include_noise:
+        k+= noise*jnp.eye(k.shape[0])
+    return k
 
-
-def matern_kernel(xa,xb,lengthscales,outputscale):
-   return None
+@partial(jit,static_argnames='include_noise')
+def matern_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True):
+    """
+    The Matern-5/2 kernel
+    """
+    c_dist = jnp.sqrt(cdist(xa/lengthscales,xb/lengthscales))
+    exp = jnp.exp(sqrt5*c_dist)
+    poly = 1 + c_dist*(sqrt5 + c_dist*5/3)
+    k = outputscale*poly*exp
+    if include_noise:
+        k+= noise*jnp.eye(k.shape[0])
+    return k
 
 
 class numpyro_model:
    # Note - train_x and train_y received here are already transformed, npoints x ndim and npoints x 1
-   def __init__(self, train_x,  train_y, train_yvar, kernel_func,noise=1e-4) -> None:
+   def __init__(self, train_x,  train_y, #train_yvar, 
+                kernel_func=rbf_kernel,noise=1e-4) -> None:
       self.train_x = train_x 
       self.train_y = train_y
-      self.train_yvar = train_yvar
+    #   self.train_yvar = train_yvar
       self.ndim = train_x.shape[-1]
       self.npoints = train_x.shape[-2]
       self.kernel_func = kernel_func
@@ -75,7 +98,8 @@ class numpyro_model:
         lengthscales = numpyro.deterministic("kernel_length",1/jnp.sqrt(tausq*inv_length_sq)) # type: ignore
         # lengthscales = numpyro.deterministic("kernel_length",1/jnp.sqrt(inv_length_sq)) # type: ignore
         # truncated_lengthscales = numpyro.sample("trunc_lengths",lengthscales)
-        k = rbf_kernel(self.train_x,self.train_x,lengthscales,outputscale) + self.noise*jnp.eye(self.train_x.shape[0]) #self.train_yvar * jnp.eye(self.train_x.shape[0])
+        k = rbf_kernel(self.train_x,self.train_x,lengthscales,outputscale,noise=self.noise,include_noise=True) 
+        # /+ self.noise*jnp.eye(self.train_x.shape[0]) #self.train_yvar * jnp.eye(self.train_x.shape[0])
         mll = numpyro.sample(
                 "Y",
                 dist.MultivariateNormal(
@@ -109,8 +133,9 @@ class numpyro_model:
             mcmc.print_summary(exclude_deterministic=False)
         extras = mcmc.get_extra_fields()
         # print(extras.keys())
+        # print(self.train_x)
         # print(f"\nMCMC elapsed time: {time.time() - start:.2f}s")
-        log.info(f"\tMCMC elapsed time: {time.time() - start:.2f}s")
+        log.info(f" MCMC elapsed time: {time.time() - start:.2f}s")
 
         return mcmc.get_samples(), extras # type: ignore
 
@@ -127,23 +152,34 @@ class numpyro_model:
                 thinning=thinning,
                 verbose=verbose)
         samples["minus_log_prob"] = extras["potential_energy"]  # see also numpyro.infer.util.log_likelihood
+        del samples["kernel_tausq"], samples["_kernel_inv_length_sq"]
         # numpyro already thins samples and keeps deterministic params
         # samples["lengthscales"] = (samples["kernel_tausq"].unsqueeze(-1)*samples["_kernel_inv_length_sq"])
         #print(samples["_kernel_inv_length_sq"].size(),samples["lengthscales"].size(),samples["kernel_var"].size())
         return samples
+   
+#    def clean_samples(self,samples):
+       
+#        return samples
+   
+   def update(self,train_x,train_y):
+       self.train_x = train_x
+       self.train_y = train_y
 
 class saas_fbgp: #jit.ScriptModule):
 
-    def __init__(self,train_x,train_y,train_yvar=None,standardise_y=True,noise=1e-4,kernel_func=rbf_kernel) -> None:
+    def __init__(self,train_x,train_y,#train_yvar=None,
+                 standardise_y=True,noise=1e-4,kernel_func="rbf") -> None:
         """
         train_x: size (N x D), assumed to be standardised by the main sampler module
         train_y: size (N x 1)
         train_yvar: size (N x 1)
         """
 
-        # check train_x and train_y dims are N x D and N x 1
-
+        # check train_x and train_y dims are N x D and N x 1, param_bounds are 2 x d
+        
         self.train_x = train_x
+
         # train_y = jnp.atleast_2d(train_y).T
 
         if standardise_y:
@@ -156,19 +192,20 @@ class saas_fbgp: #jit.ScriptModule):
         self.train_y = (train_y - self.y_mean) / self.y_std
 
         self.noise = noise
-        if train_yvar is None:
-            self.train_yvar = self.noise * jnp.ones_like(train_y)
-        else:
-            self.train_yvar = train_yvar
+        # if train_yvar is None:
+        #     self.train_yvar = self.noise * jnp.ones_like(train_y)
+        # else:
+        #     self.train_yvar = train_yvar
 
         self.fitted = False
         self.samples = {}
         self.num_samples = 0
         self.cholesky = []
     
-        self.kernel_func = kernel_func
+        self.kernel_func = rbf_kernel if kernel_func=="rbf" else matern_kernel
         
-        self.numpyro_model = numpyro_model(self.train_x,self.train_y,self.train_yvar,self.kernel_func)
+        self.numpyro_model = numpyro_model(self.train_x,self.train_y,#self.train_yvar,
+                                           self.kernel_func,noise = self.noise)
 
         pass
 
@@ -183,29 +220,49 @@ class saas_fbgp: #jit.ScriptModule):
                                                    thinning=thinning,
                                                    verbose=verbose)
         self.num_samples = self.samples["kernel_length"].shape[0]
-        lengthscales = self.samples["kernel_length"]
-        outputscales = self.samples["kernel_var"]
-        # print(lengthscales.size(),outputscales.size())
-        kernel = lambda l,o : jnp.linalg.cholesky(self.noise*jnp.eye(self.train_x.shape[0]) + self.kernel_func(self.train_x,self.train_x,l,o))
-        self.cholesky = vmap(kernel,in_axes=(0,0),out_axes=(0))(lengthscales,outputscales)
-        # print(self.cholesky.size())
+        self.update_choleskys()
         self.map_lengthscales, self.map_outputscales = self.get_map_hyperparams()
         self.fitted = True
 
-    # can make this faster with quicker update of cholesky
-    def quick_update(self,x_new,y_new):
+    def update(self,x_new,y_new,rng_key,warmup_steps=256,num_samples=128,thinning=8,verbose=False):
+        """
+        Updates train_x and train_y, numpyro model and refit the GP using NUTS
+        """
         self.train_x = jnp.concatenate([self.train_x,x_new])
         self.train_y = self.train_y*self.y_std + self.y_mean 
         self.train_y = jnp.concatenate([self.train_y,y_new])
         self.y_mean = jnp.mean(self.train_y,axis=-2)
         self.y_std = jnp.std(self.train_y,axis=-2)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
+        self.numpyro_model.update(self.train_x,self.train_y)
+        self.fit(rng_key,warmup_steps=warmup_steps,num_samples=num_samples,thinning=thinning,verbose=verbose)
+        return None
+
+
+    # can make this faster with quicker update of cholesky
+    def quick_update(self,x_new,y_new):
+        """
+        Updates train_x and train_y, 
+        recomputes the Cholesky matrices but using the same GP hyperparameters from the previous step. We do not refit the GP using NUTS here
+        """
+        self.train_x = jnp.concatenate([self.train_x,x_new])
+        self.train_y = self.train_y*self.y_std + self.y_mean 
+        self.train_y = jnp.concatenate([self.train_y,y_new])
+        self.y_mean = jnp.mean(self.train_y,axis=-2)
+        self.y_std = jnp.std(self.train_y,axis=-2)
+        self.train_y = (self.train_y - self.y_mean) / self.y_std
+        self.numpyro_model.update(self.train_x,self.train_y)
+        self.update_choleskys()
+        # kernel = lambda l,o : jnp.linalg.cholesky(self.noise*jnp.eye(self.train_x.shape[0]) + self.kernel_func(self.train_x,self.train_x,l,o))
+        # self.cholesky = vmap(kernel,in_axes=(0,0),out_axes=(0))(lengthscales,outputscales)        
+        return None
+    
+    def update_choleskys(self):
         lengthscales = self.samples["kernel_length"]
         outputscales = self.samples["kernel_var"]
-        # print(lengthscales.size(),outputscales.size())
-        kernel = lambda l,o : jnp.linalg.cholesky(self.noise*jnp.eye(self.train_x.shape[0]) + self.kernel_func(self.train_x,self.train_x,l,o))
-        self.cholesky = vmap(kernel,in_axes=(0,0),out_axes=(0))(lengthscales,outputscales)        
-        return None
+        kernel = lambda l,o : jnp.linalg.cholesky(self.kernel_func(self.train_x,self.train_x,l,o,
+                                                                   noise=self.noise,include_noise=True)) # self.noise*jnp.eye(self.train_x.shape[0]) + 
+        self.cholesky = vmap(kernel,in_axes=(0,0),out_axes=(0))(lengthscales,outputscales)  # todo - jax.lax.map batched       
 
     def get_mean_var(self,X,k11_cho,lengthscales,outputscales):
         """
@@ -216,10 +273,10 @@ class saas_fbgp: #jit.ScriptModule):
         
         k12 = self.kernel_func(self.train_x,X,
                                lengthscales,
-                               outputscales)
+                               outputscales,noise=self.noise,include_noise=False)
         k22 = self.kernel_func(X,X,
                                lengthscales,
-                               outputscales)
+                               outputscales,noise=self.noise,include_noise=True)
 
         var = self._get_var(k11_cho,k12,k22)
         mean = self._get_mean(k11_cho,k12)
@@ -227,11 +284,11 @@ class saas_fbgp: #jit.ScriptModule):
     
     def _get_var(self,k11_cho,k12,k22):
         vv = solve_triangular(k11_cho,k12,lower=True)
-        var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0) 
+        var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0) # replace k22 computation with single element diagonal
         return var
     
     def _get_mean(self,k11_cho,k12):
-        mu = jnp.matmul(jnp.transpose(k12),cho_solve((k11_cho,True),self.train_y))
+        mu = jnp.matmul(jnp.transpose(k12),cho_solve((k11_cho,True),self.train_y)) # can also store alphas
         mean = mu[:,0]  
         return mean
 
@@ -240,11 +297,11 @@ class saas_fbgp: #jit.ScriptModule):
         X = jnp.atleast_2d(X)
         if not self.fitted:
             raise RuntimeError("FullyBayesian GP needs to be fitted using model.fit() first")
-        func = lambda cho, l, o :  self.get_mean_var(X=X,k11_cho=cho,lengthscales=l,outputscales=o)    
-        batched_predict = vmap(func,in_axes=(0,0,0),out_axes=(0,0))
+        func = lambda cho, l, o :  self.get_mean_var(X=X,k11_cho=cho,lengthscales=l,outputscales=o)   
+        batched_predict = vmap(func,in_axes=(0,0,0),out_axes=(0,0)) # todo - jax.lax.map batched  
         lengthscales = self.samples["kernel_length"]
         outputscales = self.samples["kernel_var"]
-        mean, var = batched_predict(self.cholesky,lengthscales,outputscales)
+        mean, var = batched_predict(self.cholesky,lengthscales,outputscales)       
         return mean, var
     
     def posterior(self,X,single=False,unstandardize=True): # for use externally
@@ -257,29 +314,27 @@ class saas_fbgp: #jit.ScriptModule):
             var = var.mean(axis=0) #* self.y_std**2      
         return mean, var
 
+    # think about doing sequential optimization
     def _fantasy_var_fb(self,x_new,lengthscales,outputscales,mc_points):
         # print(self.train_x.shape,x_new.shape)
         x_new = jnp.atleast_2d(x_new)
         new_x = jnp.concatenate([self.train_x,x_new])
-        k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales)+self.noise*jnp.eye(new_x.shape[0])
-        # k11 = self.kernel_func(new_x,new_x,self.map_lengthscales,self.map_outputscales)+self.noise*jnp.eye(new_x.shape[0])
+        k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales,noise=self.noise,include_noise=True) #)+self.noise*jnp.eye(new_x.shape[0])
         k11_cho = jnp.linalg.cholesky(k11) # replace with fast update cholesky!
-        # k12 = self.kernel_func(new_x,mc_points,self.map_lengthscales,self.map_outputscales)
-        # k22 = self.kernel_func(mc_points,mc_points,self.map_lengthscales,self.map_outputscales)
-        # print(np.shape(new_x),np.shape(k11_cho),np.shape(k12),np.shape(k22))
-        k12 = self.kernel_func(new_x,mc_points,lengthscales,outputscales)
-        k22 = self.kernel_func(mc_points,mc_points,lengthscales,outputscales)
+        k12 = self.kernel_func(new_x,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=False)
+        k22 = self.kernel_func(mc_points,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=True)
         var = self._get_var(k11_cho,k12,k22)
         return var
     
-    def fantasy_var_fb(self,x_new,mc_points):
+    def fantasy_var_fb(self,x_new,mc_points): # is batching over xnew needed?
         func = lambda x,l,o: self._fantasy_var_fb(x_new=x,lengthscales=l,outputscales=o,mc_points=mc_points)
-        batched_var_hyperparams = vmap(func,in_axes=(None,0,0))
-        batched_var_xnew = vmap(batched_var_hyperparams,in_axes=(0,None,None)) #needed or can be moved to acq?
+        batched_var_hyperparams = vmap(func,in_axes=(None,0,0)) # todo - jax.lax.map batched        
+        # batched_var_xnew = vmap(batched_var_hyperparams,in_axes=(0,None,None)) #needed or can be moved to acq?
         lengthscales = self.samples["kernel_length"]
         outputscales = self.samples["kernel_var"]
+        var = batched_var_hyperparams(x_new,lengthscales,outputscales)
         # var = batched_fantasy_var(x_new,lengthscales,outputscales)
-        var = batched_var_xnew(x_new,lengthscales,outputscales)
+        # var = batched_var_xnew(x_new,lengthscales,outputscales)
         # print(var.shape)
         return var
     
@@ -287,20 +342,20 @@ class saas_fbgp: #jit.ScriptModule):
     def _fantasy_var_map(self,x_new,lengthscales,outputscales,mc_points):
         x_new = jnp.atleast_2d(x_new)
         new_x = jnp.concatenate([self.train_x,x_new])
-        k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales)+self.noise*jnp.eye(new_x.shape[0])
+        k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales,noise=self.noise,include_noise=True) #)+self.noise*jnp.eye(new_x.shape[0])
         # k11 = self.kernel_func(new_x,new_x,self.map_lengthscales,self.map_outputscales)+self.noise*jnp.eye(new_x.shape[0])
         k11_cho = jnp.linalg.cholesky(k11) # replace with fast update cholesky!
         # k12 = self.kernel_func(new_x,mc_points,self.map_lengthscales,self.map_outputscales)
         # k22 = self.kernel_func(mc_points,mc_points,self.map_lengthscales,self.map_outputscales)
         # print(np.shape(new_x),np.shape(k11_cho),np.shape(k12),np.shape(k22))
         k12 = self.kernel_func(new_x,mc_points,lengthscales,outputscales)
-        k22 = self.kernel_func(mc_points,mc_points,lengthscales,outputscales)
+        k22 = self.kernel_func(mc_points,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=True)
         var = self._get_var(k11_cho,k12,k22)
         return var
     
     def fantasy_var_map(self,x_new,mc_points):
         func = lambda x,l,o: self._fantasy_var_fb(x_new=x,lengthscales=l,outputscales=o,mc_points=mc_points)
-        batched_var_hyperparams = vmap(func,in_axes=(None,0,0))
+        batched_var_hyperparams = vmap(func,in_axes=(None,0,0)) 
         batched_var_xnew = vmap(batched_var_hyperparams,in_axes=(0,None,None))
         lengthscales = self.samples["kernel_length"]
         outputscales = self.samples["kernel_var"]
@@ -344,6 +399,35 @@ class saas_fbgp: #jit.ScriptModule):
         pass
 
 
+def sample_GP_NUTS(gp,rng_key,num_warmup=512,num_samples=512,progress_bar=True,thinning=2):
+
+    class gp_dist(numpyro.distributions.Distribution):
+        support = dist.constraints.real
+
+        def __init__(self,gp: saas_fbgp):
+            super().__init__(batch_shape = (), event_shape=())
+            self.gp = gp
+        def sample(self, key, sample_shape=()):
+            raise NotImplementedError
     
+        def log_prob(self,x):
+            val, _ = gp.posterior(x,single=True,unstandardize=True)
+            return val
 
+    def model():
+        x = numpyro.sample('x',numpyro.distributions.Uniform(low=jnp.zeros(gp.train_x.shape[1]),high=jnp.ones(gp.train_x.shape[1]))) # type: ignore
+        numpyro.sample('y',gp_dist(gp),obs=x)
 
+    start = time.time()
+    kernel = NUTS(model,dense_mass=False,
+                max_tree_depth=6)
+    mcmc = MCMC(kernel,num_warmup=num_warmup,
+                num_samples=num_samples,
+                num_chains=1,
+                progress_bar=progress_bar,
+                thinning=thinning,)
+    mcmc.run(rng_key,extra_fields=("potential_energy",))
+    mcmc.print_summary(exclude_deterministic=False)
+    print(f"MCMC took {time.time()-start:.4f} s")
+    nuts_samples = mcmc.get_samples()['x']
+    return nuts_samples

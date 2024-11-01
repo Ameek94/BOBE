@@ -1,1 +1,11 @@
 *.pyc
+*.out
+*.err
+*.sh
+*.txt
+*.checkpoint
+*.progress
+*.minimum
+*.input.yaml
+*.updated.yaml
+*.covmat
