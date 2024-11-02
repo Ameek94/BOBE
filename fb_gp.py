@@ -13,7 +13,7 @@ from jax import jit, vmap
 from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 from numpyro.diagnostics import summary
 from numpyro.infer import MCMC, NUTS
-# from util import chunk_vmap
+from bo_utils import split_vmap
 from jax import config
 from sympy import false
 config.update("jax_enable_x64", True)
@@ -28,19 +28,18 @@ log = logging.getLogger("[GP]")
 # 2. test speed vs standard botorch
 # 3. Matern kernal
 # 4. methods to load and save from dict
-# 5. vmap memory efficiency - chunk/split vmap
+# 5. vmap memory efficiency - chunk/split vmap - done!
 # 6. separate mean and var predictions
 # 7. stability of cholesky when points are very close together 
 
 sqrt5 = jnp.sqrt(5.)
 
-def cdist(x, y):
+def dist_sq(x, y):
     """
     Compute squared Euclidean distance between two points x, y. If x is n1 x d and y is n2 x d returns a n1 x n2 matrix of distances.
     """
     return jnp.sum(jnp.square(x[:,None,:] - y),axis=-1) 
 
-# @partial(jit,static_argnums=4)
 @partial(jit,static_argnames='include_noise')
 def rbf_kernel(xa,
                xb,
@@ -50,9 +49,9 @@ def rbf_kernel(xa,
     """
     The RBF kernel
     """
-    c_dist = cdist(xa/lengthscales,xb/lengthscales) 
-    c_dist = jnp.exp(-0.5*c_dist)
-    k = outputscale*c_dist
+    sq_dist = dist_sq(xa/lengthscales,xb/lengthscales) 
+    sq_dist = jnp.exp(-0.5*sq_dist)
+    k = outputscale*sq_dist
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
     return k
@@ -62,9 +61,9 @@ def matern_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True):
     """
     The Matern-5/2 kernel
     """
-    c_dist = jnp.sqrt(cdist(xa/lengthscales,xb/lengthscales))
-    exp = jnp.exp(sqrt5*c_dist)
-    poly = 1 + c_dist*(sqrt5 + c_dist*5/3)
+    sq_dist = jnp.sqrt(dist_sq(xa/lengthscales,xb/lengthscales))
+    exp = jnp.exp(sqrt5*sq_dist)
+    poly = 1 + sq_dist*(sqrt5 + sq_dist*5/3)
     k = outputscale*poly*exp
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
@@ -77,12 +76,10 @@ class numpyro_model:
                 kernel_func=rbf_kernel,noise=1e-4) -> None:
       self.train_x = train_x 
       self.train_y = train_y
-    #   self.train_yvar = train_yvar
       self.ndim = train_x.shape[-1]
       self.npoints = train_x.shape[-2]
       self.kernel_func = kernel_func
       self.noise = noise
-    #   print(self.npoints,self.ndim)
  
    
    def model(self):
@@ -107,7 +104,6 @@ class numpyro_model:
                     covariance_matrix=k,
                 ),
                 obs=self.train_y.squeeze(-1),)
-        # loglike = numpyro.deterministic("loglike",jnp.log(ll)) # replace with loglike or use another method for ll
 
     # add method to start from previous samples
 
@@ -132,9 +128,6 @@ class numpyro_model:
         if verbose:
             mcmc.print_summary(exclude_deterministic=False)
         extras = mcmc.get_extra_fields()
-        # print(extras.keys())
-        # print(self.train_x)
-        # print(f"\nMCMC elapsed time: {time.time() - start:.2f}s")
         log.info(f" MCMC elapsed time: {time.time() - start:.2f}s")
 
         return mcmc.get_samples(), extras # type: ignore
@@ -157,11 +150,7 @@ class numpyro_model:
         # samples["lengthscales"] = (samples["kernel_tausq"].unsqueeze(-1)*samples["_kernel_inv_length_sq"])
         #print(samples["_kernel_inv_length_sq"].size(),samples["lengthscales"].size(),samples["kernel_var"].size())
         return samples
-   
-#    def clean_samples(self,samples):
-       
-#        return samples
-   
+      
    def update(self,train_x,train_y):
        self.train_x = train_x
        self.train_y = train_y
@@ -169,7 +158,7 @@ class numpyro_model:
 class saas_fbgp: #jit.ScriptModule):
 
     def __init__(self,train_x,train_y,#train_yvar=None,
-                 standardise_y=True,noise=1e-4,kernel_func="rbf") -> None:
+                 standardise_y=True,noise=1e-4,kernel_func="rbf",vmap_size=8) -> None:
         """
         train_x: size (N x D), assumed to be standardised by the main sampler module
         train_y: size (N x 1)
@@ -206,6 +195,8 @@ class saas_fbgp: #jit.ScriptModule):
         
         self.numpyro_model = numpyro_model(self.train_x,self.train_y,#self.train_yvar,
                                            self.kernel_func,noise = self.noise)
+        
+        self.vmap_size = vmap_size # to process vmap in vmap_size batches
 
         pass
 
@@ -243,7 +234,8 @@ class saas_fbgp: #jit.ScriptModule):
     def quick_update(self,x_new,y_new):
         """
         Updates train_x and train_y, 
-        recomputes the Cholesky matrices but using the same GP hyperparameters from the previous step. We do not refit the GP using NUTS here
+        recomputes the Cholesky matrices but using the same GP hyperparameters from the previous step. 
+        We do not refit the GP using NUTS here
         """
         self.train_x = jnp.concatenate([self.train_x,x_new])
         self.train_y = self.train_y*self.y_std + self.y_mean 
@@ -253,23 +245,18 @@ class saas_fbgp: #jit.ScriptModule):
         self.train_y = (self.train_y - self.y_mean) / self.y_std
         self.numpyro_model.update(self.train_x,self.train_y)
         self.update_choleskys()
-        # kernel = lambda l,o : jnp.linalg.cholesky(self.noise*jnp.eye(self.train_x.shape[0]) + self.kernel_func(self.train_x,self.train_x,l,o))
-        # self.cholesky = vmap(kernel,in_axes=(0,0),out_axes=(0))(lengthscales,outputscales)        
         return None
     
     def update_choleskys(self):
-        lengthscales = self.samples["kernel_length"]
-        outputscales = self.samples["kernel_var"]
-        kernel = lambda l,o : jnp.linalg.cholesky(self.kernel_func(self.train_x,self.train_x,l,o,
-                                                                   noise=self.noise,include_noise=True)) # self.noise*jnp.eye(self.train_x.shape[0]) + 
-        self.cholesky = vmap(kernel,in_axes=(0,0),out_axes=(0))(lengthscales,outputscales)  # todo - jax.lax.map batched       
+        vmap_func = lambda l,o : (jnp.linalg.cholesky(self.kernel_func(self.train_x,self.train_x,l,o,
+                                                                   noise=self.noise,include_noise=True)),)
+        vmap_arrays = (self.samples["kernel_length"],self.samples["kernel_var"])
+        self.cholesky = split_vmap(jit(vmap_func),vmap_arrays,batch_size=self.vmap_size)[0]
 
     def get_mean_var(self,X,k11_cho,lengthscales,outputscales):
         """
         Algorithm 2.1 of R&W (2006)
         """
-        if not self.fitted:
-            raise RuntimeError("FullyBayesian GP needs to be fitted using model.fit() first")
         
         k12 = self.kernel_func(self.train_x,X,
                                lengthscales,
@@ -282,26 +269,27 @@ class saas_fbgp: #jit.ScriptModule):
         mean = self._get_mean(k11_cho,k12)
         return mean, var
     
+    @partial(jit, static_argnums=(0,))
     def _get_var(self,k11_cho,k12,k22):
         vv = solve_triangular(k11_cho,k12,lower=True)
         var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0) # replace k22 computation with single element diagonal
         return var
     
+    @partial(jit, static_argnums=(0,))
     def _get_mean(self,k11_cho,k12):
         mu = jnp.matmul(jnp.transpose(k12),cho_solve((k11_cho,True),self.train_y)) # can also store alphas
         mean = mu[:,0]  
         return mean
 
-    # @jit.script_method
     def predict(self,X):
         X = jnp.atleast_2d(X)
         if not self.fitted:
             raise RuntimeError("FullyBayesian GP needs to be fitted using model.fit() first")
-        func = lambda cho, l, o :  self.get_mean_var(X=X,k11_cho=cho,lengthscales=l,outputscales=o)   
-        batched_predict = vmap(func,in_axes=(0,0,0),out_axes=(0,0)) # todo - jax.lax.map batched  
-        lengthscales = self.samples["kernel_length"]
-        outputscales = self.samples["kernel_var"]
-        mean, var = batched_predict(self.cholesky,lengthscales,outputscales)       
+        vmap_func = lambda cho, l, o :  self.get_mean_var(X=X,k11_cho=cho,lengthscales=l,outputscales=o)   
+        vmap_arrays = (self.cholesky, 
+                       self.samples["kernel_length"],
+                       self.samples["kernel_var"])
+        mean, var = split_vmap(vmap_func,vmap_arrays,batch_size=self.vmap_size)
         return mean, var
     
     def posterior(self,X,single=False,unstandardize=True): # for use externally
@@ -315,27 +303,22 @@ class saas_fbgp: #jit.ScriptModule):
         return mean, var
 
     # think about doing sequential optimization
+
+    @partial(jit, static_argnums=(0,))
     def _fantasy_var_fb(self,x_new,lengthscales,outputscales,mc_points):
-        # print(self.train_x.shape,x_new.shape)
         x_new = jnp.atleast_2d(x_new)
         new_x = jnp.concatenate([self.train_x,x_new])
         k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales,noise=self.noise,include_noise=True) #)+self.noise*jnp.eye(new_x.shape[0])
-        k11_cho = jnp.linalg.cholesky(k11) # replace with fast update cholesky!
+        k11_cho = jnp.linalg.cholesky(k11) # can replace with fast update cholesky!
         k12 = self.kernel_func(new_x,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=False)
         k22 = self.kernel_func(mc_points,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=True)
         var = self._get_var(k11_cho,k12,k22)
-        return var
+        return (var,)
     
     def fantasy_var_fb(self,x_new,mc_points): # is batching over xnew needed?
-        func = lambda x,l,o: self._fantasy_var_fb(x_new=x,lengthscales=l,outputscales=o,mc_points=mc_points)
-        batched_var_hyperparams = vmap(func,in_axes=(None,0,0)) # todo - jax.lax.map batched        
-        # batched_var_xnew = vmap(batched_var_hyperparams,in_axes=(0,None,None)) #needed or can be moved to acq?
-        lengthscales = self.samples["kernel_length"]
-        outputscales = self.samples["kernel_var"]
-        var = batched_var_hyperparams(x_new,lengthscales,outputscales)
-        # var = batched_fantasy_var(x_new,lengthscales,outputscales)
-        # var = batched_var_xnew(x_new,lengthscales,outputscales)
-        # print(var.shape)
+        vmap_func = lambda l,o: self._fantasy_var_fb(x_new=x_new,lengthscales=l,outputscales=o,mc_points=mc_points)
+        vmap_arrays = (self.samples["kernel_length"], self.samples["kernel_var"])
+        var = split_vmap(vmap_func,vmap_arrays,batch_size=self.vmap_size)[0]
         return var
     
     # maybe not needed?
@@ -343,11 +326,7 @@ class saas_fbgp: #jit.ScriptModule):
         x_new = jnp.atleast_2d(x_new)
         new_x = jnp.concatenate([self.train_x,x_new])
         k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales,noise=self.noise,include_noise=True) #)+self.noise*jnp.eye(new_x.shape[0])
-        # k11 = self.kernel_func(new_x,new_x,self.map_lengthscales,self.map_outputscales)+self.noise*jnp.eye(new_x.shape[0])
         k11_cho = jnp.linalg.cholesky(k11) # replace with fast update cholesky!
-        # k12 = self.kernel_func(new_x,mc_points,self.map_lengthscales,self.map_outputscales)
-        # k22 = self.kernel_func(mc_points,mc_points,self.map_lengthscales,self.map_outputscales)
-        # print(np.shape(new_x),np.shape(k11_cho),np.shape(k12),np.shape(k22))
         k12 = self.kernel_func(new_x,mc_points,lengthscales,outputscales)
         k22 = self.kernel_func(mc_points,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=True)
         var = self._get_var(k11_cho,k12,k22)

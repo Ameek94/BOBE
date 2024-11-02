@@ -85,7 +85,6 @@ class IPV(Acquisition):
         self.mc_points = mc_points
         self.batch_size = batch_size
     
-    # @jit ?
     def __call__(self, X) -> Any:
         X = jnp.atleast_2d(X) # new_x
         return self.variance(X)
