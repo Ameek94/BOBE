@@ -30,6 +30,7 @@ log = logging.getLogger("[AQ]")
 
 #------------------The acqusition functions-------------------------
 
+@jit
 def Z_EI(mean, sigma, best_f, zeta,):
     """Returns `z(x) = (mean(x) - best_obs) / sigma(x)`"""
     z = (mean - best_f-zeta) / sigma
@@ -53,7 +54,9 @@ class EI(Acquisition):
     def __init__(self,
                  gp: saas_fbgp,
                  best_f,
-                 zeta: float = 0.1,) -> None:
+                 zeta: float = 0.1,
+                 batch_size=1, # EI batch_size must always be 1
+                 ) -> None:
         super().__init__(gp)
         self.best_f =  gp.train_y.max() #best_f
         self.zeta = zeta
@@ -84,11 +87,13 @@ class IPV(Acquisition):
         super().__init__(gp)
         self.mc_points = mc_points
         self.batch_size = batch_size
+        self.ndim = self.gp.train_x.shape[1]
     
     def __call__(self, X) -> Any:
-        X = jnp.atleast_2d(X) # new_x
+        X = jnp.reshape(X,(self.batch_size,self.ndim)) # input X is 1D array (x1_1,x1_2,...x1_d,x2_1,x2_2,...,x2_d) for d-dim x
+        # X = jnp.atleast_2d(X) # new_x
         return self.variance(X)
-
+    
     def variance(self,X):
         var = self.gp.fantasy_var_fb(X,self.mc_points)
         var = var.mean(axis=-1)

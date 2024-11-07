@@ -9,3 +9,5 @@
 *.input.yaml
 *.updated.yaml
 *.covmat
+*.png
+*.pdf

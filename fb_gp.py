@@ -1,4 +1,5 @@
-# Convert to JAX
+
+
 
 from math import sqrt
 import time
@@ -26,11 +27,12 @@ log = logging.getLogger("[GP]")
 # todo
 # 1. method to reuse previous mcmc samples if HMC runs into issues
 # 2. test speed vs standard botorch
-# 3. Matern kernal
+# 3. Matern kernel - done!
 # 4. methods to load and save from dict
 # 5. vmap memory efficiency - chunk/split vmap - done!
-# 6. separate mean and var predictions
+# 6. separate mean and var predictions - done!
 # 7. stability of cholesky when points are very close together 
+# 8. Pytree for GP?
 
 sqrt5 = jnp.sqrt(5.)
 
@@ -68,6 +70,52 @@ def matern_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True):
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
     return k
+
+@jit
+def get_var_from_cho(k11_cho,k12,k22):
+    vv = solve_triangular(k11_cho,k12,lower=True)
+    var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0) # replace k22 computation with single element diagonal
+    return var
+    
+@jit    # @partial(jit, static_argnums=(0,)) ---- function outside class or use pytrees
+def get_mean_from_cho(k11_cho,k12,train_y):
+    mu = jnp.matmul(jnp.transpose(k12),cho_solve((k11_cho,True),train_y)) # can also store alphas
+    mean = mu[:,0]  
+    return mean
+
+def sample_GP_NUTS(gp,rng_key,num_warmup=512,num_samples=512,progress_bar=True,thinning=2):
+
+    class gp_dist(numpyro.distributions.Distribution):
+        support = dist.constraints.real
+
+        def __init__(self,gp: saas_fbgp):
+            super().__init__(batch_shape = (), event_shape=())
+            self.gp = gp
+        def sample(self, key, sample_shape=()):
+            raise NotImplementedError
+    
+        def log_prob(self,x):
+            val, _ = gp.posterior(x,single=True,unstandardize=True)
+            return val
+
+    def model():
+        x = numpyro.sample('x',numpyro.distributions.Uniform
+                           (low=jnp.zeros(gp.train_x.shape[1]),high=jnp.ones(gp.train_x.shape[1]))) # type: ignore
+        numpyro.sample('y',gp_dist(gp),obs=x)
+
+    start = time.time()
+    kernel = NUTS(model,dense_mass=False,
+                max_tree_depth=6)
+    mcmc = MCMC(kernel,num_warmup=num_warmup,
+                num_samples=num_samples,
+                num_chains=1,
+                progress_bar=progress_bar,
+                thinning=thinning,)
+    mcmc.run(rng_key,extra_fields=("potential_energy",))
+    mcmc.print_summary(exclude_deterministic=False)
+    print(f"MCMC took {time.time()-start:.4f} s")
+    nuts_samples = mcmc.get_samples()['x']
+    return nuts_samples
 
 
 class numpyro_model:
@@ -250,8 +298,8 @@ class saas_fbgp: #jit.ScriptModule):
     def update_choleskys(self):
         vmap_func = lambda l,o : (jnp.linalg.cholesky(self.kernel_func(self.train_x,self.train_x,l,o,
                                                                    noise=self.noise,include_noise=True)),)
-        vmap_arrays = (self.samples["kernel_length"],self.samples["kernel_var"])
-        self.cholesky = split_vmap(jit(vmap_func),vmap_arrays,batch_size=self.vmap_size)[0]
+        vmap_arrays = (self.samples["kernel_length"],self.samples["kernel_var"]) 
+        self.cholesky = split_vmap(vmap_func,vmap_arrays,batch_size=self.vmap_size)[0] # jit?
 
     def get_mean_var(self,X,k11_cho,lengthscales,outputscales):
         """
@@ -265,26 +313,24 @@ class saas_fbgp: #jit.ScriptModule):
                                lengthscales,
                                outputscales,noise=self.noise,include_noise=True)
 
-        var = self._get_var(k11_cho,k12,k22)
-        mean = self._get_mean(k11_cho,k12)
+        var = get_var_from_cho(k11_cho,k12,k22) #self._get_var(k11_cho,k12,k22)
+        mean = get_mean_from_cho(k11_cho,k12,self.train_y) #self._get_mean(k11_cho,k12)
         return mean, var
     
-    @partial(jit, static_argnums=(0,))
+    # @partial(jit, static_argnums=(0,)) ---- function outside class or use pytrees
     def _get_var(self,k11_cho,k12,k22):
         vv = solve_triangular(k11_cho,k12,lower=True)
         var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0) # replace k22 computation with single element diagonal
         return var
     
-    @partial(jit, static_argnums=(0,))
+    # @partial(jit, static_argnums=(0,)) ---- function outside class or use pytrees
     def _get_mean(self,k11_cho,k12):
         mu = jnp.matmul(jnp.transpose(k12),cho_solve((k11_cho,True),self.train_y)) # can also store alphas
         mean = mu[:,0]  
         return mean
 
     def predict(self,X):
-        X = jnp.atleast_2d(X)
-        if not self.fitted:
-            raise RuntimeError("FullyBayesian GP needs to be fitted using model.fit() first")
+        X = jnp.atleast_2d(X) # move it to external 
         vmap_func = lambda cho, l, o :  self.get_mean_var(X=X,k11_cho=cho,lengthscales=l,outputscales=o)   
         vmap_arrays = (self.cholesky, 
                        self.samples["kernel_length"],
@@ -302,9 +348,8 @@ class saas_fbgp: #jit.ScriptModule):
             var = var.mean(axis=0) #* self.y_std**2      
         return mean, var
 
-    # think about doing sequential optimization
-
-    @partial(jit, static_argnums=(0,))
+    # think about doing sequential optimization, at the moment joint acquisition is supported
+    # @partial(jit, static_argnums=(0,)) ---- function outside class or use pytrees
     def _fantasy_var_fb(self,x_new,lengthscales,outputscales,mc_points):
         x_new = jnp.atleast_2d(x_new)
         new_x = jnp.concatenate([self.train_x,x_new])
@@ -312,7 +357,7 @@ class saas_fbgp: #jit.ScriptModule):
         k11_cho = jnp.linalg.cholesky(k11) # can replace with fast update cholesky!
         k12 = self.kernel_func(new_x,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=False)
         k22 = self.kernel_func(mc_points,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=True)
-        var = self._get_var(k11_cho,k12,k22)
+        var = get_var_from_cho(k11_cho,k12,k22) #self._get_var(k11_cho,k12,k22)
         return (var,)
     
     def fantasy_var_fb(self,x_new,mc_points): # is batching over xnew needed?
@@ -377,36 +422,3 @@ class saas_fbgp: #jit.ScriptModule):
     def load_from_dict(self):
         pass
 
-
-def sample_GP_NUTS(gp,rng_key,num_warmup=512,num_samples=512,progress_bar=True,thinning=2):
-
-    class gp_dist(numpyro.distributions.Distribution):
-        support = dist.constraints.real
-
-        def __init__(self,gp: saas_fbgp):
-            super().__init__(batch_shape = (), event_shape=())
-            self.gp = gp
-        def sample(self, key, sample_shape=()):
-            raise NotImplementedError
-    
-        def log_prob(self,x):
-            val, _ = gp.posterior(x,single=True,unstandardize=True)
-            return val
-
-    def model():
-        x = numpyro.sample('x',numpyro.distributions.Uniform(low=jnp.zeros(gp.train_x.shape[1]),high=jnp.ones(gp.train_x.shape[1]))) # type: ignore
-        numpyro.sample('y',gp_dist(gp),obs=x)
-
-    start = time.time()
-    kernel = NUTS(model,dense_mass=False,
-                max_tree_depth=6)
-    mcmc = MCMC(kernel,num_warmup=num_warmup,
-                num_samples=num_samples,
-                num_chains=1,
-                progress_bar=progress_bar,
-                thinning=thinning,)
-    mcmc.run(rng_key,extra_fields=("potential_energy",))
-    mcmc.print_summary(exclude_deterministic=False)
-    print(f"MCMC took {time.time()-start:.4f} s")
-    nuts_samples = mcmc.get_samples()['x']
-    return nuts_samples

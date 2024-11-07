@@ -70,7 +70,7 @@ def plot_gp(samples,gp,names,labels,param_bounds,thin=1):
                         legend_labels=[f'GP fit, N = {gp.train_y.shape[0]} samples','True Distribution'],title_limit=1)
 
     else:
-        g.triangle_plot([gp_samples], names,filled=[True,False],contour_colors=['red','blue'],
+        g.triangle_plot([gp_samples], names,contour_colors=['red','blue'],
                                 legend_labels=[f'GP fit, N = {gp.train_y.shape[0]} ','True Distribution'],
-                                contour_lws=[1,1.5],title_limit=1,) # type: ignore
+                                filled=[True,False],contour_lws=[1,1.5],title_limit=1,) # type: ignore
     plt.show()
