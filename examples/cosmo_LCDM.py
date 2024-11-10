@@ -24,17 +24,18 @@ from nested_sampler import nested_sampling_jaxns, nested_sampling_Dy
 from getdist import plots,MCSamples,loadMCSamples
 matplotlib.rc('font', size=16,family='serif')
 matplotlib.rc('legend', fontsize=16)
+matplotlib.rc('text', usetex=True)
+matplotlib.rc('text.latex', preamble=r'\usepackage{lmodern}')
 
+# input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
 
-input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
+input_file = './cosmo_input/LCDM_6D.yaml'
 
-# input_file = './cosmo_input/LCDM_6D.yaml'
-
-max_steps = 218
+max_steps = 168
 nstart = 32
 
 cosmo = sampler(cobaya_model=True,input_file=input_file,seed=200000,
-                max_steps=max_steps, nstart=nstart,mc_points_size=32,acq_goal=5e-7,noise=1e-6)
+                max_steps=max_steps, nstart=nstart,mc_points_size=32,acq_goal=1e-12,noise=1e-6)
 
 cosmo.run()
 
@@ -43,13 +44,12 @@ from fb_gp import sample_GP_NUTS
 train_x = input_unstandardize(cosmo.train_x,cosmo.param_bounds)
 seed = 0
 rng_key, _ = random.split(random.PRNGKey(seed), 2)
-samples = sample_GP_NUTS(gp = cosmo.gp,rng_key=rng_key,num_warmup=2048,num_samples=8192,thinning=16)
-
+samples = sample_GP_NUTS(gp = cosmo.gp,rng_key=rng_key,num_warmup=2048,num_samples=4096,thinning=16)
 samples = input_unstandardize(samples,cosmo.param_bounds)
 
-np.savetxt('samples_LCDM_Full_250.txt',samples)
+np.savetxt('samples_LCDM_200.txt',samples)
 
-np.savetxt('train_x_LCDM_Full_250.txt',train_x)
+np.savetxt('train_x_LCDM_200.txt',train_x)
 
 
 # samples = np.loadtxt('samples.txt')
@@ -72,28 +72,49 @@ gp_samples_nuts = MCSamples(samples=samples[:,:6],names=keys, labels = cosmo.par
                             ,ranges=bounds_dict)
 
 
-g = plots.get_subplot_plotter(subplot_size=3,subplot_size_ratio=1)
-# # for s in [gp_samples,gp_samples_nuts,true_samples]:
-# #         print(f"".join(f"{str(s.getInlineLatex(p,limit=1))}") for p in names)
-# # # g.settings.num_plot_contours = 2
+g = plots.get_subplot_plotter(width_inch=8)
 g.settings.axes_fontsize=18
 g.settings.axes_labelsize = 18
 g.settings.legend_fontsize = 18
 g.settings.title_limit_fontsize = 14
-g.triangle_plot([gp_samples_nuts], keys,filled=[True,False],contour_lws=[1.25,1.5,1.],
-                  contour_colors=['red','blue','black'],markers = markers_bf,title_limit=1,
+g.triangle_plot([gp_samples_nuts,samples], keys,filled=[True,False],contour_lws=[1.25,1.5,1.],
+                  contour_colors=['red','blue','black'],markers = markers_bf, #,title_limit=1,
                   marker_args={'lw': 1.25, 'ls': '-.', 'color': 'C2'}
                   ,legend_labels=[f'BayOp, 150 samples','MCMC']) #,param_limits=cosmo.bounds_dict) # type: ignore
 # #                                 legend_labels=[f'GP fit, N = {gp.train_y.shape[0]} samples','True Distribution','HMC on GP fit'],
 # #                                 contour_lws=[1,1.5,1.],markers = dict(zip(names,f_mean)),
 # #                                 marker_args={'lw': 1.25, 'ls': '-', 'color': 'C2'},title_limit=1 ) # type: ignore
 
-
-g.export('LCDM_full_BO.pdf')
+g.export('LCDM_BO.pdf')
 for i in range(6):
     ax = g.subplots[i,i]
     ax.axvline(bf[i], color='C2', ls='-.',lw=1.25)
     for j in range(i+1,6):
         ax = g.subplots[j,i]
         ax.scatter(train_x[:,i],train_x[:,j],alpha=0.33,color='c',s=8)
-g.export('LCDM_full_BO_points.pdf')
+g.export('LCDM_BO_points.pdf')
+
+# g = plots.get_subplot_plotter(subplot_size=3,subplot_size_ratio=1)
+# # # for s in [gp_samples,gp_samples_nuts,true_samples]:
+# # #         print(f"".join(f"{str(s.getInlineLatex(p,limit=1))}") for p in names)
+# # # # g.settings.num_plot_contours = 2
+# g.settings.axes_labelsize = 16
+# g.settings.axes_fontsize = 16
+# g.settings.legend_fontsize = 16
+# g.settings.title_limit_fontsize = 12
+# g.triangle_plot([gp_samples_nuts,mcmc_samples], keys,filled=[True,False],contour_lws=[1,1.5,1.],
+#                   contour_colors=['red','blue','black'],title_limit=1,markers = markers_bf,
+#                   marker_args={'lw': 1.25, 'ls': '-.', 'color': 'C2'}
+#                   ,legend_labels=[f'BayOp, N = {train_x.shape[0]} samples','MCMC']) #,param_limits=cosmo.bounds_dict) # type: ignore
+# # #                                 legend_labels=[f'GP fit, N = {gp.train_y.shape[0]} samples','True Distribution','HMC on GP fit'],
+# # #                                 contour_lws=[1,1.5,1.],markers = dict(zip(names,f_mean)),
+# # #                                 marker_args={'lw': 1.25, 'ls': '-', 'color': 'C2'},title_limit=1 ) # type: ignore
+
+# g.export('LCDM_BO.pdf')
+# for i in range(6):
+#     ax = g.subplots[i,i]
+#     ax.axvline(bf[i], color='C2', ls='-.',lw=1.25)
+#     for j in range(i+1,6):
+#         ax = g.subplots[j,i]
+#         ax.scatter(train_x[:,i],train_x[:,j],alpha=0.33,color='k',s=25)
+# g.export('LCDM_BO_points.pdf')

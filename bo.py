@@ -3,7 +3,7 @@
 import functools
 import pandas as pd
 import numpy as np
-from typing import Callable, List,Optional, Tuple, Dict
+from typing import Any, Callable, List,Optional, Tuple, Dict
 from fb_gp import saas_fbgp, sample_GP_NUTS
 import time
 import jax.numpy as jnp
@@ -32,14 +32,14 @@ class sampler:
             param_list: Optional[List] = None,
             param_bounds: Optional[List] = None, # shape 2 x D
             param_labels: Optional[List] = None,
-            gp_kwargs: Optional[dict] = None,
-            gp: str = 'default',
-            noise: float = 1e-4,
+            gp_kwargs: dict[str,Any] = {'kernel_func':"rbf", 'vmap_size': 8},
+            noise: float = 1e-6,
             gpfit_step: int = 1, 
             nstart: int = 4,
             max_steps: int = 4,
             acq_goal: float = 1e-6, # currently arbitrary...
             save: Optional[bool] = False,
+            save_step: Optional[int] = 5,
             nested_sampler: str = "default", #jaxns 
             ns_step: int = 1, 
             mc_points_size: int = 16,
@@ -80,6 +80,7 @@ class sampler:
         # self.unit_transform = functools.partial(input_standardize,param_bounds=self.param_bounds)
 
         #initialize train_x, train_y and run GP
+        log.info(f" Sampler will start with {self.nstart} points and run for a maximum of {self.max_steps} steps")
         self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(nstart)
         log.info(f" Initial values to evaluate \n{self.print_point(self.train_x)}")
         self.train_y = self.logp(self.train_x)
@@ -88,11 +89,14 @@ class sampler:
         # train_y = output_standardize(train_y)
         # self.gp_kwargs = gp_kwargs
         self.noise = noise
-        self.gp = saas_fbgp(self.train_x,self.train_y,noise=self.noise)
+        self.gp = saas_fbgp(self.train_x,self.train_y,noise=self.noise,**gp_kwargs) 
         rng_key, _ = random.split(random.PRNGKey(seed), 2)
-        self.gp.fit(rng_key,warmup_steps=256,num_samples=256,thinning=16,verbose=False) # input settings
+        self.gp.fit(rng_key,warmup_steps=512,num_samples=512,thinning=16,verbose=False) # input settings
 
     def run(self):
+        """
+        Run the BO loop until convergence or max steps reached. Here all x are standarised to [0,1]
+        """
         start = time.time()
         self.converged = False
         while not self.converged:
@@ -115,7 +119,7 @@ class sampler:
             if (self.num_step%self.gpfit_step==0):
                 # self.gp = saas_fbgp(self.train_x,self.train_y,noise=self.noise)
                 # self.gp.fit(rng_key,warmup_steps=256,num_samples=256,thinning=16,verbose=False)
-                self.gp.update(next_x,next_y,rng_key,warmup_steps=256,num_samples=256,thinning=16,verbose=False)
+                self.gp.update(next_x,next_y,rng_key,warmup_steps=512,num_samples=512,thinning=16,verbose=False)
             else:
                 self.gp.quick_update(next_x,next_y)
             # np.savetxt('train_x.txt',input_unstandardize(self.train_x,self.param_bounds))
@@ -178,14 +182,14 @@ class sampler:
             log.error(" Cobaya not found")
 
     def get_mc_points(self,step):
-        # if (step%self.ns_step==0):
+        if (step%self.ns_step==0):
         #     samples, logz_dict = samples, logz_dict = nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.1)
         #     log.info(f" LogZ info :"+"".join(f"{key}: = {value:.4f}, " for key, value in logz_dict.items()))                
         #     size = len(samples)
         #     mc_points = samples[::int(size/self.mc_points_size),:]        
-        seed = step
-        rng_key, _ = random.split(random.PRNGKey(seed), 2)
-        samples = sample_GP_NUTS(gp = self.gp,rng_key=rng_key,num_warmup=1024,num_samples=1024,thinning=32)
+            seed = step
+            rng_key, _ = random.split(random.PRNGKey(seed), 2)
+            samples = sample_GP_NUTS(gp = self.gp,rng_key=rng_key,num_warmup=512,num_samples=512,thinning=16)
         # size = len(samples)
         # mc_points = samples[::int(size/self.mc_points_size),:]                
         return samples

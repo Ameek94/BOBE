@@ -28,7 +28,9 @@ log = logging.getLogger("[NS]")
 
 
 class gp_likelihood:
-
+    """
+    GP likelihood for dynesty
+    """
     def __init__(self,
                  gp: saas_fbgp,) -> None:
         self.gp = gp
@@ -86,7 +88,8 @@ def nested_sampling_Dy(gp: saas_fbgp
                        ,logz_std: bool = True
                        ,maxcall: Optional[int] = None
                         ,boost_maxcall: Optional[int] = 1
-                       ) -> tuple[np.ndarray,Dict]:
+                        ,progress : bool = False
+                       ,) -> tuple[np.ndarray,Dict]:
     if maxcall is None:
         if ndim<=4:
             maxcall = int(3000*ndim*boost_maxcall) # type: ignore
@@ -100,10 +103,10 @@ def nested_sampling_Dy(gp: saas_fbgp
     start = time.time()
     if dynamic:
         sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=logz_std,logl_args={'logz_std': logz_std})
-        sampler.run_nested(print_progress=False,dlogz_init=dlogz,maxcall=maxcall) #tune? ,maxcall=20000
+        sampler.run_nested(print_progress=progress,dlogz_init=dlogz,maxcall=maxcall) #tune? ,maxcall=20000
     else:
         sampler = NestedSampler(loglike,prior_transform,ndim=ndim,blob=logz_std,logl_args={'logz_std': logz_std}) # type: ignore
-        sampler.run_nested(print_progress=False,dlogz=dlogz,maxcall=maxcall) # type: ignore #tune? ,maxcall=20000
+        sampler.run_nested(print_progress=progress,dlogz=dlogz,maxcall=maxcall) # type: ignore #tune? ,maxcall=20000
     log.info(f" Nested Sampling took {time.time() - start:.2f}s")
     res = sampler.results  # type: ignore # grab our results
     logl = res['logl']
