@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import jax.random as random
 import numpy as np
 import jax
-from jax import config, vmap
+from jax import config, vmap, jit
 config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
@@ -135,7 +135,7 @@ def nested_sampling_jaxns(gp: saas_fbgp
                         ,num_samples_equal=1000
                         ,difficult_model = False
                        ) -> tuple[np.ndarray,Dict]:
-        
+
     def log_likelihood(x):
         # f = lambda x: 
         mu, var = gp.posterior(x,single=True,unstandardize=True) # vmap(f,in_axes=(0),out_axes=(0,0))(x)

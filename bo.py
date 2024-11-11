@@ -17,6 +17,10 @@ import logging
 log = logging.getLogger("[BO]")
 
 
+# todo
+# 1. save and resume
+# 2. initialize from input yaml file
+# 3. ?
 
 def test_function(x):
     return -0.5*jnp.sum((x-0.5)**2/0.04,axis=-1,keepdims=True)
@@ -117,6 +121,7 @@ class sampler:
             seed = self.num_step
             rng_key, _ = random.split(random.PRNGKey(seed), 2)
             if (self.num_step%self.gpfit_step==0):
+                # self.gp.kernel_func._clear_cache()
                 # self.gp = saas_fbgp(self.train_x,self.train_y,noise=self.noise)
                 # self.gp.fit(rng_key,warmup_steps=256,num_samples=256,thinning=16,verbose=False)
                 self.gp.update(next_x,next_y,rng_key,warmup_steps=512,num_samples=512,thinning=16,verbose=False)

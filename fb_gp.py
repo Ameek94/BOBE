@@ -299,7 +299,7 @@ class saas_fbgp: #jit.ScriptModule):
         vmap_func = lambda l,o : (jnp.linalg.cholesky(self.kernel_func(self.train_x,self.train_x,l,o,
                                                                    noise=self.noise,include_noise=True)),)
         vmap_arrays = (self.samples["kernel_length"],self.samples["kernel_var"]) 
-        self.cholesky = split_vmap(vmap_func,vmap_arrays,batch_size=self.vmap_size)[0] # jit?
+        self.cholesky = split_vmap(vmap_func,vmap_arrays,batch_size=self.vmap_size)[0] 
 
     def get_mean_var(self,X,k11_cho,lengthscales,outputscales):
         """

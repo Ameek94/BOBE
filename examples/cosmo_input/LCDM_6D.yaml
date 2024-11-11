@@ -1,18 +1,19 @@
-theory:
-  camb:
-    path: 'global'
-    extra_args:
-      halofit_version: mead
-      bbn_predictor: PArthENoPE_880.2_standard.dat
-      lens_potential_accuracy: 1
-      num_massive_neutrinos: 1
-      nnu: 3.044
-      dark_energy_model: 'fluid'
+# theory:
+#   camb:
+#     path: 'global'
+#     extra_args:
+#       halofit_version: mead
+#       bbn_predictor: PArthENoPE_880.2_standard.dat
+#       lens_potential_accuracy: 1
+#       num_massive_neutrinos: 1
+#       nnu: 3.044
+#       dark_energy_model: 'fluid'
 likelihood:
-  planck_2018_lowl.TT: null
-  planck_2018_lowl.EE: null
-  planck_2018_highl_plik.TTTEEE_lite_native: null
-  planck_2018_lensing.native: null
+  one:
+  # planck_2018_lowl.TT: null
+  # planck_2018_lowl.EE: null
+  # planck_2018_highl_plik.TTTEEE_lite_native: null
+  # planck_2018_lensing.native: null
 params:
  # Baseline cosmological parameters
   w: -1.
@@ -87,14 +88,14 @@ params:
 #     method: scipy
 #     best_of: 2 
 sampler:
-  polychord:
-    nlive: 5d
-    precision_criterion: 0.01
-  # mcmc:
-  #   drag: False
-  #   oversample_power: 0.4
-  #   proposal_scale: 1.9
-  #   covmat: auto
-  #   Rminus1_stop: 0.01
-  #   Rminus1_cl_stop: 0.2   
-output: chains/Planck_lite_LCDM_pchord
+  # polychord:
+  #   nlive: 5d
+  #   precision_criterion: 0.01
+  mcmc:
+    drag: False
+    oversample_power: 0.4
+    proposal_scale: 1.9
+    covmat: auto
+    Rminus1_stop: 0.01
+    Rminus1_cl_stop: 0.2   
+output: chains/Planck_lite_one
