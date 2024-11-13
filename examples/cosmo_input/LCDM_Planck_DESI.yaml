@@ -106,3 +106,12 @@ params:
   #   # proposal: 0.01
   #   # latex: c_{EE}
   mnu: 0.06
+sampler:
+  mcmc:
+    drag: False
+    oversample_power: 0.4
+    proposal_scale: 1.9
+    covmat: auto
+    Rminus1_stop: 0.01
+    Rminus1_cl_stop: 0.2   
+output: chains/Planck_DESI_LCDM
