@@ -30,7 +30,7 @@ log = logging.getLogger("[AQ]")
 
 #------------------The acqusition functions-------------------------
 
-@jit
+# @jit
 def Z_EI(mean, sigma, best_f, zeta,):
     """Returns `z(x) = (mean(x) - best_obs) / sigma(x)`"""
     z = (mean - best_f-zeta) / sigma
@@ -106,17 +106,21 @@ class IPV(Acquisition):
 #------------------Optimizers for the acqusition functions-------------------------
 
 # effectively a local optimizer with multiple restarts
-def optim_scipy_bh(acq_func,x0,minimizer_kwargs,stepsize=1/4,niter=15):
+def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs,stepsize=1/4,niter=15):
     start = time.time()
+    acq_grad = grad(acq_func)
     # ideally stepsize should be ~ max(delta,distance between sampled points)
     # with delta some small number to ensure that step size does not become too small
+    minimizer_kwargs['jac'] = acq_grad
+    minimizer_kwargs['bounds': self.ndim*[(0,1)]']
     results = scipy.optimize.basinhopping(acq_func,
                                         x0=x0,
                                         stepsize=stepsize,
                                         niter=niter,
-                                        minimizer_kwargs=minimizer_kwargs) # minimizer_kwargs is for the choice of the local optimizer, bounds and to provide gradient if necessary
+                                        minimizer_kwargs=minimizer_kwargs) 
+    # minimizer_kwargs is for the choice of the local optimizer, bounds and to provide gradient if necessary
     log.info(f" Acquisition optimization took {time.time() - start:.2f} s")
-    return results
+    return results.x, results.fun
 
 # add here jax based optax optimizers - stochastic gradient descent
 

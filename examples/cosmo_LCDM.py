@@ -10,7 +10,7 @@ import tensorflow_probability.substrates.jax as tfp
 import jax.numpy as jnp
 from jax import random,vmap, grad
 tfpd = tfp.distributions
-from bo import sampler
+from BO_jax.JaxBo.bo_be import sampler
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm

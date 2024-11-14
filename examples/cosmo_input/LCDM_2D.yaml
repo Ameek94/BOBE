@@ -8,9 +8,6 @@ theory:
       lens_potential_accuracy: 1
       num_massive_neutrinos: 1
       nnu: 3.046
-      #theta_H0_range:
-      #- 10
-      #- 200
 likelihood:
   planck_2018_lowl.TT: null
   planck_2018_lowl.EE: null
@@ -20,8 +17,8 @@ params:
   # Baseline cosmological parameters
   logA: 
     prior:
-     min: 2.95 #Change to 2.95
-     max: 3.15 #Change to 3.15
+     min: 2.95 
+     max: 3.15 
     ref:
      dist: norm
      loc: 3.05

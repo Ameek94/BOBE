@@ -1,5 +1,6 @@
-
-
+# The FullyBayesian GP implementation is based on Eriksson, D. and Jankowiak, M., “High-Dimensional Bayesian Optimization with Sparse Axis-Aligned Subspaces” (2021), arXiv:2103.00349, 
+# doi: 10.1080/00401706.2018.1469433 (see also SAASBO on GitHub) and the BoTorch FullyBayesianGP with minor changes
+#
 
 from math import sqrt
 import time
@@ -27,12 +28,9 @@ log = logging.getLogger("[GP]")
 # todo
 # 1. method to reuse previous mcmc samples if HMC runs into issues
 # 2. test speed vs standard botorch
-# 3. Matern kernel - done!
-# 4. methods to load and save from dict
-# 5. vmap memory efficiency - chunk/split vmap - done!
-# 6. separate mean and var predictions - done!
-# 7. stability of cholesky when points are very close together 
-# 8. Pytree for GP?
+# 3. methods to load and save from dict
+# 4. stability of cholesky when points are very close together 
+# 5. Pytree for GP?
 
 sqrt5 = jnp.sqrt(5.)
 
@@ -98,9 +96,9 @@ def sample_GP_NUTS(gp,rng_key,num_warmup=512,num_samples=512,progress_bar=True,t
             val, _ = gp.posterior(x,single=True,unstandardize=True)
             return val
 
-    def model():
+    def model(train_x):
         x = numpyro.sample('x',numpyro.distributions.Uniform
-                           (low=jnp.zeros(gp.train_x.shape[1]),high=jnp.ones(gp.train_x.shape[1]))) # type: ignore
+                           (low=jnp.zeros(train_x.shape[1]),high=jnp.ones(train_x.shape[1]))) # type: ignore
         numpyro.sample('y',gp_dist(gp),obs=x)
 
     start = time.time()
@@ -111,10 +109,11 @@ def sample_GP_NUTS(gp,rng_key,num_warmup=512,num_samples=512,progress_bar=True,t
                 num_chains=1,
                 progress_bar=progress_bar,
                 thinning=thinning,)
-    mcmc.run(rng_key,extra_fields=("potential_energy",))
+                #jit_model_args=True)
+    mcmc.run(rng_key,gp.train_x,extra_fields=("potential_energy",))
     mcmc.print_summary(exclude_deterministic=False)
     print(f"MCMC took {time.time()-start:.4f} s")
-    nuts_samples = mcmc.get_samples()['x']
+    nuts_samples = mcmc.get_samples()['x'] # jnp.clip samples
     return nuts_samples
 
 
@@ -131,6 +130,7 @@ class numpyro_model:
  
    
    def model(self):
+        # add option to use SAAS priors on certain lengthscales only?
         outputscale = numpyro.sample("kernel_var", dist.Gamma(concentration=2.,rate=0.15))
         tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(0.1))
         # def trunc_HC(scale=tausq,low=None,high=None,validate_args=None):
@@ -229,24 +229,15 @@ class saas_fbgp: #jit.ScriptModule):
         self.train_y = (train_y - self.y_mean) / self.y_std
 
         self.noise = noise
-        # if train_yvar is None:
-        #     self.train_yvar = self.noise * jnp.ones_like(train_y)
-        # else:
-        #     self.train_yvar = train_yvar
-
         self.fitted = False
-        self.samples = {}
         self.num_samples = 0
-        self.cholesky = []
     
         self.kernel_func = rbf_kernel if kernel_func=="rbf" else matern_kernel
         
-        self.numpyro_model = numpyro_model(self.train_x,self.train_y,#self.train_yvar,
+        self.numpyro_model = numpyro_model(self.train_x,self.train_y,
                                            self.kernel_func,noise = self.noise)
         
         self.vmap_size = vmap_size # to process vmap in vmap_size batches
-
-        pass
 
     def fit(self,rng_key,dense_mass=True,max_tree_depth=6,
                 warmup_steps=512,num_samples=512,num_chains=1,progbar=True,thinning=16,verbose=False):
@@ -259,9 +250,10 @@ class saas_fbgp: #jit.ScriptModule):
                                                    thinning=thinning,
                                                    verbose=verbose)
         self.num_samples = self.samples["kernel_length"].shape[0]
-        self.update_choleskys()
+        self.samples["kernel_length"] = jnp.clip(self.samples["kernel_length"],1e-3,1e2) # best values?
         self.map_lengthscales, self.map_outputscales = self.get_map_hyperparams()
         self.fitted = True
+        self.update_choleskys()
 
     def update(self,x_new,y_new,rng_key,warmup_steps=256,num_samples=128,thinning=8,verbose=False):
         """
@@ -275,7 +267,6 @@ class saas_fbgp: #jit.ScriptModule):
         self.train_y = (self.train_y - self.y_mean) / self.y_std
         self.numpyro_model.update(self.train_x,self.train_y)
         self.fit(rng_key,warmup_steps=warmup_steps,num_samples=num_samples,thinning=thinning,verbose=verbose)
-        return None
 
 
     # can make this faster with quicker update of cholesky
@@ -317,13 +308,11 @@ class saas_fbgp: #jit.ScriptModule):
         mean = get_mean_from_cho(k11_cho,k12,self.train_y) #self._get_mean(k11_cho,k12)
         return mean, var
     
-    # @partial(jit, static_argnums=(0,)) ---- function outside class or use pytrees
     def _get_var(self,k11_cho,k12,k22):
         vv = solve_triangular(k11_cho,k12,lower=True)
-        var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0) # replace k22 computation with single element diagonal
+        var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0)
         return var
     
-    # @partial(jit, static_argnums=(0,)) ---- function outside class or use pytrees
     def _get_mean(self,k11_cho,k12):
         mu = jnp.matmul(jnp.transpose(k12),cho_solve((k11_cho,True),self.train_y)) # can also store alphas
         mean = mu[:,0]  
@@ -344,8 +333,8 @@ class saas_fbgp: #jit.ScriptModule):
             mean = mean*self.y_std + self.y_mean
             var = var*self.y_std**2           
         if single:
-            mean = mean.mean(axis=0) #*self.y_std + self.y_mean
-            var = var.mean(axis=0) #* self.y_std**2      
+            mean = mean.mean(axis=0) 
+            var = var.mean(axis=0)    
         return mean, var
 
     # think about doing sequential optimization, at the moment joint acquisition is supported

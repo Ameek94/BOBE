@@ -2,14 +2,14 @@
 BO:
   maxiter: 100
   loglike: model.py # file containing external loglike definition, param names, bounds and labels
-  cobaya_model: None
-  acq_goal: 
+  cobaya_model: False
+  cobaya_model_file: ./examples/cosmo_input/LCDM_2D.yaml
+  acq_goal: 1e-12
   feedback_lvl: 1
   ninit: 4
   init_strat: Sobol
 GP:
-  gp_model: FullyBayesian
-  model_FB: 
+  model_FB:
     gpfit_step: 1
     warmum_steps: 256
     num_samples: 256
@@ -23,10 +23,14 @@ GP:
   min_lengthscale: 1e-3
   max_lengthscale: 10.
 NS:
-  name: jaxns
-  dlogz_goal: 0.1
-  upper_lower: False
-  max_call: 1e5
+  jaxns:
+    dlogz_goal: 0.1
+    upper_lower: False
+    max_call: 1e5
+  dynesty:
+    dlogz_goal: 0.1
+    upper_lower: True
+    max_call: 1e5
 ACQ:
   name: IPV
   mc_points_size: 16

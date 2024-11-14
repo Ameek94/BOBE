@@ -56,7 +56,7 @@ class gp_likelihood:
 def prior_transform(x):
     return x
 
-# dynesty utility for computing evidence
+# dynesty utility function for computing evidence
 def compute_integrals(logl=None, logvol=None, reweight=None):
     assert logl is not None
     assert logvol is not None

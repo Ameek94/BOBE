@@ -11,4 +11,5 @@
 *.covmat
 *.png
 *.pdf
+*.npz
 mem*.ipynb
