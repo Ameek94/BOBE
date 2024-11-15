@@ -131,9 +131,11 @@ def nested_sampling_jaxns(gp: saas_fbgp
                        ,dlogz: float = 0.1
                        ,logz_std: bool = True
                        ,maxcall: int = 1e5 # type: ignore
+                       ,max_samples = 1e5
                         ,boost_maxcall: int = 1
                         ,num_samples_equal=1000
                         ,difficult_model = False
+                        ,verbose=False
                        ) -> tuple[np.ndarray,Dict]:
 
     def log_likelihood(x):
@@ -150,7 +152,9 @@ def nested_sampling_jaxns(gp: saas_fbgp
               log_likelihood=log_likelihood)
     
     start = time.time()
-    ns = NestedSampler(model=model, max_samples=1e5,parameter_estimation=True,difficult_model=difficult_model)
+    ns = NestedSampler(model=model, max_samples=max_samples
+                       ,parameter_estimation=True,difficult_model=difficult_model
+                       ,verbose=verbose)
     # Run the sampler
     term_cond = TerminationCondition(dlogZ=dlogz,evidence_uncert=0.05)
     # currently always stops around dlogz~0.1, need to figure out how to decrease it further
@@ -166,7 +170,7 @@ def nested_sampling_jaxns(gp: saas_fbgp
     samples = resample(key=jax.random.PRNGKey(0),
                     samples=results.samples,
                     log_weights=results.log_dp_mean, # type: ignore
-                    S=num_samples_equal*ndim, # type: ignore # check with effective sample size...
+                    # type: ignore # check with effective sample size...
                     replace=True,) 
     
     return np.array(samples['x']), logz_dict

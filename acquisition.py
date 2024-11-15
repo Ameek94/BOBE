@@ -1,5 +1,5 @@
 import time
-from typing import Any,List
+from typing import Any,List, Optional
 import numpyro
 import numpyro.distributions as dist
 from numpyro.util import enable_x64
@@ -13,7 +13,8 @@ from numpyro.diagnostics import summary
 from numpyro.infer import MCMC, NUTS
 # from util import chunk_vmap
 from jax import config
-from fb_gp import saas_fbgp
+from pyro import sample
+from fb_gp import saas_fbgp, sample_GP_NUTS
 config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
@@ -53,15 +54,13 @@ class EI(Acquisition):
 
     def __init__(self,
                  gp: saas_fbgp,
-                 best_f,
-                 zeta: float = 0.1,
+                 zeta: float = 0.,
                  batch_size=1, # EI batch_size must always be 1
                  ) -> None:
         super().__init__(gp)
         self.best_f =  gp.train_y.max() #best_f
         self.zeta = zeta
 
-    # @jit ?
     def __call__(self, X) -> Any:
         mu, var = self.gp.predict(X)
         mu  = mu.mean(axis=0)
@@ -76,16 +75,17 @@ class EI(Acquisition):
 # implement the more stable logEI 
     
 
-class IPV(Acquisition):
+class WIPV(Acquisition):
     """
     Integrated (mean) posterior variance over the over a set of test points (mc_points). 
     Can do joint optimization here with batch size > 1
     """
 
-    def __init__(self, gp: saas_fbgp,
-                 mc_points,batch_size=1) -> None:
+    def __init__(self, gp: saas_fbgp,rng_key
+                 ,batch_size=1
+                 ,wipv_kwargs: dict[str,Any] = {}) -> None:
         super().__init__(gp)
-        self.mc_points = mc_points
+        self.mc_points = sample_GP_NUTS(gp,rng_key,**wipv_kwargs)
         self.batch_size = batch_size
         self.ndim = self.gp.train_x.shape[1]
     
@@ -112,7 +112,7 @@ def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs,stepsize=1/4,niter=15):
     # ideally stepsize should be ~ max(delta,distance between sampled points)
     # with delta some small number to ensure that step size does not become too small
     minimizer_kwargs['jac'] = acq_grad
-    minimizer_kwargs['bounds': self.ndim*[(0,1)]']
+    minimizer_kwargs['bounds'] = ndim*[(0,1)]
     results = scipy.optimize.basinhopping(acq_func,
                                         x0=x0,
                                         stepsize=stepsize,
@@ -122,15 +122,15 @@ def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs,stepsize=1/4,niter=15):
     log.info(f" Acquisition optimization took {time.time() - start:.2f} s")
     return results.x, results.fun
 
-# add here jax based optax optimizers - stochastic gradient descent
+# add here jax based optax or optuna optimizers
 
-def optim_optax(acq_func,x0,iters=100): # needs more work
+def optim_optax(acq_func,x0,ndim,iters=100,start_learning_rate=1e-2): # needs more work
     acq_grad = grad(acq_func)
-    start_learning_rate = 1e-1
     optimizer = optax.adam(start_learning_rate)
     params = jnp.array(x0)
     opt_state = optimizer.init(params)
     start = time.time()
+    iters = ndim*iters
     for _ in range(iters):
         grads = acq_grad(params)
         updates, opt_state = optimizer.update(grads, opt_state)
@@ -138,40 +138,52 @@ def optim_optax(acq_func,x0,iters=100): # needs more work
         params = optax.projections.projection_hypercube(params)
     print(f"Optax optimizer took {time.time() - start:.4f}s")
     # print(params)
-    return params
-
+    return params, acq_func(params)
 
 # some gradient free optimizers (e.g. from iminuit or pybobyqa)
 
 def optim_cma(acq_func,x0,):
     pass
 
-
 def optim_bobyqa(acq_func
                  ,x0: np.ndarray
-                 ,dim: int = 1
+                 ,ndim: int = 1
                  ,batch_size: int = 1):
     # set up bounds for the solver
-    upper = np.ones(dim*batch_size)
+
+    upper = np.ones(ndim*batch_size)
     lower = np.zeros_like(upper)
+
     start = time.time()
     x0 = np.atleast_1d(x0) # tweak for batched acquisition
     soln = pybobyqa.solve(acq_func,x0,bounds=(lower,upper)
                           ,seek_global_minimum=True,print_progress=False,do_logging=False)
 
-    # # convert acq_func output to numpy output
-    # def wrap_acq_func(x):
-    #     with torch.no_grad():
-    #         x = np.array(x).reshape(batch_size,dim) # optimizer cannot do joint optimization but can get batched points by converting to batch_size*ndim shaped arrays
-    #         X = torch.tensor(x,**tkwargs)        
-    #         Y = -acq_func(X)
-    #         del X
-    #         y = Y.view(-1).double().numpy()
-    #         return y
-    # run the solver
-    # xs = soln.x # xs is 1D array of size dim*batch_size
-    # best_x  = np.array(xs).reshape(batch_size,dim)
-    # best_x = torch.tensor(best_x,**tkwargs)
-    # best_val = torch.tensor(soln.f,**tkwargs)
     print(f"Py-Bobyqa took {time.time()-start:.4f} s")
     return soln.x, soln.f
+
+#------------------Optimizing the acquisition-------------------------
+
+optimzer_functions = {"scipy": optim_scipy_bh, "optax": optim_optax, "bobyqa": optim_bobyqa, "cma": optim_cma}
+
+def optimize_acq(rng_key
+                 ,gp: saas_fbgp
+                 ,x0: np.ndarray
+                 ,ndim: int
+                 ,step: int
+                 ,acquistion: str = "WIPV"
+                 ,method: str = "bobyqa"
+                 ,acq_kwargs: dict[str,Any] = {}
+                 ,optimizer_kwargs: dict[str,Any] = {}
+                 ):
+    
+    if acquistion=="WIPV":
+        acq_func = WIPV(gp,rng_key,**acq_kwargs)
+    else:
+        acq_func = EI(gp,**acq_kwargs)
+
+    optimizer = optimzer_functions[method]
+
+    pt, val = optimizer(acq_func,x0,ndim,**optimizer_kwargs)
+
+    return pt, val

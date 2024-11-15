@@ -9,7 +9,7 @@ import time
 import jax
 import jax.numpy as jnp
 from jax import random,vmap, grad
-from acquisition import EI, IPV, optim_bobyqa, optim_scipy_bh
+from acquisition import EI, WIPV, optim_bobyqa, optim_scipy_bh, optimize_acq
 from scipy.stats import qmc
 from jaxns import NestedSampler
 from nested_sampler import nested_sampling_jaxns, nested_sampling_Dy
@@ -20,7 +20,7 @@ log = logging.getLogger("[BO]")
 
 # todo
 # 1. save and resume
-# 2. initialize from input yaml file
+# 2. initialize everything from input yaml file and clean up this module
 # 3. ?
 
 def test_function(x):
@@ -32,21 +32,24 @@ class sampler:
             ndim = None,
             cobaya_model = False,
             cobaya_start: int = 8,
-            input_file = None,
+            resume_from_file=False,
+            resume_file = None,
+            input_file: Optional[str] = None,
             loglike =  None, # for external functions this should be the logposterior 
             param_list: Optional[List] = None,
             param_bounds: Optional[List] = None, # shape 2 x D
             param_labels: Optional[List] = None,
             gp_kwargs: dict[str,Any] = {'kernel_func':"rbf", 'vmap_size': 8},
-            noise: float = 1e-6,
+            noise: float = 1e-8,
             gpfit_step: int = 1, 
             nstart: int = 4,
             max_steps: int = 4,
+            acq_strat: Optional[str] = 'WIPV',
             acq_goal: float = 1e-6, # currently arbitrary...
             save: Optional[bool] = True,
             save_step: int = 5,
             save_file: str = 'run_data',
-            nested_sampler: str = "default", #jaxns 
+            nested_sampler: str = "jaxns", #jaxns 
             ns_step: int = 1, 
             mc_points_size: int = 16,
             nested_sampler_kwargs: Optional[dict] = None,
@@ -71,45 +74,49 @@ class sampler:
         self.mc_points_size = mc_points_size
 
         if cobaya_model:
-            points = self._cobaya_init(input_file,cobaya_start=cobaya_start)
+            points, lls = self._cobaya_init(input_file,cobaya_start=cobaya_start) # type: ignore
         else:
             assert loglike is not None
             self.logp = functools.partial(self._ext_logp,loglike=loglike) # assuming loglike returns N x 1 shape for input N x d, eventually add option to define loglike model in external file
-            self.param_list = param_list if param_list is not None else ['x_%i'%(i+1) for i in range(ndim)]
-            self.param_labels = param_labels if param_labels is not None else ['x_%i'%(i+1) for i in range(ndim)]
-            self.param_bounds = np.array(param_bounds) if param_bounds is not None else np.array(ndim*[[0,1]]).T
+            self.param_list = param_list if param_list is not None else ['x_%i'%(i+1) for i in range(ndim)] # type: ignore
+            self.param_labels = param_labels if param_labels is not None else ['x_%i'%(i+1) for i in range(ndim)] # type: ignore
+            self.param_bounds = np.array(param_bounds) if param_bounds is not None else np.array(ndim*[[0,1]]).T # type: ignore
         self.ndim = len(self.param_list)
         self.bounds_dict = dict(zip(self.param_list,self.param_bounds.T)) # type: ignore
-        self.nstart = nstart
         log.info(f" Running the sampler with the following params {self.param_list}")
         log.info(f" Parameter bounds \n{self.param_bounds.T}")
         log.info(f" Parameter labels \n{self.param_labels}")
-        #output and timing dataframes
-        # self.unit_transform = functools.partial(input_standardize,param_bounds=self.param_bounds)
 
-        #initialize train_x, train_y and run GP
-        log.info(f" Sampler will start with {self.nstart} points and run for a maximum of {self.max_steps} steps")
-        self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(nstart)
-        if cobaya_model:
-            print("adding cobaya points")
-            #need to check if points are not same as sobol
-            for pt in points: # type: ignore
-                print(dict(zip(self.param_list,pt)))
-                pt = input_standardize(np.reshape(pt,(1,self.ndim)),self.param_bounds)
-                if pt not in self.train_x:
-                    self.train_x = np.concatenate([self.train_x,pt])
-             # type: ignore
-        # if nstart<=8:
-        # log.info(f" Initial values to evaluate \n{self.print_point(self.train_x)}")
-        self.train_y = self.logp(self.train_x)
-        log.info(f" Initial loglikes \n{self.train_y}")
-        # self.train_x = input_standardize(self.train_x,self.param_bounds)
-        # train_y = output_standardize(train_y)
-        # self.gp_kwargs = gp_kwargs
         self.noise = noise
-        self.gp = saas_fbgp(self.train_x,self.train_y,noise=self.noise,**gp_kwargs) 
-        rng_key, _ = random.split(random.PRNGKey(seed), 2)
-        self.gp.fit(rng_key,warmup_steps=512,num_samples=512,thinning=16,verbose=False) # input settings
+        if resume_from_file:
+            assert resume_file is not None
+            with np.load(resume_file) as run_data:
+                self.train_x = jnp.array(run_data['train_x'])
+                self.train_y = jnp.array(run_data['train_y'])
+                self.param_bounds = run_data['param_bounds']
+                lengthscales = jnp.array(run_data["lengthscales"])
+                outputscales = jnp.array(run_data["outputscales"])
+            self.gp = saas_fbgp(self.train_x,self.train_y,noise=self.noise,**gp_kwargs,sample_lengthscales=lengthscales,sample_outputscales=outputscales) 
+            log.info(f"Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
+        else:
+            self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(nstart)
+            print(self.train_x)
+            self.train_y = self.logp(self.train_x)
+            print(self.train_y)
+            if cobaya_model:
+                for pt,ll in zip(points,lls): 
+                    print("adding cobaya points")
+                    print(dict(zip(self.param_list,pt)))
+                    pt = input_standardize(np.reshape(pt,(1,self.ndim)),self.param_bounds)
+                    if pt not in self.train_x:
+                        print(pt,ll)
+                        self.train_x = np.concatenate([self.train_x,pt])
+                        self.train_y = np.concatenate([self.train_y,np.atleast_2d(ll)])
+            log.info(f" Initial loglikes \n{self.train_y}")
+            log.info(f" Sampler will start with {len(self.train_y)} points and run for a maximum of {self.max_steps} steps")
+            self.gp = saas_fbgp(self.train_x,self.train_y,noise=self.noise,**gp_kwargs) 
+            rng_key, _ = random.split(random.PRNGKey(seed), 2)
+            self.gp.fit(rng_key,warmup_steps=512,num_samples=512,thinning=16,verbose=False) # input settings
 
     def run(self):
         """
@@ -118,50 +125,48 @@ class sampler:
         start = time.time()
         self.converged = False
         while not self.converged:
-            mc_points = self.get_mc_points(self.num_step)
-            acq_func = IPV(self.gp,mc_points)
-            grad_fn = grad(acq_func)
-            x0 =  np.random.uniform(0,1,self.ndim)
-            pt, val  = optim_bobyqa(acq_func,x0,dim=self.ndim) 
+            seed = self.num_step
+            rng_key, _ = random.split(random.PRNGKey(seed), 2)
+            # mc_points = self.get_mc_points(self.num_step)
+            # acq_func = WIPV(self.gp,mc_points)
+            # grad_fn = grad(acq_func)
+            x0 =  np.random.uniform(0,1,self.ndim) # get better initial point
+            pt, val  = optimize_acq(rng_key=rng_key,
+                                    gp=self.gp,
+                                    x0=x0,
+                                    ndim=self.ndim,
+                                    step=self.num_step,
+                                    )
+            #optim_bobyqa(acq_func,x0,ndim=self.ndim) 
             #optim_scipy_bh(acq_func,x0=x0,stepsize=1/5,ndim=self.ndim
                                       #niter=20,minimizer_kwargs={'jac': grad_fn, 'bounds': self.ndim*[(0,1)] })
             self.acq_val = abs(val)
             next_x = jnp.atleast_2d(pt)
-            log.info(f" Next point at x = {self.print_point(pt)} \nwith acquisition function value = {val:.4e}")
+            log.info(f" Next point at x = {self._print_point(pt)} \nwith acquisition function value = {val:.4e}")
             next_y = self.logp(next_x)
             max_idx = jnp.argmax(self.train_y)
             self.train_x = jnp.concatenate([self.train_x,next_x])
             self.train_y = jnp.concatenate([self.train_y,next_y])
-            log.info(f" Loglike at new point = {next_y}, \ncurrent best loglike = {self.train_y[max_idx]} at \n{self.print_point(self.train_x[max_idx])} ")
-            seed = self.num_step
-            rng_key, _ = random.split(random.PRNGKey(seed), 2)
+            log.info(f" Loglike at new point = {next_y}, \ncurrent best loglike = {self.train_y[max_idx]} at \n{self._print_point(self.train_x[max_idx])} ")
             if (self.num_step%5==0 and self.num_step>0):
                 jax.clear_caches() # hack for managing memory, is there a better way?
             if (self.num_step%self.gpfit_step==0):
                 self.gp.update(next_x,next_y,rng_key,warmup_steps=512,num_samples=512,thinning=16,verbose=False)
             else:
                 self.gp.quick_update(next_x,next_y)
-            # np.savetxt('train_x.txt',input_unstandardize(self.train_x,self.param_bounds))
             log.info(f" ----------------------Step {self.num_step+1} complete----------------------\n")
             self.num_step+=1
-            self.converged = self.check_converged()
+            self.converged = self._check_converged()
             if ((self.num_step%self.save_step==0 and self.save) or self.converged):
                 log.info(f"Run training data and hyperparameters saved at step {self.num_step}")
-                jnp.savez(self.save_file+'.npz'
-                          ,train_x = self.train_x
-                          ,train_y= self.train_y
-                          ,param_bounds = self.param_bounds
-                          ,lengthscales=self.gp.samples["kernel_length"]
-                          ,outputscales=self.gp.samples["kernel_var"]) # move to gp
+                self.gp.save(self.save_file)
         samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.01,difficult_model=True)
         log.info(f" Final LogZ info :"+"".join(f"{key}: = {value:.4f}, " for key, value in logz_dict.items()))
         if self.converged:
-            log.info(" Run Complete")
+            log.info(" Run Completed")
         log.info(f" BO took {time.time() - start:.2f}s")
 
-        # plot_gp(samples,self.gp,self.param_list,self.param_labels,self.param_bounds)
-
-    def check_converged(self):
+    def _check_converged(self):
         acq = (self.acq_val < self.acq_goal)
         steps = (self.num_step >= self.max_steps)
         if acq:
@@ -180,16 +185,8 @@ class sampler:
         x =  input_unstandardize(x,self.param_bounds)
         for point in x: # can parallelize evaluation of likelihood by splitting x into nproc parts
             logpost = self.cobaya_model.logpost(point,make_finite=True) 
-            # if logpost == -np.inf:
-            #     logpost = -1e100  # or whatever the machine precision allows for
             pdf.append(logpost)
         return np.array(pdf).reshape(-1,1)
-
-    def print_point(self,x):
-        x = input_unstandardize(x,self.param_bounds)
-        # if len(x==1):
-        #     x = x.item()
-        return dict(zip(self.param_list,x))
 
     def _cobaya_init(self,input_file,cobaya_start=8):
         try:
@@ -205,15 +202,21 @@ class sampler:
             self.param_bounds = np.array(self.cobaya_model.prior.bounds(confidence_for_unbounded=0.95)).T
             self.param_labels = [self.cobaya_model.parameterization.labels()[key] for key in self.param_list]
             points = []
+            logpost = []
             for i in range(cobaya_start):
-                point, _ = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False
-                                                             , logposterior_as_dict=False
+                res = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False
+                                                             , logposterior_as_dict=True
                                                              , random_state=None)
-                points.append(point)
-            return np.array(points)
+                points.append(res[0])
+                logpost.append(res[1]['logpost']) # type: ignore
+            return np.array(points), np.array(logpost)
         except ModuleNotFoundError:
             log.error(" Cobaya not found")
 
+    
+    def _print_point(self,x):
+        x = input_unstandardize(x,self.param_bounds)
+        return dict(zip(self.param_list,x))
 
     def get_mc_points(self,step):
         if (step%self.ns_step==0):
@@ -223,7 +226,7 @@ class sampler:
         #     mc_points = samples[::int(size/self.mc_points_size),:]        
             seed = step
             rng_key, _ = random.split(random.PRNGKey(seed), 2)
-            samples = sample_GP_NUTS(gp = self.gp,rng_key=rng_key,num_warmup=512,num_samples=512,thinning=8)
+            samples = sample_GP_NUTS(gp = self.gp,rng_key=rng_key,warmup_steps=512,num_samples=512,thinning=8)
         # size = len(samples)
         # mc_points = samples[::int(size/self.mc_points_size),:]                
         return samples

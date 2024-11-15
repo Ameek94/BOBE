@@ -32,14 +32,16 @@ input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
 
 # input_file = './cosmo_input/LCDM_6D.yaml'
 
-max_steps = 160
-nstart = 32
-cobaya_init = 8
+init_file = 'cmb_bao.npz'
+
+max_steps = 120
+nstart = 2
+cobaya_init = 2
 ntot = max_steps + nstart + cobaya_init
 save_file = 'cmb_bao'
 cosmo = sampler(cobaya_model=True,input_file=input_file,cobaya_start=cobaya_init,seed=200000,
-                max_steps=max_steps, nstart=nstart,mc_points_size=32,acq_goal=5e-7,noise=1e-6,
-                save=True,save_file=save_file)
+                max_steps=max_steps, nstart=nstart,mc_points_size=32,acq_goal=1e-8,noise=1e-8,
+                save=True,save_file=save_file,init_from_file=True,init_file=init_file)
 
 cosmo.run()
 
@@ -48,7 +50,7 @@ from fb_gp import sample_GP_NUTS
 train_x = input_unstandardize(cosmo.train_x,cosmo.param_bounds)
 seed = 0
 rng_key, _ = random.split(random.PRNGKey(seed), 2)
-samples = sample_GP_NUTS(gp = cosmo.gp,rng_key=rng_key,num_warmup=1024,num_samples=8192,thinning=8)
+samples = sample_GP_NUTS(gp = cosmo.gp,rng_key=rng_key,num_warmup=512,num_samples=8192,thinning=8)
 
 samples = input_unstandardize(samples,cosmo.param_bounds)
 
@@ -70,6 +72,7 @@ gp_samples_nuts = MCSamples(samples=samples[:,:6],names=keys, labels = cosmo.par
                             ,ranges=bounds_dict)
 
 
+ntot = train_x.shape[0]
 g = plots.get_subplot_plotter(subplot_size=3,subplot_size_ratio=1)
 for s in [gp_samples_nuts,mcmc_samples]:
         for p in keys:

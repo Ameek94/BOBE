@@ -14,7 +14,7 @@ import numpy as np
 from jax import jit, vmap
 from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 from numpyro.diagnostics import summary
-from numpyro.infer import MCMC, NUTS
+from numpyro.infer import MCMC, NUTS, util
 from bo_utils import split_vmap
 from jax import config
 from sympy import false
@@ -36,7 +36,7 @@ sqrt5 = jnp.sqrt(5.)
 
 def dist_sq(x, y):
     """
-    Compute squared Euclidean distance between two points x, y. If x is n1 x d and y is n2 x d returns a n1 x n2 matrix of distances.
+    Compute squared Euclidean distance between two points x, y. If x is n1 x d and y is n2 x d returns a n1 x n2 matrix of distancess.
     """
     return jnp.sum(jnp.square(x[:,None,:] - y),axis=-1) 
 
@@ -81,8 +81,11 @@ def get_mean_from_cho(k11_cho,k12,train_y):
     mean = mu[:,0]  
     return mean
 
-def sample_GP_NUTS(gp,rng_key,num_warmup=512,num_samples=512,progress_bar=True,thinning=2):
-
+def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True,thinning=2,verbose=False
+                   ,init_params=None):
+    """
+    Sample x using the GP mean as the logprob
+    """
     class gp_dist(numpyro.distributions.Distribution):
         support = dist.constraints.real
 
@@ -104,23 +107,26 @@ def sample_GP_NUTS(gp,rng_key,num_warmup=512,num_samples=512,progress_bar=True,t
     start = time.time()
     kernel = NUTS(model,dense_mass=False,
                 max_tree_depth=6)
-    mcmc = MCMC(kernel,num_warmup=num_warmup,
+    mcmc = MCMC(kernel,num_warmup=warmup_steps,
                 num_samples=num_samples,
                 num_chains=1,
                 progress_bar=progress_bar,
                 thinning=thinning,)
                 #jit_model_args=True)
-    mcmc.run(rng_key,gp.train_x,extra_fields=("potential_energy",))
-    mcmc.print_summary(exclude_deterministic=False)
+    if init_params is not None:
+        init_params = util.unconstrain_fn(model,model_args=gp.train_x,model_kwargs=None,params=init_params)
+    mcmc.run(rng_key,gp.train_x,extra_fields=("potential_energy",),init_params=init_params)
+    if verbose:
+        mcmc.print_summary(exclude_deterministic=False)
     print(f"MCMC took {time.time()-start:.4f} s")
-    nuts_samples = mcmc.get_samples()['x'] # jnp.clip samples
+    nuts_samples = mcmc.get_samples()['x'] 
     return nuts_samples
 
 
 class numpyro_model:
    # Note - train_x and train_y received here are already transformed, npoints x ndim and npoints x 1
    def __init__(self, train_x,  train_y, #train_yvar, 
-                kernel_func=rbf_kernel,noise=1e-4) -> None:
+                kernel_func=rbf_kernel,noise=1e-6) -> None:
       self.train_x = train_x 
       self.train_y = train_y
       self.ndim = train_x.shape[-1]
@@ -133,18 +139,9 @@ class numpyro_model:
         # add option to use SAAS priors on certain lengthscales only?
         outputscale = numpyro.sample("kernel_var", dist.Gamma(concentration=2.,rate=0.15))
         tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(0.1))
-        # def trunc_HC(scale=tausq,low=None,high=None,validate_args=None):
-        #         return dist.TruncatedDistribution(base_dist=dist.HalfCauchy(scale*jnp.ones(self.ndim)),
-        #                                         low=low,
-        #                                         high=high,
-        #                                         validate_args=validate_args,)
         inv_length_sq = numpyro.sample("_kernel_inv_length_sq",dist.HalfCauchy(jnp.ones(self.ndim))) # type: ignore
-        # inv_lengthscales = numpyro.sample("_kernel_inv_length_sq",trunc_HC(scale=tausq,low=0.1,high=100.))
         lengthscales = numpyro.deterministic("kernel_length",1/jnp.sqrt(tausq*inv_length_sq)) # type: ignore
-        # lengthscales = numpyro.deterministic("kernel_length",1/jnp.sqrt(inv_length_sq)) # type: ignore
-        # truncated_lengthscales = numpyro.sample("trunc_lengths",lengthscales)
         k = rbf_kernel(self.train_x,self.train_x,lengthscales,outputscale,noise=self.noise,include_noise=True) 
-        # /+ self.noise*jnp.eye(self.train_x.shape[0]) #self.train_yvar * jnp.eye(self.train_x.shape[0])
         mll = numpyro.sample(
                 "Y",
                 dist.MultivariateNormal(
@@ -158,7 +155,7 @@ class numpyro_model:
     # how can we speed up the MCMC when we already have a large number of samples? main bottleneck -> inversion of kernel
    def run_mcmc(self,rng_key,dense_mass=True,max_tree_depth=6,
                 warmup_steps=512,num_samples=512,num_chains=1,thinning=16,
-                progbar=True,verbose=False,
+                progbar=True,verbose=False,init_params=None,
                 ) -> dict:
         start = time.time()
         kernel = NUTS(self.model,
@@ -172,7 +169,10 @@ class numpyro_model:
                 progress_bar=progbar,
                 thinning=thinning,
                 )
-        mcmc.run(rng_key,extra_fields=("potential_energy",))
+        #https://forum.pyro.ai/t/initialize-mcmc-chains-from-multiple-predetermined-starting-points/5062
+        if init_params is not None:
+            init_params = util.unconstrain_fn(self.model,model_args=self.train_x,model_kwargs=None,params=init_params)
+        mcmc.run(rng_key,extra_fields=("potential_energy",),init_params=init_params)
         if verbose:
             mcmc.print_summary(exclude_deterministic=False)
         extras = mcmc.get_extra_fields()
@@ -203,21 +203,24 @@ class numpyro_model:
        self.train_x = train_x
        self.train_y = train_y
 
-class saas_fbgp: #jit.ScriptModule):
+class saas_fbgp:
 
-    def __init__(self,train_x,train_y,#train_yvar=None,
-                 standardise_y=True,noise=1e-4,kernel_func="rbf",vmap_size=8) -> None:
+    def __init__(self,train_x,train_y
+                 ,standardise_y=True
+                 ,noise=1e-4
+                 ,kernel_func="rbf"
+                 ,vmap_size=8
+                 ,sample_lengthscales=None
+                 ,sample_outputscales=None) -> None:
         """
-        train_x: size (N x D), assumed to be standardised by the main sampler module
+        train_x: size (N x D), always in [0,1] coming from the sampler module
         train_y: size (N x 1)
-        train_yvar: size (N x 1)
+        noise
         """
 
         # check train_x and train_y dims are N x D and N x 1, param_bounds are 2 x d
         
         self.train_x = train_x
-
-        # train_y = jnp.atleast_2d(train_y).T
 
         if standardise_y:
             self.y_mean = jnp.mean(train_y,axis=-2)
@@ -231,14 +234,19 @@ class saas_fbgp: #jit.ScriptModule):
         self.noise = noise
         self.fitted = False
         self.num_samples = 0
-    
+        self.vmap_size = vmap_size # to process vmap in vmap_size batches
         self.kernel_func = rbf_kernel if kernel_func=="rbf" else matern_kernel
         
         self.numpyro_model = numpyro_model(self.train_x,self.train_y,
                                            self.kernel_func,noise = self.noise)
-        
-        self.vmap_size = vmap_size # to process vmap in vmap_size batches
-
+        if sample_lengthscales is not None and sample_outputscales is not None:
+            self.fitted=True
+            self.samples = {}
+            self.samples["kernel_length"] = sample_lengthscales
+            self.samples["kernel_var"] = sample_outputscales
+            self.num_samples = len(sample_outputscales)
+            self.update_choleskys()
+    
     def fit(self,rng_key,dense_mass=True,max_tree_depth=6,
                 warmup_steps=512,num_samples=512,num_chains=1,progbar=True,thinning=16,verbose=False):
         self.samples = self.numpyro_model.fit_gp_NUTS(rng_key,dense_mass=dense_mass,
@@ -250,8 +258,7 @@ class saas_fbgp: #jit.ScriptModule):
                                                    thinning=thinning,
                                                    verbose=verbose)
         self.num_samples = self.samples["kernel_length"].shape[0]
-        self.samples["kernel_length"] = jnp.clip(self.samples["kernel_length"],1e-3,1e2) # best values?
-        self.map_lengthscales, self.map_outputscales = self.get_map_hyperparams()
+        # self.samples["kernel_length"] = jnp.clip(self.samples["kernel_length"],1e-3,1e2) # best values?
         self.fitted = True
         self.update_choleskys()
 
@@ -304,20 +311,10 @@ class saas_fbgp: #jit.ScriptModule):
                                lengthscales,
                                outputscales,noise=self.noise,include_noise=True)
 
-        var = get_var_from_cho(k11_cho,k12,k22) #self._get_var(k11_cho,k12,k22)
-        mean = get_mean_from_cho(k11_cho,k12,self.train_y) #self._get_mean(k11_cho,k12)
+        var = get_var_from_cho(k11_cho,k12,k22) 
+        mean = get_mean_from_cho(k11_cho,k12,self.train_y)
         return mean, var
     
-    def _get_var(self,k11_cho,k12,k22):
-        vv = solve_triangular(k11_cho,k12,lower=True)
-        var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0)
-        return var
-    
-    def _get_mean(self,k11_cho,k12):
-        mu = jnp.matmul(jnp.transpose(k12),cho_solve((k11_cho,True),self.train_y)) # can also store alphas
-        mean = mu[:,0]  
-        return mean
-
     def predict(self,X):
         X = jnp.atleast_2d(X) # move it to external 
         vmap_func = lambda cho, l, o :  self.get_mean_var(X=X,k11_cho=cho,lengthscales=l,outputscales=o)   
@@ -338,43 +335,20 @@ class saas_fbgp: #jit.ScriptModule):
         return mean, var
 
     # think about doing sequential optimization, at the moment joint acquisition is supported
-    # @partial(jit, static_argnums=(0,)) ---- function outside class or use pytrees
     def _fantasy_var_fb(self,x_new,lengthscales,outputscales,mc_points):
         x_new = jnp.atleast_2d(x_new)
         new_x = jnp.concatenate([self.train_x,x_new])
-        k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales,noise=self.noise,include_noise=True) #)+self.noise*jnp.eye(new_x.shape[0])
+        k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales,noise=self.noise,include_noise=True) 
         k11_cho = jnp.linalg.cholesky(k11) # can replace with fast update cholesky!
         k12 = self.kernel_func(new_x,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=False)
         k22 = self.kernel_func(mc_points,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=True)
-        var = get_var_from_cho(k11_cho,k12,k22) #self._get_var(k11_cho,k12,k22)
+        var = get_var_from_cho(k11_cho,k12,k22)
         return (var,)
     
-    def fantasy_var_fb(self,x_new,mc_points): # is batching over xnew needed?
+    def fantasy_var_fb(self,x_new,mc_points): 
         vmap_func = lambda l,o: self._fantasy_var_fb(x_new=x_new,lengthscales=l,outputscales=o,mc_points=mc_points)
         vmap_arrays = (self.samples["kernel_length"], self.samples["kernel_var"])
         var = split_vmap(vmap_func,vmap_arrays,batch_size=self.vmap_size)[0]
-        return var
-    
-    # maybe not needed?
-    def _fantasy_var_map(self,x_new,lengthscales,outputscales,mc_points):
-        x_new = jnp.atleast_2d(x_new)
-        new_x = jnp.concatenate([self.train_x,x_new])
-        k11 = self.kernel_func(new_x,new_x,lengthscales,outputscales,noise=self.noise,include_noise=True) #)+self.noise*jnp.eye(new_x.shape[0])
-        k11_cho = jnp.linalg.cholesky(k11) # replace with fast update cholesky!
-        k12 = self.kernel_func(new_x,mc_points,lengthscales,outputscales)
-        k22 = self.kernel_func(mc_points,mc_points,lengthscales,outputscales,noise=self.noise,include_noise=True)
-        var = self._get_var(k11_cho,k12,k22)
-        return var
-    
-    def fantasy_var_map(self,x_new,mc_points):
-        func = lambda x,l,o: self._fantasy_var_fb(x_new=x,lengthscales=l,outputscales=o,mc_points=mc_points)
-        batched_var_hyperparams = vmap(func,in_axes=(None,0,0)) 
-        batched_var_xnew = vmap(batched_var_hyperparams,in_axes=(0,None,None))
-        lengthscales = self.samples["kernel_length"]
-        outputscales = self.samples["kernel_var"]
-        # var = batched_fantasy_var(x_new,lengthscales,outputscales)
-        var = batched_var_xnew(x_new,lengthscales,outputscales)
-        # print(var.shape)
         return var
     
     def get_map_hyperparams(self):
@@ -397,17 +371,11 @@ class saas_fbgp: #jit.ScriptModule):
         mlls = self.samples["minus_log_prob"]
         median_mll = jnp.median(mlls)
         return median_mll
-
-    # Use JAX NS for this
-    def get_evidence(self):
-        pass
-
-    def get_param_posteriors(self):
-        pass
-
-    def model_dict(self):
-        pass
-
-    def load_from_dict(self):
-        pass
-
+    
+    def save(self,save_file):
+        jnp.savez(save_file+'.npz'
+                ,train_x = self.train_x
+                ,train_y= self.train_y
+                ,lengthscales=self.samples["kernel_length"]
+                ,outputscales=self.samples["kernel_var"])
+       

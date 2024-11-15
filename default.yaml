@@ -1,37 +1,64 @@
-# default settings for the BO sampling, GP, Nested Sampler, Acquisition functions and its optimizers
 BO:
-  maxiter: 100
-  loglike: model.py # file containing external loglike definition, param names, bounds and labels
-  cobaya_model: False
-  cobaya_model_file: ./examples/cosmo_input/LCDM_2D.yaml
-  acq_goal: 1e-12
-  feedback_lvl: 1
-  ninit: 4
-  init_strat: Sobol
-GP:
-  model_FB:
+  method: evidence
+  evidence:
+    max_steps: 100
+    cobaya_model_file: ./examples/cosmo_input/LCDM_2D.yaml
+    external_model: model.py
+    cobaya_start: 8
+    acq_goal: 1e-8
+    feedback_lvl: 1
+    init_strat: Sobol
+    ninit: 4
     gpfit_step: 1
+    save: True
+    save_file: 'run_data'
+    save_step: 5
+    ns_step: 10
+    seed: 0
+GP:
+  method: fullybayesian
+  fullybayesian:
     warmum_steps: 256
     num_samples: 256
     thinning: 16
     vmap_size: 8
-  model_single: 
-    optimizer: scipy
-  standardize: True
-  noise: 1e-6
-  kernel: rbf
-  min_lengthscale: 1e-3
-  max_lengthscale: 10.
+    standardize: True
+    noise: 1e-6
+    kernel: rbf
+    min_lengthscale: 1e-3
+    max_lengthscale: 100.
 NS:
+  method: 'jaxns'
   jaxns:
     dlogz_goal: 0.1
     upper_lower: False
     max_call: 1e5
+    final_ns_dlogz: 0.01
   dynesty:
     dlogz_goal: 0.1
     upper_lower: True
     max_call: 1e5
+    final_ns_dlogz: 0.01
 ACQ:
-  name: IPV
-  mc_points_size: 16
-  batch_size: 1
+  method: WIPV
+  WIPV:
+    num_samples: 512
+    warmup_steps: 512
+    thinning: 16
+    batch_size: 1
+  EI:
+    zeta: 0.
+    batch_size: 1
+optimizer:
+  method: bobyqa
+  bobyqa:
+    seek_global_minimum: False
+  scipy:
+    stepsize: 0.2
+    niter: 15
+    local_minimizer:
+      method: L-BFGS-B  
+  optax:
+    steps: 100
+    start_learning_rate: 1e-3
+

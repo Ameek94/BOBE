@@ -13,3 +13,5 @@
 *.pdf
 *.npz
 mem*.ipynb
+test*.ipynb
+plots*.py
