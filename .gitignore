@@ -13,3 +13,7 @@
 *.pdf
 *.npz
 mem*.ipynb
+test*.py
+test*.ipynb
+plot*.py
+plot*.ipynb
