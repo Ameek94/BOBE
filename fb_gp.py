@@ -211,7 +211,11 @@ class saas_fbgp:
                  ,kernel_func="rbf"
                  ,vmap_size=8
                  ,sample_lengthscales=None
-                 ,sample_outputscales=None) -> None:
+                 ,sample_outputscales=None
+                 ,warmup_steps=256
+                 ,num_samples=256
+                 ,thinning=16
+                 ,) -> None:
         """
         train_x: size (N x D), always in [0,1] coming from the sampler module
         train_y: size (N x 1)
@@ -246,9 +250,13 @@ class saas_fbgp:
             self.samples["kernel_var"] = sample_outputscales
             self.num_samples = len(sample_outputscales)
             self.update_choleskys()
+        
+        self.warmup_steps=warmup_steps
+        self.num_samples=num_samples
+        self.thinning=thinning
     
-    def fit(self,rng_key,dense_mass=True,max_tree_depth=6,
-                warmup_steps=512,num_samples=512,num_chains=1,progbar=True,thinning=16,verbose=False):
+    def fit(self,rng_key,dense_mass=True,max_tree_depth=6,warmup_steps=256
+                ,num_samples=256,num_chains=1,progbar=True,thinning=16,verbose=False):
         self.samples = self.numpyro_model.fit_gp_NUTS(rng_key,dense_mass=dense_mass,
                                                    max_tree_depth=max_tree_depth,
                                                    warmup_steps=warmup_steps,
@@ -273,7 +281,11 @@ class saas_fbgp:
         self.y_std = jnp.std(self.train_y,axis=-2)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
         self.numpyro_model.update(self.train_x,self.train_y)
-        self.fit(rng_key,warmup_steps=warmup_steps,num_samples=num_samples,thinning=thinning,verbose=verbose)
+        self.fit(rng_key
+                 ,warmup_steps=self.warmup_steps
+                 ,num_samples=self.num_samples
+                 ,thinning=self.thinning
+                 ,verbose=verbose)
 
 
     # can make this faster with quicker update of cholesky

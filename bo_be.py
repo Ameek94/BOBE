@@ -30,11 +30,12 @@ class sampler:
 
     def __init__(self,
             ndim = None,
+            input_file: Optional[str] = None,
             cobaya_model = False,
             cobaya_start: int = 8,
+            cobaya_input_file: Optional[str] = None,
             resume_from_file=False,
             resume_file = None,
-            input_file: Optional[str] = None,
             loglike =  None, # for external functions this should be the logposterior 
             param_list: Optional[List] = None,
             param_bounds: Optional[List] = None, # shape 2 x D
@@ -74,7 +75,7 @@ class sampler:
         self.mc_points_size = mc_points_size
 
         if cobaya_model:
-            points, lls = self._cobaya_init(input_file,cobaya_start=cobaya_start) # type: ignore
+            points, lls = self._cobaya_init(cobaya_input_file,cobaya_start=cobaya_start) # type: ignore
         else:
             assert loglike is not None
             self.logp = functools.partial(self._ext_logp,loglike=loglike) # assuming loglike returns N x 1 shape for input N x d, eventually add option to define loglike model in external file
