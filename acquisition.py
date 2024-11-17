@@ -25,10 +25,6 @@ import logging
 log = logging.getLogger("[AQ]")
 
 
-
-# Implement optimizer call within the acquisition class?
-
-
 #------------------The acqusition functions-------------------------
 
 # @jit
@@ -39,13 +35,27 @@ def Z_EI(mean, sigma, best_f, zeta,):
 
 class Acquisition():
 
-    def __init__(self,gp: saas_fbgp,) -> None:
+    def __init__(self
+                 ,gp: saas_fbgp
+                 ,ndim: int
+                 ,optimizer_settings: dict[str,Any]) -> None:
         self.gp = gp
+        self.ndim = ndim
+        self.optimizer_method = optimizer_settings['method']
+        self.optimizer_kwargs = optimizer_settings[self.optimizer_method]
         pass
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
-        pass
-        
+        raise NotImplementedError
+
+    def update_gp(self,gp: saas_fbgp):
+        self.gp = gp
+
+    def optimize(self,x0,):
+        acq_func = self.__call__
+        optimizer = optimzer_functions[self.optimizer_method]
+        pt, val = optimizer(acq_func,x0,self.ndim,**self.optimizer_kwargs)
+        return pt, val
 
 class EI(Acquisition):
     """
@@ -54,10 +64,13 @@ class EI(Acquisition):
 
     def __init__(self,
                  gp: saas_fbgp,
+                 rng_key,               
+                 ndim: int,
+                 optimizer_settings: dict[str,Any],
                  zeta: float = 0.,
                  batch_size=1, # EI batch_size must always be 1
                  ) -> None:
-        super().__init__(gp)
+        super().__init__(gp,ndim,optimizer_settings)
         self.best_f =  gp.train_y.max() #best_f
         self.zeta = zeta
 
@@ -81,10 +94,14 @@ class WIPV(Acquisition):
     Can do joint optimization here with batch size > 1
     """
 
-    def __init__(self, gp: saas_fbgp,rng_key
-                 ,batch_size=1
-                 ,wipv_kwargs: dict[str,Any] = {}) -> None:
-        super().__init__(gp)
+    def __init__(self
+                , gp: saas_fbgp
+                ,rng_key
+                ,ndim: int
+                ,optimizer_settings: dict[str,Any]
+                ,batch_size=1
+                ,wipv_kwargs: dict[str,Any] = {}) -> None:
+        super().__init__(gp,ndim,optimizer_settings)
         self.mc_points = sample_GP_NUTS(gp,rng_key,**wipv_kwargs)
         self.batch_size = batch_size
         self.ndim = self.gp.train_x.shape[1]
@@ -100,6 +117,9 @@ class WIPV(Acquisition):
         var = var.mean(axis=-1)
         return var #np.reshape(var,()) #*mu
         # +ve can be directly minimized
+
+    def update_mc_points(self,rng_key,wipv_kwargs):
+        self.mc_points = sample_GP_NUTS(self.gp,rng_key,**wipv_kwargs)
 
 
 
@@ -124,18 +144,18 @@ def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs,stepsize=1/4,niter=15):
 
 # add here jax based optax or optuna optimizers
 
-def optim_optax(acq_func,x0,ndim,iters=100,start_learning_rate=1e-2): # needs more work
+def optim_optax(acq_func,x0: np.ndarray,ndim,iters=100,start_learning_rate=1e-2): # needs more work
     acq_grad = grad(acq_func)
     optimizer = optax.adam(start_learning_rate)
     params = jnp.array(x0)
     opt_state = optimizer.init(params)
     start = time.time()
-    iters = ndim*iters
-    for _ in range(iters):
+    max_iters = ndim*iters
+    for _ in range(max_iters):
         grads = acq_grad(params)
         updates, opt_state = optimizer.update(grads, opt_state)
         params = optax.apply_updates(params, updates)
-        params = optax.projections.projection_hypercube(params)
+    params = optax.projections.projection_hypercube(params)
     print(f"Optax optimizer took {time.time() - start:.4f}s")
     # print(params)
     return params, acq_func(params)

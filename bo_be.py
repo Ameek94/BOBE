@@ -15,6 +15,7 @@ from jaxns import NestedSampler
 from nested_sampler import nested_sampling_jaxns, nested_sampling_Dy
 from bo_utils import input_standardize,input_unstandardize, output_standardize, output_unstandardize, plot_gp
 import logging
+from init import input_settings
 log = logging.getLogger("[BO]")
 
 
@@ -57,6 +58,15 @@ class sampler:
             final_ns_dlogz: float = 0.01,
             feedback_lvl: int = 1,
             seed: int = 0,) -> None:
+        
+        if input_file is not None:
+            set_from_file=True
+        else:
+            set_from_file = False
+        inputs = input_settings(set_from_file=set_from_file
+                                ,file=input_file
+                                ,input_dict=None)
+        self.settings = inputs.settings
         
         self.feedback = feedback_lvl
 

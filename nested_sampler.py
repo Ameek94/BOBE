@@ -133,7 +133,6 @@ def nested_sampling_jaxns(gp: saas_fbgp
                        ,maxcall: int = 1e5 # type: ignore
                        ,max_samples = 1e5
                         ,boost_maxcall: int = 1
-                        ,num_samples_equal=1000
                         ,difficult_model = False
                         ,verbose=False
                        ) -> tuple[np.ndarray,Dict]:
@@ -170,7 +169,6 @@ def nested_sampling_jaxns(gp: saas_fbgp
     samples = resample(key=jax.random.PRNGKey(0),
                     samples=results.samples,
                     log_weights=results.log_dp_mean, # type: ignore
-                    # type: ignore # check with effective sample size...
                     replace=True,) 
     
     return np.array(samples['x']), logz_dict
