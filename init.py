@@ -31,10 +31,12 @@ default_file = os.path.join(os.path.dirname(__file__),'./default.yaml')
 
 class input_settings:
 
+    settings: dict[str,Any]
+
     def __init__(self
                  ,set_from_file: bool
                  ,file: Optional[str]
-                 ,input_dict: Optional[dict[str,Any]]) -> None:
+                 ,input_dict: Optional[dict[str,Any]] = {}) -> None:
         
         with open(default_file,'r') as f:
             self.defaults = yaml.load(f,Loader=loader)
@@ -48,7 +50,7 @@ class input_settings:
                 self.settings = self.defaults
                 print("Run settings not found, reverting to defaults")
         else:
-            self.settings = input_dict
+            self.settings = input_dict # type: ignore
             
         self.set_gp_settings()
         self.set_acq_settings()

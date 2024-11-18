@@ -208,14 +208,18 @@ class saas_fbgp:
                  ,train_y
                  ,standardise_y=True
                  ,noise=1e-6
-                 ,kernel_func="rbf"
+                 ,kernel="rbf"
                  ,vmap_size=8
                  ,sample_lengthscales=None
                  ,sample_outputscales=None
-                 ,warmup_steps=256
-                 ,num_samples=256
-                 ,thinning=16
-                 ,) -> None:
+                 ,warmup_steps:int = 256
+                 ,num_samples:int = 256
+                 ,thinning:int = 16
+                 ,dense_mass: bool = True
+                 ,max_tree_depth:int = 6
+                 ,num_chains: int = 1
+                 ,min_lengthscale: float = 1e-4
+                 ,max_lengthscale: float = 1e2) -> None:
         """
         train_x: size (N x D), always in [0,1] coming from the sampler module
         train_y: size (N x 1)
@@ -239,7 +243,7 @@ class saas_fbgp:
         self.fitted = False
         self.num_samples = 0
         self.vmap_size = vmap_size # to process vmap in vmap_size batches
-        self.kernel_func = rbf_kernel if kernel_func=="rbf" else matern_kernel
+        self.kernel_func = rbf_kernel if kernel=="rbf" else matern_kernel
         
         self.numpyro_model = numpyro_model(self.train_x,self.train_y,
                                            self.kernel_func,noise = self.noise)
@@ -248,32 +252,32 @@ class saas_fbgp:
             self.samples = {}
             self.samples["kernel_length"] = sample_lengthscales
             self.samples["kernel_var"] = sample_outputscales
-            self.num_samples = len(sample_outputscales)
+            # self.num_samples = len(sample_outputscales)
             self.update_choleskys()
         
         self.warmup_steps=warmup_steps
         self.num_samples=num_samples
         self.thinning=thinning
+        self.dense_mass = dense_mass
+        self.max_tree_depth = max_tree_depth
+        self.num_chains = num_chains
     
-    def fit(self,rng_key,dense_mass=True,max_tree_depth=6,warmup_steps=256
-                ,num_samples=256,num_chains=1,progbar=True,thinning=16,verbose=False):
-        self.samples = self.numpyro_model.fit_gp_NUTS(rng_key,dense_mass=dense_mass,
-                                                   max_tree_depth=max_tree_depth,
-                                                   warmup_steps=warmup_steps,
-                                                   num_samples=num_samples,
-                                                   num_chains=num_chains,
+    def fit(self,rng_key,progbar=True,verbose=False):
+        
+        self.samples = self.numpyro_model.fit_gp_NUTS(rng_key,dense_mass=self.dense_mass,
+                                                   max_tree_depth=self.max_tree_depth,
+                                                   warmup_steps=self.warmup_steps,
+                                                   num_samples=self.num_samples,
+                                                   num_chains=self.num_chains,
                                                    progbar=progbar,
-                                                   thinning=thinning,
+                                                   thinning=self.thinning,
                                                    verbose=verbose)
         
-        self.num_samples = self.samples["kernel_length"].shape[0]
         # self.samples["kernel_length"] = jnp.clip(self.samples["kernel_length"],1e-3,1e2) # best values?
         self.fitted = True
         self.update_choleskys()
 
-    def update(self,x_new,y_new,rng_key
-               ,dense_mass=True,max_tree_depth=6,num_chains=1,progbar=True
-               ,warmup_steps=256,num_samples=256,thinning=16,verbose=False):
+    def update(self,x_new,y_new,rng_key,progbar=True,verbose=False):
         """
         Updates train_x and train_y, numpyro model and refit the GP using NUTS
         """
@@ -285,11 +289,7 @@ class saas_fbgp:
         self.train_y = (self.train_y - self.y_mean) / self.y_std
         self.numpyro_model.update(self.train_x,self.train_y)
         self.fit(rng_key=rng_key
-                 ,dense_mass=dense_mass
-                 ,max_tree_depth=max_tree_depth
-                 ,warmup_steps=self.warmup_steps
-                 ,num_samples=self.num_samples
-                 ,thinning=self.thinning
+                 ,progbar=progbar
                  ,verbose=verbose)
 
 
