@@ -75,7 +75,7 @@ def get_var_from_cho(k11_cho,k12,k22):
     var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0) # replace k22 computation with single element diagonal
     return var
     
-@jit    # @partial(jit, static_argnums=(0,)) ---- function outside class or use pytrees
+@jit   # move back to gp and use pytree
 def get_mean_from_cho(k11_cho,k12,train_y):
     mu = jnp.matmul(jnp.transpose(k12),cho_solve((k11_cho,True),train_y)) # can also store alphas
     mean = mu[:,0]  
@@ -195,8 +195,6 @@ class numpyro_model:
         samples["minus_log_prob"] = extras["potential_energy"]  # see also numpyro.infer.util.log_likelihood
         del samples["kernel_tausq"], samples["_kernel_inv_length_sq"]
         # numpyro already thins samples and keeps deterministic params
-        # samples["lengthscales"] = (samples["kernel_tausq"].unsqueeze(-1)*samples["_kernel_inv_length_sq"])
-        #print(samples["_kernel_inv_length_sq"].size(),samples["lengthscales"].size(),samples["kernel_var"].size())
         return samples
       
    def update(self,train_x,train_y):
@@ -205,17 +203,23 @@ class numpyro_model:
 
 class saas_fbgp:
 
-    def __init__(self,train_x,train_y
+    def __init__(self
+                 ,train_x
+                 ,train_y
                  ,standardise_y=True
-                 ,noise=1e-4
-                 ,kernel_func="rbf"
+                 ,noise=1e-6
+                 ,kernel="rbf"
                  ,vmap_size=8
                  ,sample_lengthscales=None
                  ,sample_outputscales=None
-                 ,warmup_steps=256
-                 ,num_samples=256
-                 ,thinning=16
-                 ,) -> None:
+                 ,warmup_steps:int = 256
+                 ,num_samples:int = 256
+                 ,thinning:int = 16
+                 ,dense_mass: bool = True
+                 ,max_tree_depth:int = 6
+                 ,num_chains: int = 1
+                 ,min_lengthscale: float = 1e-4
+                 ,max_lengthscale: float = 1e2) -> None:
         """
         train_x: size (N x D), always in [0,1] coming from the sampler module
         train_y: size (N x 1)
@@ -239,7 +243,7 @@ class saas_fbgp:
         self.fitted = False
         self.num_samples = 0
         self.vmap_size = vmap_size # to process vmap in vmap_size batches
-        self.kernel_func = rbf_kernel if kernel_func=="rbf" else matern_kernel
+        self.kernel_func = rbf_kernel if kernel=="rbf" else matern_kernel
         
         self.numpyro_model = numpyro_model(self.train_x,self.train_y,
                                            self.kernel_func,noise = self.noise)
@@ -248,29 +252,32 @@ class saas_fbgp:
             self.samples = {}
             self.samples["kernel_length"] = sample_lengthscales
             self.samples["kernel_var"] = sample_outputscales
-            self.num_samples = len(sample_outputscales)
+            # self.num_samples = len(sample_outputscales)
             self.update_choleskys()
         
         self.warmup_steps=warmup_steps
         self.num_samples=num_samples
         self.thinning=thinning
+        self.dense_mass = dense_mass
+        self.max_tree_depth = max_tree_depth
+        self.num_chains = num_chains
     
-    def fit(self,rng_key,dense_mass=True,max_tree_depth=6,warmup_steps=256
-                ,num_samples=256,num_chains=1,progbar=True,thinning=16,verbose=False):
-        self.samples = self.numpyro_model.fit_gp_NUTS(rng_key,dense_mass=dense_mass,
-                                                   max_tree_depth=max_tree_depth,
-                                                   warmup_steps=warmup_steps,
-                                                   num_samples=num_samples,
-                                                   num_chains=num_chains,
+    def fit(self,rng_key,progbar=True,verbose=False):
+        
+        self.samples = self.numpyro_model.fit_gp_NUTS(rng_key,dense_mass=self.dense_mass,
+                                                   max_tree_depth=self.max_tree_depth,
+                                                   warmup_steps=self.warmup_steps,
+                                                   num_samples=self.num_samples,
+                                                   num_chains=self.num_chains,
                                                    progbar=progbar,
-                                                   thinning=thinning,
+                                                   thinning=self.thinning,
                                                    verbose=verbose)
-        self.num_samples = self.samples["kernel_length"].shape[0]
+        
         # self.samples["kernel_length"] = jnp.clip(self.samples["kernel_length"],1e-3,1e2) # best values?
         self.fitted = True
         self.update_choleskys()
 
-    def update(self,x_new,y_new,rng_key,warmup_steps=256,num_samples=128,thinning=8,verbose=False):
+    def update(self,x_new,y_new,rng_key,progbar=True,verbose=False):
         """
         Updates train_x and train_y, numpyro model and refit the GP using NUTS
         """
@@ -281,10 +288,8 @@ class saas_fbgp:
         self.y_std = jnp.std(self.train_y,axis=-2)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
         self.numpyro_model.update(self.train_x,self.train_y)
-        self.fit(rng_key
-                 ,warmup_steps=self.warmup_steps
-                 ,num_samples=self.num_samples
-                 ,thinning=self.thinning
+        self.fit(rng_key=rng_key
+                 ,progbar=progbar
                  ,verbose=verbose)
 
 

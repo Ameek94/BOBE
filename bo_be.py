@@ -9,29 +9,44 @@ import time
 import jax
 import jax.numpy as jnp
 from jax import random,vmap, grad
-from acquisition import EI, WIPV, optim_bobyqa, optim_scipy_bh, optimize_acq
+from acquisition import EI, WIPV, Acquisition, optim_bobyqa, optim_scipy_bh, optimize_acq
 from scipy.stats import qmc
 from jaxns import NestedSampler
 from nested_sampler import nested_sampling_jaxns, nested_sampling_Dy
 from bo_utils import input_standardize,input_unstandardize, output_standardize, output_unstandardize, plot_gp
 import logging
+from init import input_settings
 log = logging.getLogger("[BO]")
-
+np.set_printoptions(precision=4,suppress=False,floatmode='fixed')
+jnp.set_printoptions(precision=4,suppress=False,floatmode='fixed')
 
 # todo
 # 1. save and resume
 # 2. initialize everything from input yaml file and clean up this module
 # 3. ?
 
-def test_function(x):
-    return -0.5*jnp.sum((x-0.5)**2/0.04,axis=-1,keepdims=True)
-
 class sampler:
 
+    # BO settings
+    max_steps: int
+    acq_goal: float
+    acq_batch_size: int
+    feedback_lvl: int
+    init_strat: str
+    ninit: int
+    gpfit_step: int
+    save: bool
+    save_file: str
+    save_step: int
+    ns_step: int
+    seed: int
+    Acq: Acquisition
+    gp: saas_fbgp
+
     def __init__(self,
-            ndim = None,
-            input_file: Optional[str] = None,
-            cobaya_model = False,
+            ndim: Optional[int] = None,
+            settings_file: Optional[str] = None,
+            cobaya_model = True,
             cobaya_start: int = 8,
             cobaya_input_file: Optional[str] = None,
             resume_from_file=False,
@@ -40,43 +55,27 @@ class sampler:
             param_list: Optional[List] = None,
             param_bounds: Optional[List] = None, # shape 2 x D
             param_labels: Optional[List] = None,
-            gp_kwargs: dict[str,Any] = {'kernel_func':"rbf", 'vmap_size': 8},
-            noise: float = 1e-8,
-            gpfit_step: int = 1, 
-            nstart: int = 4,
-            max_steps: int = 4,
-            acq_strat: Optional[str] = 'WIPV',
-            acq_goal: float = 1e-6, # currently arbitrary...
-            save: Optional[bool] = True,
-            save_step: int = 5,
-            save_file: str = 'run_data',
-            nested_sampler: str = "jaxns", #jaxns 
-            ns_step: int = 1, 
-            mc_points_size: int = 16,
-            nested_sampler_kwargs: Optional[dict] = None,
-            final_ns_dlogz: float = 0.01,
             feedback_lvl: int = 1,
             seed: int = 0,) -> None:
         
-        self.feedback = feedback_lvl
+        # input file with all settings
+        if settings_file is not None:
+            set_from_file=True
+        else:
+            set_from_file = False
+        inputs = input_settings(set_from_file=set_from_file
+                                ,file=settings_file
+                                ,input_dict=None)
+        self.settings = inputs.settings
+        log.info(" Loaded input settings")
 
-        self.max_steps = max_steps
-        self.final_dlogz = final_ns_dlogz # the precision for the final run of the nested sampler
-        self.nested_sampler_kwargs = nested_sampler_kwargs # not used yet
-        self.ns_step = ns_step
-        self.curr_step = 0
-        self.gpfit_step = gpfit_step
-        self.acq_goal  = acq_goal
-        self.acq_val = 1e100
-        self.num_step = 0
-        self.save_step = save_step
-        self.save = save
-        self.save_file = save_file
-        self.mc_points_size = mc_points_size
+        # initialize BO settings
+        self.init_run_settings()
 
+        # then initialize the model, params, bounds
         if cobaya_model:
             points, lls = self._cobaya_init(cobaya_input_file,cobaya_start=cobaya_start) # type: ignore
-        else:
+        else: # for external model, to clean up
             assert loglike is not None
             self.logp = functools.partial(self._ext_logp,loglike=loglike) # assuming loglike returns N x 1 shape for input N x d, eventually add option to define loglike model in external file
             self.param_list = param_list if param_list is not None else ['x_%i'%(i+1) for i in range(ndim)] # type: ignore
@@ -85,10 +84,15 @@ class sampler:
         self.ndim = len(self.param_list)
         self.bounds_dict = dict(zip(self.param_list,self.param_bounds.T)) # type: ignore
         log.info(f" Running the sampler with the following params {self.param_list}")
-        log.info(f" Parameter bounds \n{self.param_bounds.T}")
-        log.info(f" Parameter labels \n{self.param_labels}")
+        log.info(f" Parameter lower bounds = {dict(zip(self.param_list,self.param_bounds[0]))}")
+        log.info(f" Parameter upper bounds = {dict(zip(self.param_list,self.param_bounds[1]))}")
+        log.info(f" Parameter labels  = {self.param_labels}")
+        self.feedback = feedback_lvl # unused for now
 
-        self.noise = noise
+        # set up gp
+        rng_key, _ = random.split(random.PRNGKey(seed), 2)
+        self.gp_method = self.settings["GP"]["method"]
+        self.gp_settings = self.settings["GP"][self.gp_method]
         if resume_from_file:
             assert resume_file is not None
             with np.load(resume_file) as run_data:
@@ -97,79 +101,87 @@ class sampler:
                 self.param_bounds = run_data['param_bounds']
                 lengthscales = jnp.array(run_data["lengthscales"])
                 outputscales = jnp.array(run_data["outputscales"])
-            self.gp = saas_fbgp(self.train_x,self.train_y,noise=self.noise,**gp_kwargs,sample_lengthscales=lengthscales,sample_outputscales=outputscales) 
+            self.gp = saas_fbgp(self.train_x,self.train_y,
+                                sample_lengthscales=lengthscales,sample_outputscales=outputscales,
+                                **self.gp_settings) 
             log.info(f"Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
         else:
-            self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(nstart)
-            print(self.train_x)
+            self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(self.ninit)
             self.train_y = self.logp(self.train_x)
-            print(self.train_y)
             if cobaya_model:
                 for pt,ll in zip(points,lls): 
-                    print("adding cobaya points")
-                    print(dict(zip(self.param_list,pt)))
-                    pt = input_standardize(np.reshape(pt,(1,self.ndim)),self.param_bounds)
-                    if pt not in self.train_x:
-                        print(pt,ll)
-                        self.train_x = np.concatenate([self.train_x,pt])
+                    pt_unit = input_standardize(np.reshape(pt,(1,self.ndim)),self.param_bounds)
+                    if pt_unit not in self.train_x:
+                        log.info(" Adding cobaya point")
+                        log.info("".join(f" {key} = {val:.4f}, " for key,val in dict(zip(self.param_list,pt)).items()) )
+                        self.train_x = np.concatenate([self.train_x,pt_unit])
                         self.train_y = np.concatenate([self.train_y,np.atleast_2d(ll)])
             log.info(f" Initial loglikes \n{self.train_y}")
             log.info(f" Sampler will start with {len(self.train_y)} points and run for a maximum of {self.max_steps} steps")
-            self.gp = saas_fbgp(self.train_x,self.train_y,noise=self.noise,**gp_kwargs) 
-            rng_key, _ = random.split(random.PRNGKey(seed), 2)
-            self.gp.fit(rng_key,warmup_steps=512,num_samples=512,thinning=16,verbose=False) # input settings
+            self.gp = saas_fbgp(self.train_x,self.train_y,
+                                **self.gp_settings)             
+            self.gp.fit(rng_key)
+
+        # once GP is initialized, we can now initialize the acquisition function and its optimizers
+        self.init_aquisition(rng_key)
+
+        # need to properly set up the nested sampler with the input settings
+
+        # testrun
+        # samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.1,difficult_model=False
+        #                                             ,logz_std=True,batch_size=50)
+        # log.info(f" Initial LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
 
     def run(self):
         """
-        Run the BO loop until convergence or max steps reached. Here all x are standarised to [0,1]
-        """
-        start = time.time()
+        Run the BO loop until convergence or max steps reached. 
+        """        
+        num_step = 0
         self.converged = False
+        start = time.time()
         while not self.converged:
-            seed = self.num_step
+            seed = num_step
             rng_key, _ = random.split(random.PRNGKey(seed), 2)
-            # mc_points = self.get_mc_points(self.num_step)
-            # acq_func = WIPV(self.gp,mc_points)
-            # grad_fn = grad(acq_func)
-            x0 =  np.random.uniform(0,1,self.ndim) # get better initial point
-            pt, val  = optimize_acq(rng_key=rng_key,
-                                    gp=self.gp,
-                                    x0=x0,
-                                    ndim=self.ndim,
-                                    step=self.num_step,
-                                    )
-            #optim_bobyqa(acq_func,x0,ndim=self.ndim) 
-            #optim_scipy_bh(acq_func,x0=x0,stepsize=1/5,ndim=self.ndim
-                                      #niter=20,minimizer_kwargs={'jac': grad_fn, 'bounds': self.ndim*[(0,1)] })
+
+            # get new point from acquisition function optimization
+            x0 =  np.random.uniform(0,1,self.acq_batch_size*self.ndim) # get better initial point
+            pt,val = self.acq.optimize(x0)
             self.acq_val = abs(val)
             next_x = jnp.atleast_2d(pt)
-            log.info(f" Next point at x = {self._print_point(pt)} \nwith acquisition function value = {val:.4e}")
-            next_y = self.logp(next_x)
+            log.info(f" Next point at x = {self._print_point(pt)} with acquisition function value = {val:.4e}")
             max_idx = jnp.argmax(self.train_y)
+            # update gp with new point
+            next_y = self.logp(next_x)
             self.train_x = jnp.concatenate([self.train_x,next_x])
             self.train_y = jnp.concatenate([self.train_y,next_y])
-            log.info(f" Loglike at new point = {next_y}, \ncurrent best loglike = {self.train_y[max_idx]} at \n{self._print_point(self.train_x[max_idx])} ")
-            if (self.num_step%5==0 and self.num_step>0):
-                jax.clear_caches() # hack for managing memory, is there a better way?
-            if (self.num_step%self.gpfit_step==0):
-                self.gp.update(next_x,next_y,rng_key,warmup_steps=512,num_samples=512,thinning=16,verbose=False)
+            if (num_step%5==0 and num_step>0):
+                jax.clear_caches() # hack for managing memory until I implement GP pytree 
+            log.info(f" Current best loglike = {self.train_y[max_idx]} at {self._print_point(self.train_x[max_idx])} \nLoglike at new point = {next_y}")
+            if (num_step%self.gpfit_step==0):
+                self.gp.update(next_x,next_y,rng_key) # broke with my updates, need to fix
+                self.acq.update_mc_points(rng_key)
             else:
                 self.gp.quick_update(next_x,next_y)
-            log.info(f" ----------------------Step {self.num_step+1} complete----------------------\n")
-            self.num_step+=1
-            self.converged = self._check_converged()
-            if ((self.num_step%self.save_step==0 and self.save) or self.converged):
-                log.info(f"Run training data and hyperparameters saved at step {self.num_step}")
-                self.gp.save(self.save_file)
-        samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.01,difficult_model=True)
-        log.info(f" Final LogZ info :"+"".join(f"{key}: = {value:.4f}, " for key, value in logz_dict.items()))
-        if self.converged:
-            log.info(" Run Completed")
-        log.info(f" BO took {time.time() - start:.2f}s")
+            log.info(f" ----------------------Step {num_step+1} complete----------------------\n")
+            
+            # check convergence
+            num_step+=1
+            self.converged = self._check_converged(num_step)
 
-    def _check_converged(self):
+            # save if needed
+            if ((num_step%self.save_step==0 and self.save) or self.converged):
+                self.gp.save(self.save_file)
+                log.info(f" Run training data and hyperparameters saved at step {num_step}")
+
+        samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.01,difficult_model=True)
+        log.info(f" Final LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
+        log.info(" Run Completed")
+        log.info(f" BO took {time.time() - start:.2f}s")
+        
+
+    def _check_converged(self,num_step):
         acq = (self.acq_val < self.acq_goal)
-        steps = (self.num_step >= self.max_steps)
+        steps = (num_step >= self.max_steps)
         if acq:
             log.info(" Acquisition goal reached")
         if steps:
@@ -219,18 +231,30 @@ class sampler:
         x = input_unstandardize(x,self.param_bounds)
         return dict(zip(self.param_list,x))
 
-    def get_mc_points(self,step):
-        if (step%self.ns_step==0):
-        #     samples, logz_dict = samples, logz_dict = nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.1)
-        #     log.info(f" LogZ info :"+"".join(f"{key}: = {value:.4f}, " for key, value in logz_dict.items()))                
-        #     size = len(samples)
-        #     mc_points = samples[::int(size/self.mc_points_size),:]        
-            seed = step
-            rng_key, _ = random.split(random.PRNGKey(seed), 2)
-            samples = sample_GP_NUTS(gp = self.gp,rng_key=rng_key,warmup_steps=512,num_samples=512,thinning=8)
-        # size = len(samples)
-        # mc_points = samples[::int(size/self.mc_points_size),:]                
-        return samples
+    def init_run_settings(self):
+        method = self.settings['BO']['method']
+        for key,val in self.settings['BO'][method].items():
+            setattr(self,key,val)
 
 
-
+    def init_aquisition(self,rng_key):
+        # acqs = {EI: "EI", WIPV: "WIPV"}
+        acq_method = self.settings['ACQ']['method']
+        acq_settings = self.settings['ACQ'][acq_method]
+        optimizer_settings = self.settings['optimizer']
+        if acq_method=="WIPV":
+            self.acq = WIPV(gp=self.gp
+                            ,rng_key=rng_key
+                            ,ndim=self.ndim
+                            ,batch_size=self.acq_batch_size
+                            ,optimizer_settings=optimizer_settings
+                            ,mcmc_kwargs=acq_settings)
+        elif acq_method=="EI":
+             self.acq = EI(gp=self.gp
+                            ,rng_key=rng_key
+                            ,ndim=self.ndim
+                            ,batch_size=self.acq_batch_size
+                            ,optimizer_settings=optimizer_settings
+                            ,ei_kwargs=acq_settings)       
+        else:
+            raise ValueError('Not a valid acquisition function')    

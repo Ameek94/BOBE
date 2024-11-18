@@ -6,7 +6,8 @@ from numpyro.util import enable_x64
 import jax.numpy as jnp
 import jax.random as random
 import numpy as np
-from jax import jit, vmap, grad
+from jax import jit, vmap, grad, value_and_grad
+from jax.lax import scan
 from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 from jax.scipy.stats import norm
 from numpyro.diagnostics import summary
@@ -24,10 +25,7 @@ import optax, pybobyqa
 import logging
 log = logging.getLogger("[AQ]")
 
-
-
-# Implement optimizer call within the acquisition class?
-
+import matplotlib.pyplot as plt
 
 #------------------The acqusition functions-------------------------
 
@@ -39,13 +37,31 @@ def Z_EI(mean, sigma, best_f, zeta,):
 
 class Acquisition():
 
-    def __init__(self,gp: saas_fbgp,) -> None:
+    def __init__(self
+                 ,gp: saas_fbgp
+                 ,ndim: int
+                 ,optimizer_settings: dict[str,Any]
+                 ,name = "") -> None:
         self.gp = gp
+        self.ndim = ndim
+        self.optimizer_method = optimizer_settings['method']
+        self.optimizer_kwargs = optimizer_settings[self.optimizer_method]
+        self.name = name
+        log.info(f" Initialized {name} Acquisition function")
+        log.info(f" Acquisition optimizer is {self.optimizer_method} with settings {self.optimizer_kwargs}")
         pass
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
+        raise NotImplementedError
+
+    def optimize(self,x0,):
+        acq_func = self.__call__
+        optimizer = optimzer_functions[self.optimizer_method]
+        pt, val = optimizer(acq_func,x0,self.ndim,**self.optimizer_kwargs)
+        return pt, val
+    
+    def update_mc_points(self,rng_key):
         pass
-        
 
 class EI(Acquisition):
     """
@@ -54,12 +70,15 @@ class EI(Acquisition):
 
     def __init__(self,
                  gp: saas_fbgp,
-                 zeta: float = 0.,
+                 rng_key,               
+                 ndim: int,
+                 optimizer_settings: dict[str,Any],
+                 ei_kwargs: dict[str,Any] = {'zeta': 0.},
                  batch_size=1, # EI batch_size must always be 1
                  ) -> None:
-        super().__init__(gp)
+        super().__init__(gp,ndim,optimizer_settings,name="EI")
         self.best_f =  gp.train_y.max() #best_f
-        self.zeta = zeta
+        self.zeta = ei_kwargs['zeta']
 
     def __call__(self, X) -> Any:
         mu, var = self.gp.predict(X)
@@ -72,8 +91,43 @@ class EI(Acquisition):
         return np.reshape(-ei,()) # ei # can we make it directly a scalar without reshape
         # -ve so that we can minimize it
 
-# implement the more stable logEI 
+# todo implement the more stable logEI 
+# stable implementation of logEI from Ament et al. (2023) arxiv: 2310.20708 as implemented in BoTorch: https://github.com/pytorch/botorch/blob/main/botorch/acquisition/analytic.py#L355
+# class logEI(EI):
+
+#     def __init__(self, 
+#                  gp: saas_fbgp, 
+#                  rng_key, ndim: int, 
+#                  optimizer_settings: dict[str, Any], 
+#                  ei_kwargs: dict[str, Any] = { 'zeta': 0. }
+#                  , batch_size=1) -> None:
+#         super().__init__(gp, rng_key, ndim, optimizer_settings, ei_kwargs, batch_size)
+
+#     def __call__(self, X) -> Any:
+#         mu, var = self.gp.predict(X)
+#         mu  = mu.mean(axis=0)
+#         var = var.mean(axis=0)
+#         sigma = jnp.sqrt(var)
+#         u = Z_EI(mu, sigma, self.best_f,self.zeta)
+#         log_ei = jnp.log(sigma) + self.log_ei_helper(u)
+#         return jnp.reshape(-log_ei,())
     
+#     def log_ei_helper(self,u):
+#         bound = -1
+#         u_upper = jnp.where(u<bound,bound,u) # u.masked_fill(u < bound, bound)  # mask u to avoid NaNs in gradients
+#         log_ei_upper =  jnp.log(u_upper*norm.cdf(u_upper) + norm.pdf(u_upper)) # type: ignore
+#         neg_inv_sqrt_eps = -1e6 
+#         u_lower = jnp.where(u > bound, bound, u)
+#         u_eps = jnp.where(u < neg_inv_sqrt_eps, neg_inv_sqrt_eps, u_lower) # type: ignore
+#         w = _log_abs_u_Phi_div_phi(u_eps)
+#         log_ei_lower = log_phi(u) + (
+#             jnp.where(
+#                 u > neg_inv_sqrt_eps,
+#                 log1mexp(w),
+#                 -2 * jnp.log(jnp.abs(u_lower)), # type: ignore
+#                 )
+#             )
+#         return jnp.where(u > bound, log_ei_upper, log_ei_lower)
 
 class WIPV(Acquisition):
     """
@@ -81,11 +135,18 @@ class WIPV(Acquisition):
     Can do joint optimization here with batch size > 1
     """
 
-    def __init__(self, gp: saas_fbgp,rng_key
-                 ,batch_size=1
-                 ,wipv_kwargs: dict[str,Any] = {}) -> None:
-        super().__init__(gp)
-        self.mc_points = sample_GP_NUTS(gp,rng_key,**wipv_kwargs)
+    def __init__(self
+                ,gp: saas_fbgp
+                ,rng_key
+                ,ndim: int
+                ,batch_size: int
+                ,optimizer_settings: dict[str,Any]
+                ,mcmc_kwargs: dict[str,Any] = {'num_samples': 512, 'warmup_steps': 512, 'thinning': 16, 'progress_bar': True, 'verbose': False}
+                )-> None:
+        super().__init__(gp,ndim,optimizer_settings,name="WIPV")
+        self.mcmc_kwargs = mcmc_kwargs
+        self.mc_points = sample_GP_NUTS(gp,rng_key,**mcmc_kwargs)
+        log.info(" MC points generated")
         self.batch_size = batch_size
         self.ndim = self.gp.train_x.shape[1]
     
@@ -98,15 +159,19 @@ class WIPV(Acquisition):
         var = self.gp.fantasy_var_fb(X,self.mc_points)
         var = var.mean(axis=-1)
         var = var.mean(axis=-1)
-        return var #np.reshape(var,()) #*mu
+        return var
         # +ve can be directly minimized
+
+    def update_mc_points(self,rng_key):
+        self.mc_points = sample_GP_NUTS(self.gp,rng_key,**self.mcmc_kwargs)
+        log.info(" Updated acquisition MC points")
 
 
 
 #------------------Optimizers for the acqusition functions-------------------------
 
 # effectively a local optimizer with multiple restarts
-def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs,stepsize=1/4,niter=15):
+def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs={},stepsize=1/4,niter=15):
     start = time.time()
     acq_grad = grad(acq_func)
     # ideally stepsize should be ~ max(delta,distance between sampled points)
@@ -124,21 +189,41 @@ def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs,stepsize=1/4,niter=15):
 
 # add here jax based optax or optuna optimizers
 
-def optim_optax(acq_func,x0,ndim,iters=100,start_learning_rate=1e-2): # needs more work
-    acq_grad = grad(acq_func)
+def optim_optax(acq_func,x0: np.ndarray,ndim,steps=100,start_learning_rate=1e-2): # needs more work
     optimizer = optax.adam(start_learning_rate)
     params = jnp.array(x0)
     opt_state = optimizer.init(params)
     start = time.time()
-    iters = ndim*iters
-    for _ in range(iters):
-        grads = acq_grad(params)
-        updates, opt_state = optimizer.update(grads, opt_state)
+    max_iters = ndim*steps
+
+    def step(carry,xs):
+        params, opt_state = carry
+        # grads = acq_grad(params)
+        fval, gradval = value_and_grad(acq_func)(params)
+        updates, opt_state = optimizer.update(gradval, opt_state)
         params = optax.apply_updates(params, updates)
         params = optax.projections.projection_hypercube(params)
+        carry = params, opt_state
+        return carry, fval
+
+    (params, _ ), fvals = scan(step,(params,opt_state),length=max_iters) # scan is much faster but more complicated to terminate early
     print(f"Optax optimizer took {time.time() - start:.4f}s")
-    # print(params)
-    return params, acq_func(params)
+
+    # just for testing
+    # plt.semilogy(np.arange(max_iters),fvals)
+    # plt.xlabel(r'Step')
+    # plt.ylabel(r'Acq val')
+    # plt.tight_layout()
+    # plt.show()
+
+    # acq_grad = grad(acq_func)
+    # for _ in range(max_iters):
+    #     grads = acq_grad(params)
+    #     updates, opt_state = optimizer.update(grads, opt_state)
+    #     params = optax.apply_updates(params, updates)
+    #     params = optax.projections.projection_hypercube(params)
+
+    return params, fvals[-1] #acq_func(params)
 
 # some gradient free optimizers (e.g. from iminuit or pybobyqa)
 
@@ -148,7 +233,8 @@ def optim_cma(acq_func,x0,):
 def optim_bobyqa(acq_func
                  ,x0: np.ndarray
                  ,ndim: int = 1
-                 ,batch_size: int = 1):
+                 ,batch_size: int = 1
+                 ,seek_global_minimum: bool = False):
     # set up bounds for the solver
 
     upper = np.ones(ndim*batch_size)
@@ -157,33 +243,33 @@ def optim_bobyqa(acq_func
     start = time.time()
     x0 = np.atleast_1d(x0) # tweak for batched acquisition
     soln = pybobyqa.solve(acq_func,x0,bounds=(lower,upper)
-                          ,seek_global_minimum=True,print_progress=False,do_logging=False)
+                          ,seek_global_minimum=seek_global_minimum,print_progress=False,do_logging=False)
 
     print(f"Py-Bobyqa took {time.time()-start:.4f} s")
     return soln.x, soln.f
 
 #------------------Optimizing the acquisition-------------------------
 
-optimzer_functions = {"scipy": optim_scipy_bh, "optax": optim_optax, "bobyqa": optim_bobyqa, "cma": optim_cma}
+optimzer_functions = {"scipy_bh": optim_scipy_bh, "optax": optim_optax, "bobyqa": optim_bobyqa, "cma": optim_cma}
 
-def optimize_acq(rng_key
-                 ,gp: saas_fbgp
-                 ,x0: np.ndarray
-                 ,ndim: int
-                 ,step: int
-                 ,acquistion: str = "WIPV"
-                 ,method: str = "bobyqa"
-                 ,acq_kwargs: dict[str,Any] = {}
-                 ,optimizer_kwargs: dict[str,Any] = {}
-                 ):
+# def optimize_acq(rng_key
+#                  ,gp: saas_fbgp
+#                  ,x0: np.ndarray
+#                  ,ndim: int
+#                  ,step: int
+#                  ,acquistion: str = "WIPV"
+#                  ,method: str = "bobyqa"
+#                  ,acq_kwargs: dict[str,Any] = {}
+#                  ,optimizer_kwargs: dict[str,Any] = {}
+#                  ):
     
-    if acquistion=="WIPV":
-        acq_func = WIPV(gp,rng_key,**acq_kwargs)
-    else:
-        acq_func = EI(gp,**acq_kwargs)
+#     if acquistion=="WIPV":
+#         acq_func = WIPV(gp,rng_key,**acq_kwargs)
+#     else:
+#         acq_func = EI(gp,**acq_kwargs)
 
-    optimizer = optimzer_functions[method]
+#     optimizer = optimzer_functions[method]
 
-    pt, val = optimizer(acq_func,x0,ndim,**optimizer_kwargs)
+#     pt, val = optimizer(acq_func,x0,ndim,**optimizer_kwargs)
 
-    return pt, val
+#     return pt, val

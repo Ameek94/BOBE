@@ -1,6 +1,10 @@
 # Initialization methods for the samplers and optimizers using inputs from yaml
 #  Default settings in default.yaml
 
+# needs some cleanup
+
+import os
+from typing import Any, Optional
 import yaml
 from yaml import load, dump
 import re
@@ -23,18 +27,30 @@ loader.add_implicit_resolver(
     list(u'-+0123456789.'))
 
 
+default_file = os.path.join(os.path.dirname(__file__),'./default.yaml')
+
 class input_settings:
 
-    def __init__(self,file) -> None:
+    settings: dict[str,Any]
+
+    def __init__(self
+                 ,set_from_file: bool
+                 ,file: Optional[str]
+                 ,input_dict: Optional[dict[str,Any]] = {}) -> None:
         
-        with open('./default.yaml','r') as f:
+        with open(default_file,'r') as f:
             self.defaults = yaml.load(f,Loader=loader)
-        try:
-            with open(file,'r') as f:
-                self.settings = yaml.load(f,Loader=loader) 
-        except FileNotFoundError:
-            self.settings = self.defaults
-            print("Run settings not found, reverting to defaults")
+        
+        if set_from_file:
+            try:
+                assert file is not None
+                with open(file,'r') as f:
+                    self.settings = yaml.load(f,Loader=loader) 
+            except FileNotFoundError:
+                self.settings = self.defaults
+                print("Run settings not found, reverting to defaults")
+        else:
+            self.settings = input_dict # type: ignore
             
         self.set_gp_settings()
         self.set_acq_settings()
@@ -42,30 +58,36 @@ class input_settings:
         self.set_optimizer_settings()
         self.set_bo_settings()
 
+        self.settings = {}
+        self.settings["BO"] = self.bo_settings
+        self.settings["NS"] = self.ns_settings
+        self.settings["GP"] = self.gp_settings
+        self.settings["ACQ"] = self.acq_settings
+        self.settings["optimizer"] = self.optimzer_settings
+
     def set_gp_settings(self):
         method = self.set_method("GP")
-        self.gp_settings = {}
+        self.gp_settings = {'method': method}
         self.gp_settings[method] = self.set_from_file("GP",method)
 
     def set_ns_settings(self):
         method = self.set_method("NS")
-        print(method)
-        self.ns_settings = {}
+        self.ns_settings = {'method': method}
         self.ns_settings[method] = self.set_from_file("NS",method)
 
     def set_acq_settings(self):
         method = self.set_method("ACQ")
-        self.acq_settings = {}
+        self.acq_settings = {'method': method}
         self.acq_settings[method] = self.set_from_file("ACQ",method)
     
     def set_optimizer_settings(self):
         method = self.set_method("optimizer")
-        self.optimzer_settings = {}
+        self.optimzer_settings = {'method': method}
         self.optimzer_settings[method] = self.set_from_file("optimizer",method)
 
     def set_bo_settings(self):
         method = self.set_method("BO")
-        self.bo_settings = {}
+        self.bo_settings = {'method': method}
         self.bo_settings[method] = self.set_from_file("BO",method)
     
     def set_method(self
