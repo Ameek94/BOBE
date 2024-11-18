@@ -11,7 +11,7 @@ config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
 from JaxFBGP import saas_fbgp
-
+from GPUtils import split_vmap
 import functools
 
 try:
@@ -130,10 +130,12 @@ def nested_sampling_jaxns(gp: saas_fbgp
                           ,ndim: int = 1
                           ,dlogz: float = 0.1
                           ,logz_std: bool = True
-                          ,maxcall: int = 1e5 # type: ignore
+                          ,maxcall: int = 1e4 # type: ignore
+                          ,post_prior_ratio: int = 1 #Ratio of posterior density to prior volume [1, 2]
                           ,boost_maxcall: int = 1
+                          ,boost_livepoints: int = 100
                           ,num_samples_equal=1000
-                          ,difficult_model = True) -> tuple[np.ndarray,Dict]:
+                          ,difficult_model = False) -> tuple[np.ndarray,Dict]:
         
     def log_likelihood(x):
         mu, var = gp.posterior(x,single=True,unstandardize=True) # vmap(f,in_axes=(0),out_axes=(0,0))(x)
@@ -145,54 +147,75 @@ def nested_sampling_jaxns(gp: saas_fbgp
         return x
 
 
-    def compute_integrals_jax(logl=None, logvol=None, reweight=None):
-        assert logl is not None
-        assert logvol is not None
-        loglstar_pad = jnp.concatenate([jnp.array([-1.e300]), logl])
-        dlogvol = jnp.diff(logvol, prepend=0)
-        logdvol = logvol - dlogvol + jnp.log1p(-jnp.exp(dlogvol))
-        logdvol2 = logdvol + jnp.log(0.5)
-        dlogvol = -jnp.diff(logvol, prepend=0)
-        saved_logwt = jnp.logaddexp(loglstar_pad[1:], loglstar_pad[:-1]) + logdvol2
-        if reweight is not None:
-            saved_logwt = saved_logwt + reweight
-        saved_logz = jnp.logaddexp.accumulate(saved_logwt)
-        return saved_logz
-
-
     model_mean = Model(prior_model=prior_model,
               log_likelihood=log_likelihood)
     
-    term_cond = TerminationCondition(evidence_uncert=1e-2) #dlogZ=(1 + 1e-6),
+    term_cond = TerminationCondition(evidence_uncert=1e-2) 
+
+    if ndim < 6:
+        num_live_points = np.sqrt(ndim)/(0.01**2)*boost_livepoints 
+        max_samples = np.sqrt(ndim)/(0.01**2)*(post_prior_ratio*ndim)
+    elif ndim < 10 and ndim >= 6:
+        num_live_points =  ndim/(0.01**2)*boost_livepoints
+        max_samples = ndim/(0.01**2)*(post_prior_ratio*ndim)
+    if ndim >=10:
+        num_live_points = (ndim**(3/2))/(0.01**2)*boost_livepoints
+        max_samples = (ndim**(3/2))/(0.01**2)*(post_prior_ratio*ndim)
+    
     
     start = time.time()
     ns_mean = NestedSampler(model=model_mean,
-                        max_samples=maxcall*boost_maxcall,
-                        parameter_estimation=True,
-                        difficult_model=difficult_model,)
-                        #num_parallel_workers=10)
+                            parameter_estimation=True,
+                            difficult_model=difficult_model,
+                            num_live_points=num_live_points,
+                            max_samples=max_samples)
      # Run the sampler
     termination_reason, state = ns_mean(jax.random.PRNGKey(42),term_cond=term_cond)
     # Get the results
     results = ns_mean.to_results(termination_reason=termination_reason, state=state)
-
+    #ns_mean.summary(results)
     ns_mean.plot_cornerplot(results)
     
     mean = results.log_Z_mean
     logz_err = results.log_Z_uncert
-
-    # Upper and Lower bound calculation
     logvol = results.log_X_mean
 
-    logl_var = jnp.sqrt(gp.posterior(jnp.array(results.samples['x']), single=True)[1]) 
-    
-    logl_upper = results.log_L_samples + logl_var
 
-    logl_lower = results.log_L_samples - logl_var
+    '''vmap_func = lambda x: gp.posterior(x, single=True)
+    _, logl_var = split_vmap(vmap_func, results.samples['x'], 10)'''
+    
+    ### Attempt to use vmap for var and mean ###
+    num_inputs = len(results.samples['x'])
+    batch_size = 1000
+    num_batches = (num_inputs + batch_size - 1 ) // batch_size
+    input_arrays = (results.samples['x'],)
+    batch_idxs = [jnp.arange( i*batch_size, min( (i+1)*batch_size,num_inputs  )) for i in range(num_batches)]
+    f = lambda x: gp.posterior(x, single=True)
+    res = [f(*tuple([arr[idx] for arr in input_arrays])) for idx in batch_idxs]
+    nres = len(res[0])
+    vmap_results = tuple(jnp.concatenate([x[i] for x in res]) for i in range(nres))
+    _, logl_var = vmap_results
+    
+    '''# Upper and Lower bound calculation
+    logvol = results.log_X_mean
+    #log.info("Getting variance at live points")
+    vmap_func = lambda x :  gp.posterior(x, single=True)   
+    vmap_arrays = ([results.samples['x']])
+    vmap_size = 8
+
+    _, logl_var = split_vmap(vmap_func,vmap_arrays,batch_size=vmap_size)'''
 
     
-    upper =  compute_integrals(logl=jnp.array(logl_upper), logvol=logvol)[-1]
-    lower = compute_integrals(logl=jnp.array(logl_lower), logvol=logvol)[-1]
+    logl_std = jnp.sqrt(logl_var)
+
+    #log.info("Calculating upper and lower logl values")
+    logl_upper = results.log_L_samples + logl_std
+    
+    logl_lower = results.log_L_samples - logl_std
+    #log.info("Calculating upper and lower integral bounds")
+    
+    upper =  compute_integrals(logl=np.array(logl_upper), logvol=logvol)[-1]
+    lower = compute_integrals(logl=np.array(logl_lower), logvol=logvol)[-1]
 
     termination_reasons = ['Reached max samples',
                            'Evidence uncertainty low enough',
@@ -207,9 +230,10 @@ def nested_sampling_jaxns(gp: saas_fbgp
                             'no seed points left (consider decreasing shell_fraction)']
     
     #Log evidence estimates
-    log.info(f" Nested Sampling took {time.time() - start:.2f}s")
-    log.info(f" jaxns did {results.total_num_likelihood_evaluations} likelihood evaluations, terminated due to {termination_reasons[results.termination_reason]}")
     log.info(f" Mean LogZ: {mean}, Upper LogZ: {upper}, Lower LogZ: {lower}, Internal dLogZ: {logz_err}")
+    log.info(f" Nested Sampling took {time.time() - start:.2f}s")
+    log.info(results.termination_reason)
+    log.info(f" jaxns did {results.total_num_likelihood_evaluations} likelihood evaluations, terminated due to {termination_reasons[results.termination_reason-1]}")
     logz_dict = {'mean': mean,'upper': upper, 'lower': lower,'dlogz sampler': logz_err}
 
     #Get uniform samples for acq function

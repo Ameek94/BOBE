@@ -378,8 +378,11 @@ class saas_fbgp: #jit.ScriptModule):
         pass
 
 
-def sample_GP_NUTS(gp,rng_key,num_warmup=512,num_samples=512,progress_bar=True,thinning=2):
-
+def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True,thinning=2,verbose=False
+                   ,init_params=None):
+    """
+    Sample x using the GP mean as the logprob
+    """
     class gp_dist(numpyro.distributions.Distribution):
         support = dist.constraints.real
 
@@ -393,20 +396,25 @@ def sample_GP_NUTS(gp,rng_key,num_warmup=512,num_samples=512,progress_bar=True,t
             val, _ = gp.posterior(x,single=True,unstandardize=True)
             return val
 
-    def model():
-        x = numpyro.sample('x',numpyro.distributions.Uniform(low=jnp.zeros(gp.train_x.shape[1]),high=jnp.ones(gp.train_x.shape[1]))) # type: ignore
+    def model(train_x):
+        x = numpyro.sample('x',numpyro.distributions.Uniform
+                           (low=jnp.zeros(train_x.shape[1]),high=jnp.ones(train_x.shape[1]))) # type: ignore
         numpyro.sample('y',gp_dist(gp),obs=x)
 
     start = time.time()
     kernel = NUTS(model,dense_mass=False,
                 max_tree_depth=6)
-    mcmc = MCMC(kernel,num_warmup=num_warmup,
+    mcmc = MCMC(kernel,num_warmup=warmup_steps,
                 num_samples=num_samples,
                 num_chains=1,
                 progress_bar=progress_bar,
                 thinning=thinning,)
-    mcmc.run(rng_key,extra_fields=("potential_energy",))
-    mcmc.print_summary(exclude_deterministic=False)
-    log.info(f"MCMC took {time.time()-start:.4f} s")
-    nuts_samples = mcmc.get_samples()['x']
+                #jit_model_args=True)
+    if init_params is not None:
+        init_params = util.unconstrain_fn(model,model_args=gp.train_x,model_kwargs=None,params=init_params)
+    mcmc.run(rng_key,gp.train_x,extra_fields=("potential_energy",),init_params=init_params)
+    if verbose:
+        mcmc.print_summary(exclude_deterministic=False)
+    print(f"MCMC took {time.time()-start:.4f} s")
+    nuts_samples = mcmc.get_samples()['x'] 
     return nuts_samples

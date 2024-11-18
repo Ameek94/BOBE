@@ -3,6 +3,7 @@ import torch
 from torch import Tensor
 from botorch.utils.transforms import normalize, unnormalize
 import numpy as np
+import jax.numpy as jnp
 
 tkwargs = {"device": torch.device("cuda" if torch.cuda.is_available() else "cpu"), "dtype": torch.double}
 
@@ -19,14 +20,14 @@ def ext_logp(X, loglike, interp_logp, bounds): # logposterior for external likel
 
 def gaussian(X, dynesty=False, plot=False):
         # X is a N x DIM shaped tensor, output is N tensor
-        mean = np.array(0.5) #len(param_list)*
-        sigma = np.array(0.1) #len(param_list)*
+        mean = jnp.array(0.5) #len(param_list)*
+        sigma = jnp.array(0.1) #len(param_list)*
         if dynesty:
-            return -0.5*np.sum((X-mean)**2/sigma**2, axis=-1, keepdims=False)
+            return -0.5*jnp.sum((X-mean)**2/sigma**2, axis=-1, keepdims=False)
         elif plot:
-            return -0.5*np.sum((X-mean)**2/sigma**2, axis=-1, keepdims=False)
+            return -0.5*jnp.sum((X-mean)**2/sigma**2, axis=-1, keepdims=False)
         else:
-            return (-0.5*np.sum((X-mean)**2/sigma**2, axis=-1, keepdims=False))
+            return (-0.5*jnp.sum((X-mean)**2/sigma**2, axis=-1, keepdims=False))
         
 
 def gaussian_ring_torch(X: Tensor) -> Tensor: #Bounds: [[-1, 1]]

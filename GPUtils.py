@@ -406,10 +406,10 @@ def FBGP_prediction_plots(ax, FBGP, logp, train_X, train_Y, samples_unit, param_
     return ax
 
 def timing_plot(ax, curr_step, timing, ndim):
-    if ndim <= 2: 
+    '''if ndim <= 2: 
         row = 4
-    else:
-        row = 3
+    else:'''
+    row = 3
     ax[row, 1].plot(np.linspace(1, curr_step, curr_step), timing['Nested_Sampling'], linestyle="dotted", marker="x", label="Nested Sampling")
     ax[row, 1].plot(np.linspace(1, curr_step, curr_step), timing['Acq_Fnct'], linestyle="dotted", marker="x", label="Acqusition Function")
     ax[row, 1].plot(np.linspace(1, curr_step, curr_step), timing['Likelihood'], linestyle="dotted", marker="x", label="Likelihood Evaluation")

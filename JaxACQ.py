@@ -13,7 +13,7 @@ from numpyro.diagnostics import summary
 from numpyro.infer import MCMC, NUTS
 # from util import chunk_vmap
 from jax import config
-from JaxFBGP import saas_fbgp
+from JaxFBGP import *
 config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
@@ -73,28 +73,33 @@ class EI(Acquisition):
 # implement the more stable logEI 
     
 
-class IPV(Acquisition):
+class WIPV(Acquisition):
     """
     Integrated (mean) posterior variance over the over a set of test points (mc_points). 
     Can do joint optimization here with batch size > 1
     """
 
-    def __init__(self, gp: saas_fbgp,
-                 mc_points,batch_size=1) -> None:
+    def __init__(self, gp: saas_fbgp,rng_key
+                 ,batch_size=1
+                 ,wipv_kwargs: dict[str,Any] = {}) -> None:
         super().__init__(gp)
-        self.mc_points = mc_points
+        self.mc_points = sample_GP_NUTS(gp,rng_key,**wipv_kwargs)
         self.batch_size = batch_size
+        self.ndim = self.gp.train_x.shape[1]
     
     def __call__(self, X) -> Any:
-        X = jnp.atleast_2d(X) # new_x
+        X = jnp.reshape(X,(self.batch_size,self.ndim)) # input X is 1D array (x1_1,x1_2,...x1_d,x2_1,x2_2,...,x2_d) for d-dim x
+        # X = jnp.atleast_2d(X) # new_x
         return self.variance(X)
-
+    
     def variance(self,X):
         var = self.gp.fantasy_var_fb(X,self.mc_points)
         var = var.mean(axis=-1)
         var = var.mean(axis=-1)
         return var #np.reshape(var,()) #*mu
         # +ve can be directly minimized
+
+
 
 
 
@@ -140,29 +145,45 @@ def optim_cma(acq_func,x0,):
 
 def optim_bobyqa(acq_func
                  ,x0: np.ndarray
-                 ,dim: int = 1
+                 ,ndim: int = 1
                  ,batch_size: int = 1):
     # set up bounds for the solver
-    upper = np.ones(dim*batch_size)
+    print(batch_size)
+    upper = np.ones(ndim*batch_size)
     lower = np.zeros_like(upper)
+
     start = time.time()
-    x0 = np.atleast_1d(x0) # tweak for batched acquisition
+    #x0 = np.atleast_1d(x0) # tweak for batched acquisition
     soln = pybobyqa.solve(acq_func,x0,bounds=(lower,upper)
                           ,seek_global_minimum=True,print_progress=False,do_logging=False)
 
-    # # convert acq_func output to numpy output
-    # def wrap_acq_func(x):
-    #     with torch.no_grad():
-    #         x = np.array(x).reshape(batch_size,dim) # optimizer cannot do joint optimization but can get batched points by converting to batch_size*ndim shaped arrays
-    #         X = torch.tensor(x,**tkwargs)        
-    #         Y = -acq_func(X)
-    #         del X
-    #         y = Y.view(-1).double().numpy()
-    #         return y
-    # run the solver
-    # xs = soln.x # xs is 1D array of size dim*batch_size
-    # best_x  = np.array(xs).reshape(batch_size,dim)
-    # best_x = torch.tensor(best_x,**tkwargs)
-    # best_val = torch.tensor(soln.f,**tkwargs)
+    next_points = np.array(soln.x)
+    next_points = next_points.reshape(batch_size, ndim)
     print(f"Py-Bobyqa took {time.time()-start:.4f} s")
-    return soln.x, soln.f
+
+    
+    return next_points, soln.f
+
+optimzer_functions = {"scipy": optim_scipy_bh, "optax": optim_optax, "bobyqa": optim_bobyqa, "cma": optim_cma}
+
+def optimize_acq(rng_key
+                 ,gp: saas_fbgp
+                 ,x0: np.ndarray
+                 ,ndim: int
+                 ,step: int
+                 ,acquistion: str = "WIPV"
+                 ,method: str = "bobyqa"
+                 ,acq_kwargs: dict[str,Any] = {}
+                 ,optimizer_kwargs: dict[str,Any] = {}
+                 ):
+    
+    if acquistion=="WIPV":
+        acq_func = WIPV(gp,rng_key,**acq_kwargs)
+    else:
+        acq_func = EI(gp,**acq_kwargs)
+
+    optimizer = optimzer_functions[method]
+
+    pt, val = optimizer(acq_func,x0,ndim,**optimizer_kwargs)
+
+    return pt, val, acq_func
