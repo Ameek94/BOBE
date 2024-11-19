@@ -31,10 +31,10 @@ GP:
 NS:
   method: 'jaxns'
   jaxns:
-    dlogz_goal: 0.1
-    upper_lower: False
-    max_call: 1e5
-    final_ns_dlogz: 0.01
+    ns_dlogz_goal: 0.1
+    #upper_lower: False
+    ns_max_call: 1e5
+    ns_final_dlogz: 0.01
   dynesty:
     dlogz_goal: 0.1
     upper_lower: True
