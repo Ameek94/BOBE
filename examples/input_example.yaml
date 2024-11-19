@@ -1,7 +1,7 @@
 BO:
   method: evidence
   evidence:
-    max_steps: 32
+    max_steps: 24
     acq_goal: 1e-8
     feedback_lvl: 1
     init_strat: Sobol

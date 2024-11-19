@@ -149,7 +149,6 @@ class sampler:
             # x0 =  np.random.uniform(0,1,self.acq_batch_size*self.ndim) # get better initial point
             max_idx = np.argmax(self.train_y)
             x0 = self.train_x[max_idx]
-            start_optim = time.time()
             pt,val = self.acq.optimize(x0)
             self.acq_val = abs(val)
             next_x = jnp.atleast_2d(pt)
@@ -179,9 +178,9 @@ class sampler:
                 log.info(f" Run training data and hyperparameters saved at step {num_step}")
 
             # check convergence
+            log.info(f" ----------------------Step {num_step+1} complete----------------------\n")
             num_step+=1
             self.converged = self._check_converged(num_step)
-            log.info(f" ----------------------Step {num_step+1} complete----------------------\n")
 
 
         samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.01,difficult_model=True)

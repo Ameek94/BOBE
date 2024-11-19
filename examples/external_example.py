@@ -55,7 +55,7 @@ markers_bf = dict(zip(keys,mean))
 gp_samples_nuts = MCSamples(samples=samples,names=keys, labels = bobe.param_labels
                             ,ranges=bounds_dict)
 
-test_samples = np.random.multivariate_normal(mean=mean,cov=cov,size=int(1e4))
+test_samples = np.random.multivariate_normal(mean=mean,cov=cov,size=int(1e5))
 
 true_samples = MCSamples(samples=test_samples,names=keys, labels = bobe.param_labels
                             ,ranges=bounds_dict)

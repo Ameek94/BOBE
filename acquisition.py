@@ -169,7 +169,6 @@ class WIPV(Acquisition):
 
 # effectively a local optimizer with multiple restarts
 def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs={'method': 'L-BFGS-B'  },stepsize=1/4,niter=15):
-    start = time.time()
     acq_grad = grad(acq_func)
     # ideally stepsize should be ~ max(delta,distance between sampled points)
     # with delta some small number to ensure that step size does not become too small
@@ -181,7 +180,6 @@ def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs={'method': 'L-BFGS-B'  },st
                                         niter=niter,
                                         minimizer_kwargs=minimizer_kwargs) 
     # minimizer_kwargs is for the choice of the local optimizer, bounds and to provide gradient if necessary
-    log.info(f" Acquisition optimization took {time.time() - start:.2f} s")
     return results.x, results.fun
 
 # add here jax based optax or optuna optimizers
@@ -212,7 +210,7 @@ def optim_optax(acq_func,x0: np.ndarray,ndim: int
 
     xi = x0
     for i in range(n_restarts):
-        xi = x0 + 0.1*np.random.randn(ndim)  # jump from x0 always or previous x?
+        xi = x0 + jump_sdev*np.random.randn(ndim)  # jump from x0 always or previous xi?
         params = jnp.array(xi)
         params = optax.projections.projection_hypercube(xi)
         opt_state = optimizer.init(params)
@@ -255,12 +253,9 @@ def optim_bobyqa(acq_func
     upper = np.ones(ndim*batch_size)
     lower = np.zeros_like(upper)
 
-    start = time.time()
     x0 = np.atleast_1d(x0) # tweak for batched acquisition
     soln = pybobyqa.solve(acq_func,x0,bounds=(lower,upper)
                           ,seek_global_minimum=seek_global_minimum,print_progress=False,do_logging=False)
-
-    print(f"Py-Bobyqa took {time.time()-start:.4f} s")
     return soln.x, soln.f
 
 #------------------Optimizing the acquisition-------------------------
