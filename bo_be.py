@@ -15,6 +15,7 @@ from jaxns import NestedSampler
 from nested_sampler import nested_sampling_jaxns, nested_sampling_Dy
 from bo_utils import input_standardize,input_unstandardize, output_standardize, output_unstandardize, plot_gp
 import logging
+from ext_loglike import external_loglike
 from init import input_settings
 log = logging.getLogger("[BO]")
 np.set_printoptions(precision=4,suppress=False,floatmode='fixed')
@@ -51,10 +52,7 @@ class sampler:
             cobaya_input_file: Optional[str] = None,
             resume_from_file=False,
             resume_file = None,
-            loglike =  None, # for external functions this should be the logposterior 
-            param_list: Optional[List] = None,
-            param_bounds: Optional[List] = None, # shape 2 x D
-            param_labels: Optional[List] = None,
+            objfun =  None, # for external functions this should be the logposterior 
             feedback_lvl: int = 1,
             seed: int = 0,) -> None:
         
@@ -76,11 +74,15 @@ class sampler:
         if cobaya_model:
             points, lls = self._cobaya_init(cobaya_input_file,cobaya_start=cobaya_start) # type: ignore
         else: # for external model, to clean up
-            assert loglike is not None
-            self.logp = functools.partial(self._ext_logp,loglike=loglike) # assuming loglike returns N x 1 shape for input N x d, eventually add option to define loglike model in external file
-            self.param_list = param_list if param_list is not None else ['x_%i'%(i+1) for i in range(ndim)] # type: ignore
-            self.param_labels = param_labels if param_labels is not None else ['x_%i'%(i+1) for i in range(ndim)] # type: ignore
-            self.param_bounds = np.array(param_bounds) if param_bounds is not None else np.array(ndim*[[0,1]]).T # type: ignore
+            if isinstance(objfun,external_loglike):
+                self.objfun = objfun
+                self.param_list = self.objfun.param_list
+                self.param_bounds = self.objfun.param_bounds
+                self.param_labels = self.objfun.param_labels
+                self.logp  = lambda x: self.objfun(input_unstandardize(x,self.param_bounds)) #functools.partial(self._ext_logp,loglike=objfun)
+                log.info(f" Using external function {self.objfun.name}")
+            else: 
+                raise ValueError("Loglike Error")
         self.ndim = len(self.param_list)
         self.bounds_dict = dict(zip(self.param_list,self.param_bounds.T)) # type: ignore
         log.info(f" Running the sampler with the following params {self.param_list}")
@@ -107,7 +109,7 @@ class sampler:
             log.info(f"Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
         else:
             self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(self.ninit)
-            self.train_y = self.logp(self.train_x)
+            self.train_y = np.reshape(self.logp(self.train_x),(self.ninit,1))
             if cobaya_model:
                 for pt,ll in zip(points,lls): 
                     pt_unit = input_standardize(np.reshape(pt,(1,self.ndim)),self.param_bounds)
@@ -166,16 +168,21 @@ class sampler:
                 self.acq.update_mc_points(rng_key)
             else:
                 self.gp.quick_update(next_x,next_y)
-            log.info(f" ----------------------Step {num_step+1} complete----------------------\n")
             
-            # check convergence
-            num_step+=1
-            self.converged = self._check_converged(num_step)
+            if (num_step % self.ns_step==0 and num_step>0):
+                _, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.1,difficult_model=False)
+                log.info(f" LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
 
             # save if needed
             if ((num_step%self.save_step==0 and self.save) or self.converged):
                 self.gp.save(self.save_file)
                 log.info(f" Run training data and hyperparameters saved at step {num_step}")
+
+            # check convergence
+            num_step+=1
+            self.converged = self._check_converged(num_step)
+            log.info(f" ----------------------Step {num_step+1} complete----------------------\n")
+
 
         samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.01,difficult_model=True)
         log.info(f" Final LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
