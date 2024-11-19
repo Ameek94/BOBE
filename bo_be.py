@@ -194,7 +194,7 @@ class sampler:
             log.info(" Max steps reached")
         return acq or steps
 
-    def _ext_logp(self,x,loglike):
+    def _ext_logp(self,loglike,x):
         x  = input_unstandardize(x,self.param_bounds)
         return jnp.atleast_2d(loglike(x))
 

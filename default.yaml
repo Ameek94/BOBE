@@ -51,7 +51,7 @@ ACQ:
   EI:
     zeta: 0.
 optimizer:
-  method: 'optax'
+  method: 'scipy_bh'
   bobyqa:
     seek_global_minimum: False
   scipy_bh: 

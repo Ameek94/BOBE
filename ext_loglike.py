@@ -72,7 +72,7 @@ class ndgaussian(external_loglike):
         self.dist = multivariate_normal(mean=self.means,cov=self.cov) # type: ignore
     
     def logposterior(self,x):
-        return self.dist.logpdf(x)
+        raise self.dist.logpdf(x)
     
 
 class banana(external_loglike):
