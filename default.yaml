@@ -6,6 +6,7 @@ BO:
     # external_model: model.py
     acq_goal: 1e-8
     acq_batch_size: 1
+    precision_goal: 5e-1
     feedback_lvl: 1
     init_strat: Sobol
     ninit: 4
@@ -31,13 +32,13 @@ GP:
 NS:
   method: 'jaxns'
   jaxns:
-    ns_dlogz_goal: 0.1
+    dlogz_goal: 0.1
     #upper_lower: False
-    ns_max_call: 1e5
-    ns_final_dlogz: 0.01
+    max_call: 1e5
+    final_ns_dlogz: 0.01
   dynesty:
     dlogz_goal: 0.1
-    upper_lower: True
+    #upper_lower: True
     max_call: 1e5
     final_ns_dlogz: 0.01
 ACQ:

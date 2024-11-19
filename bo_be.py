@@ -70,7 +70,7 @@ class sampler:
         log.info(" Loaded input settings")
         
         self.timing = {'GP': [], 'NS': [], 'ACQ': [], 'Likelihood': []}
-        self.integral_accuracy = {'mean': [], 'upper': [], 'lower': [], 'dlogz sampler': []}
+        self.integral_accuracy = {'mean': [0], 'upper': [100000], 'lower': [-100000], 'dlogz sampler': [10]}
         # initialize BO settings
         self.init_run_settings()
         # then initialize the model, params, bounds
@@ -187,10 +187,11 @@ class sampler:
             ###    Nested Sampling    ###
             start_ns = time.time()
             if num_step%self.ns_step==0 and self.run_nested_sampler:
-                _, logz_dict = nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.ns_dlogz_goal,maxcall=self.ns_max_call)
+                _, logz_dict = nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.dlogz_goal,maxcall=self.max_call)
                 log.info(f"Current evidence estimate: {logz_dict['mean']:.4f} ± {(logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']:.4f}")
+                log.info(f"Mean: {logz_dict['mean']:.4f}, Upper Bound: {logz_dict['upper']:.4f}, Lower Bound: {logz_dict['lower']:.4f}")
             else:
-                logz_dict = {'mean': np.nan, 'upper': np.nan, 'lower': np.nan, 'dlogz sampler': np.nan}
+                logz_dict = {'mean': logz_dict['mean'][-1], 'upper': logz_dict['upper'][-1], 'lower': logz_dict['lower'][-1], 'dlogz sampler': logz_dict['dlogz sampler'][-1]}
             self.integral_accuracy = {key: self.integral_accuracy[key] + [logz_dict[key]] for key in self.integral_accuracy.keys()}
             end_ns = time.time()
             self.timing['NS'].append(end_ns-start_ns)
@@ -208,7 +209,7 @@ class sampler:
                 self.gp.save(self.save_file)
                 log.info(f" Run training data and hyperparameters saved at step {num_step}")
 
-        samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.ns_final_dlogz,difficult_model=True)
+        samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.final_ns_dlogz,difficult_model=True)
         log.info(f" Final LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
         log.info(" Run Completed")
         log.info(f" BO took {time.time() - start:.2f}s")
@@ -218,15 +219,15 @@ class sampler:
 
     def _check_converged(self,num_step):
         acq = (self.acq_val < self.acq_goal)
-        ns_acq = (self.integral_accuracy['upper'][-1] - self.integral_accuracy['lower'][-1] < self.acq_goal)
+        ns_converged = (self.integral_accuracy['upper'][-1] - self.integral_accuracy['lower'][-1] < self.precision_goal)
         steps = (num_step >= self.max_steps)
         if acq:
             self.run_nested_sampler = True
-            if ns_acq:
+            if ns_converged:
                 log.info(" Acquisition goal reached")
         if steps:
             log.info(" Max steps reached")
-        return ns_acq or steps
+        return ns_converged or steps
 
     def _ext_logp(self,x,loglike):
         x  = input_unstandardize(x,self.param_bounds)
