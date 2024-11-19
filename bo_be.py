@@ -9,12 +9,13 @@ import time
 import jax
 import jax.numpy as jnp
 from jax import random,vmap, grad
-from acquisition import EI, WIPV, Acquisition, optim_bobyqa, optim_scipy_bh, optimize_acq
+from acquisition import EI, WIPV, Acquisition, optim_bobyqa, optim_scipy_bh 
 from scipy.stats import qmc
 from jaxns import NestedSampler
 from nested_sampler import nested_sampling_jaxns, nested_sampling_Dy
 from bo_utils import input_standardize,input_unstandardize, output_standardize, output_unstandardize, plot_gp
 import logging
+from ext_loglike import external_loglike
 from init import input_settings
 log = logging.getLogger("[BO]")
 np.set_printoptions(precision=4,suppress=False,floatmode='fixed')
@@ -51,10 +52,7 @@ class sampler:
             cobaya_input_file: Optional[str] = None,
             resume_from_file=False,
             resume_file = None,
-            loglike =  None, # for external functions this should be the logposterior 
-            param_list: Optional[List] = None,
-            param_bounds: Optional[List] = None, # shape 2 x D
-            param_labels: Optional[List] = None,
+            objfun =  None, # for external functions this should be the logposterior 
             feedback_lvl: int = 1,
             seed: int = 0,) -> None:
         
@@ -76,11 +74,15 @@ class sampler:
         if cobaya_model:
             points, lls = self._cobaya_init(cobaya_input_file,cobaya_start=cobaya_start) # type: ignore
         else: # for external model, to clean up
-            assert loglike is not None
-            self.logp = functools.partial(self._ext_logp,loglike=loglike) # assuming loglike returns N x 1 shape for input N x d, eventually add option to define loglike model in external file
-            self.param_list = param_list if param_list is not None else ['x_%i'%(i+1) for i in range(ndim)] # type: ignore
-            self.param_labels = param_labels if param_labels is not None else ['x_%i'%(i+1) for i in range(ndim)] # type: ignore
-            self.param_bounds = np.array(param_bounds) if param_bounds is not None else np.array(ndim*[[0,1]]).T # type: ignore
+            if isinstance(objfun,external_loglike):
+                self.objfun = objfun
+                self.param_list = self.objfun.param_list
+                self.param_bounds = self.objfun.param_bounds
+                self.param_labels = self.objfun.param_labels
+                self.logp  = lambda x: self.objfun(input_unstandardize(x,self.param_bounds)) #functools.partial(self._ext_logp,loglike=objfun)
+                log.info(f" Using external function {self.objfun.name}")
+            else: 
+                raise ValueError("Loglike Error")
         self.ndim = len(self.param_list)
         self.bounds_dict = dict(zip(self.param_list,self.param_bounds.T)) # type: ignore
         log.info(f" Running the sampler with the following params {self.param_list}")
@@ -107,7 +109,7 @@ class sampler:
             log.info(f"Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
         else:
             self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(self.ninit)
-            self.train_y = self.logp(self.train_x)
+            self.train_y = np.reshape(self.logp(self.train_x),(self.ninit,1))
             if cobaya_model:
                 for pt,ll in zip(points,lls): 
                     pt_unit = input_standardize(np.reshape(pt,(1,self.ndim)),self.param_bounds)
@@ -116,11 +118,12 @@ class sampler:
                         log.info("".join(f" {key} = {val:.4f}, " for key,val in dict(zip(self.param_list,pt)).items()) )
                         self.train_x = np.concatenate([self.train_x,pt_unit])
                         self.train_y = np.concatenate([self.train_y,np.atleast_2d(ll)])
-            log.info(f" Initial loglikes \n{self.train_y}")
+            log.info(f" Initial loglikes \n{self.train_y.T}")
             log.info(f" Sampler will start with {len(self.train_y)} points and run for a maximum of {self.max_steps} steps")
             self.gp = saas_fbgp(self.train_x,self.train_y,
                                 **self.gp_settings)             
             self.gp.fit(rng_key)
+            log.info(f" Initialized {self.gp_method} GP with settings {self.gp_settings}")
 
         # once GP is initialized, we can now initialize the acquisition function and its optimizers
         self.init_aquisition(rng_key)
@@ -142,42 +145,51 @@ class sampler:
         while not self.converged:
             seed = num_step
             rng_key, _ = random.split(random.PRNGKey(seed), 2)
-
             # get new point from acquisition function optimization
-            x0 =  np.random.uniform(0,1,self.acq_batch_size*self.ndim) # get better initial point
+            # x0 =  np.random.uniform(0,1,self.acq_batch_size*self.ndim) # get better initial point
+            max_idx = np.argmax(self.train_y)
+            x0 = self.train_x[max_idx]
             pt,val = self.acq.optimize(x0)
             self.acq_val = abs(val)
             next_x = jnp.atleast_2d(pt)
             log.info(f" Next point at x = {self._print_point(pt)} with acquisition function value = {val:.4e}")
-            max_idx = jnp.argmax(self.train_y)
             # update gp with new point
+            start_l = time.time()
             next_y = self.logp(next_x)
+            log.info(f" Likelihood evaluation took {time.time()-start_l:.4f} s")
             self.train_x = jnp.concatenate([self.train_x,next_x])
             self.train_y = jnp.concatenate([self.train_y,next_y])
-            if (num_step%5==0 and num_step>0):
+            if (num_step%4==0 and num_step>0):
                 jax.clear_caches() # hack for managing memory until I implement GP pytree 
             log.info(f" Current best loglike = {self.train_y[max_idx]} at {self._print_point(self.train_x[max_idx])} \nLoglike at new point = {next_y}")
             if (num_step%self.gpfit_step==0):
-                self.gp.update(next_x,next_y,rng_key) # broke with my updates, need to fix
+                self.gp.update(next_x,next_y,rng_key)
                 self.acq.update_mc_points(rng_key)
             else:
                 self.gp.quick_update(next_x,next_y)
-            log.info(f" ----------------------Step {num_step+1} complete----------------------\n")
             
-            # check convergence
-            num_step+=1
-            self.converged = self._check_converged(num_step)
+            if (num_step % self.ns_step==0 and num_step>0):
+                _, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.1,difficult_model=False)
+                log.info(f" LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
 
             # save if needed
             if ((num_step%self.save_step==0 and self.save) or self.converged):
                 self.gp.save(self.save_file)
                 log.info(f" Run training data and hyperparameters saved at step {num_step}")
 
+            # check convergence
+            log.info(f" ----------------------Step {num_step+1} complete----------------------\n")
+            num_step+=1
+            self.converged = self._check_converged(num_step)
+
+
         samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.01,difficult_model=True)
         log.info(f" Final LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
         log.info(" Run Completed")
         log.info(f" BO took {time.time() - start:.2f}s")
-        
+        samples = input_unstandardize(samples,self.param_bounds)
+        np.savez(self.save_file+'_samples.npz',*samples)
+
 
     def _check_converged(self,num_step):
         acq = (self.acq_val < self.acq_goal)
@@ -188,7 +200,7 @@ class sampler:
             log.info(" Max steps reached")
         return acq or steps
 
-    def _ext_logp(self,loglike,x):
+    def _ext_logp(self,x,loglike):
         x  = input_unstandardize(x,self.param_bounds)
         return jnp.atleast_2d(loglike(x))
 
@@ -229,7 +241,7 @@ class sampler:
     
     def _print_point(self,x):
         x = input_unstandardize(x,self.param_bounds)
-        return dict(zip(self.param_list,x))
+        return dict(zip(self.param_list,np.array(x)))
 
     def init_run_settings(self):
         method = self.settings['BO']['method']

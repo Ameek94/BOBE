@@ -1,20 +1,13 @@
 import time
 from typing import Any,List, Optional
-import numpyro
-import numpyro.distributions as dist
-from numpyro.util import enable_x64
 import jax.numpy as jnp
 import jax.random as random
 import numpy as np
 from jax import jit, vmap, grad, value_and_grad
 from jax.lax import scan
-from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 from jax.scipy.stats import norm
-from numpyro.diagnostics import summary
-from numpyro.infer import MCMC, NUTS
 # from util import chunk_vmap
 from jax import config
-from pyro import sample
 from fb_gp import saas_fbgp, sample_GP_NUTS
 config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
@@ -57,7 +50,9 @@ class Acquisition():
     def optimize(self,x0,):
         acq_func = self.__call__
         optimizer = optimzer_functions[self.optimizer_method]
+        start = time.time()
         pt, val = optimizer(acq_func,x0,self.ndim,**self.optimizer_kwargs)
+        log.info(f" {self.optimizer_method} took {time.time()-start:.4f}s")
         return pt, val
     
     def update_mc_points(self,rng_key):
@@ -165,14 +160,15 @@ class WIPV(Acquisition):
     def update_mc_points(self,rng_key):
         self.mc_points = sample_GP_NUTS(self.gp,rng_key,**self.mcmc_kwargs)
         log.info(" Updated acquisition MC points")
-
+        # print(self.gp.train_x.shape[0])
+        # plt.scatter(self.mc_points[:,0],self.mc_points[:,1],alpha=0.3)
+        # plt.show()
 
 
 #------------------Optimizers for the acqusition functions-------------------------
 
 # effectively a local optimizer with multiple restarts
-def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs={},stepsize=1/4,niter=15):
-    start = time.time()
+def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs={'method': 'L-BFGS-B'  },stepsize=1/4,niter=15):
     acq_grad = grad(acq_func)
     # ideally stepsize should be ~ max(delta,distance between sampled points)
     # with delta some small number to ensure that step size does not become too small
@@ -184,16 +180,16 @@ def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs={},stepsize=1/4,niter=15):
                                         niter=niter,
                                         minimizer_kwargs=minimizer_kwargs) 
     # minimizer_kwargs is for the choice of the local optimizer, bounds and to provide gradient if necessary
-    log.info(f" Acquisition optimization took {time.time() - start:.2f} s")
     return results.x, results.fun
 
 # add here jax based optax or optuna optimizers
 
-def optim_optax(acq_func,x0: np.ndarray,ndim,steps=100,start_learning_rate=1e-2): # needs more work
+def optim_optax(acq_func,x0: np.ndarray,ndim: int
+                ,steps=100,start_learning_rate=1e-2, n_restarts = 4,jump_sdev = 0.1): # needs more work
     optimizer = optax.adam(start_learning_rate)
     params = jnp.array(x0)
     opt_state = optimizer.init(params)
-    start = time.time()
+    # start = time.time()
     max_iters = ndim*steps
 
     def step(carry,xs):
@@ -205,9 +201,26 @@ def optim_optax(acq_func,x0: np.ndarray,ndim,steps=100,start_learning_rate=1e-2)
         params = optax.projections.projection_hypercube(params)
         carry = params, opt_state
         return carry, fval
+    
+    
+    (params, _ ), acqvals = scan(step,(params,opt_state),length=max_iters) 
 
-    (params, _ ), fvals = scan(step,(params,opt_state),length=max_iters) # scan is much faster but more complicated to terminate early
-    print(f"Optax optimizer took {time.time() - start:.4f}s")
+    best_val = acqvals[-1]
+    best_params = params
+
+    xi = x0
+    for i in range(n_restarts):
+        xi = x0 + jump_sdev*np.random.randn(ndim)  # jump from x0 always or previous xi?
+        params = jnp.array(xi)
+        params = optax.projections.projection_hypercube(xi)
+        opt_state = optimizer.init(params)
+        (params, _ ), acqvals = scan(step,(params,opt_state),length=max_iters)
+        if best_val>acqvals[-1]:
+            best_val = acqvals[-1]
+            best_params = params
+
+    #(params, _ ), fvals = scan(step,(params,opt_state),length=max_iters) # scan is much faster but more complicated to terminate early
+    # print(f"Optax optimizer took {time.time() - start:.4f}s")
 
     # just for testing
     # plt.semilogy(np.arange(max_iters),fvals)
@@ -223,7 +236,7 @@ def optim_optax(acq_func,x0: np.ndarray,ndim,steps=100,start_learning_rate=1e-2)
     #     params = optax.apply_updates(params, updates)
     #     params = optax.projections.projection_hypercube(params)
 
-    return params, fvals[-1] #acq_func(params)
+    return best_params, best_val #acq_func(params)
 
 # some gradient free optimizers (e.g. from iminuit or pybobyqa)
 
@@ -240,12 +253,9 @@ def optim_bobyqa(acq_func
     upper = np.ones(ndim*batch_size)
     lower = np.zeros_like(upper)
 
-    start = time.time()
     x0 = np.atleast_1d(x0) # tweak for batched acquisition
     soln = pybobyqa.solve(acq_func,x0,bounds=(lower,upper)
                           ,seek_global_minimum=seek_global_minimum,print_progress=False,do_logging=False)
-
-    print(f"Py-Bobyqa took {time.time()-start:.4f} s")
     return soln.x, soln.f
 
 #------------------Optimizing the acquisition-------------------------

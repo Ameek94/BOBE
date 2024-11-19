@@ -60,6 +60,8 @@ optimizer:
     minimizer_kwargs:
       method: L-BFGS-B  
   optax:
-    steps: 200
+    steps: 100
     start_learning_rate: 1e-2
+    n_restarts: 4
+    jump_sdev: 0.1
 

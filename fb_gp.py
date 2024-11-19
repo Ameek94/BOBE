@@ -24,11 +24,13 @@ enable_x64()
 from functools import partial
 import logging
 log = logging.getLogger("[GP]")
+import multiprocessing
+global_num_chains = multiprocessing.cpu_count()
 
 # todo
 # 1. method to reuse previous mcmc samples if HMC runs into issues
-# 2. test speed vs standard botorch
-# 3. methods to load and save from dict
+# 2. matern needs to be fixed
+# 3. test speed vs standard botorch
 # 4. stability of cholesky when points are very close together 
 # 5. Pytree for GP?
 
@@ -45,7 +47,7 @@ def rbf_kernel(xa,
                xb,
                lengthscales,
                outputscale,
-               noise,include_noise=True): # can use vmap for rbf/cdist? possibly faster in high dim or when large number of xa already accumulated
+               noise,include_noise=True): 
     """
     The RBF kernel
     """
@@ -61,9 +63,9 @@ def matern_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True):
     """
     The Matern-5/2 kernel
     """
-    sq_dist = jnp.sqrt(dist_sq(xa/lengthscales,xb/lengthscales))
-    exp = jnp.exp(sqrt5*sq_dist)
-    poly = 1 + sq_dist*(sqrt5 + sq_dist*5/3)
+    _dist = jnp.sqrt(dist_sq(xa/lengthscales,xb/lengthscales))
+    exp = jnp.exp(-sqrt5*_dist)
+    poly = 1 + _dist*(sqrt5 + _dist*5/3)
     k = outputscale*poly*exp
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
@@ -118,7 +120,7 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True
     mcmc.run(rng_key,gp.train_x,extra_fields=("potential_energy",),init_params=init_params)
     if verbose:
         mcmc.print_summary(exclude_deterministic=False)
-    print(f"MCMC took {time.time()-start:.4f} s")
+    log.info(f" Sampled parameters MCMC took {time.time()-start:.4f} s")
     nuts_samples = mcmc.get_samples()['x'] 
     return nuts_samples
 
@@ -126,7 +128,7 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True
 class numpyro_model:
    # Note - train_x and train_y received here are already transformed, npoints x ndim and npoints x 1
    def __init__(self, train_x,  train_y, #train_yvar, 
-                kernel_func=rbf_kernel,noise=1e-6) -> None:
+                kernel_func=rbf_kernel,noise=1e-8) -> None:
       self.train_x = train_x 
       self.train_y = train_y
       self.ndim = train_x.shape[-1]
@@ -141,7 +143,7 @@ class numpyro_model:
         tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(0.1))
         inv_length_sq = numpyro.sample("_kernel_inv_length_sq",dist.HalfCauchy(jnp.ones(self.ndim))) # type: ignore
         lengthscales = numpyro.deterministic("kernel_length",1/jnp.sqrt(tausq*inv_length_sq)) # type: ignore
-        k = rbf_kernel(self.train_x,self.train_x,lengthscales,outputscale,noise=self.noise,include_noise=True) 
+        k = self.kernel_func(self.train_x,self.train_x,lengthscales,outputscale,noise=self.noise,include_noise=True) 
         mll = numpyro.sample(
                 "Y",
                 dist.MultivariateNormal(
@@ -165,7 +167,7 @@ class numpyro_model:
                 kernel,
                 num_warmup=warmup_steps,
                 num_samples=num_samples,
-                num_chains=num_chains,
+                num_chains=1,
                 progress_bar=progbar,
                 thinning=thinning,
                 )
@@ -176,7 +178,7 @@ class numpyro_model:
         if verbose:
             mcmc.print_summary(exclude_deterministic=False)
         extras = mcmc.get_extra_fields()
-        log.info(f" MCMC elapsed time: {time.time() - start:.2f}s")
+        log.info(f" Hyperparameters MCMC elapsed time: {time.time() - start:.2f}s")
 
         return mcmc.get_samples(), extras # type: ignore
 
@@ -207,7 +209,7 @@ class saas_fbgp:
                  ,train_x
                  ,train_y
                  ,standardise_y=True
-                 ,noise=1e-6
+                 ,noise=1e-8
                  ,kernel="rbf"
                  ,vmap_size=8
                  ,sample_lengthscales=None
@@ -218,7 +220,7 @@ class saas_fbgp:
                  ,dense_mass: bool = True
                  ,max_tree_depth:int = 6
                  ,num_chains: int = 1
-                 ,min_lengthscale: float = 1e-4
+                 ,min_lengthscale: float = 1e-3
                  ,max_lengthscale: float = 1e2) -> None:
         """
         train_x: size (N x D), always in [0,1] coming from the sampler module
@@ -362,6 +364,7 @@ class saas_fbgp:
         var = get_var_from_cho(k11_cho,k12,k22)
         return (var,)
     
+    # is vmap/map or batching mc_points needed?
     def fantasy_var_fb(self,x_new,mc_points): 
         vmap_func = lambda l,o: self._fantasy_var_fb(x_new=x_new,lengthscales=l,outputscales=o,mc_points=mc_points)
         vmap_arrays = (self.samples["kernel_length"], self.samples["kernel_var"])
