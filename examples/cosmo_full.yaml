@@ -1,14 +1,14 @@
 BO:
   method: evidence
   evidence:
-    max_steps: 12
+    max_steps: 250
     acq_goal: 1e-8
     feedback_lvl: 1
     init_strat: Sobol
-    ninit: 16
-    gpfit_step: 1
+    ninit: 32
+    gpfit_step: 2
     save: True
-    save_file: 'test'
+    save_file: 'LCDM_full'
     save_step: 5
     ns_step: 10
     seed: 0
@@ -56,7 +56,6 @@ optimizer:
   #   minimizer_kwargs:
   #     method: L-BFGS-B  
   optax: 
-    steps: 100
+    steps: 250
     start_learning_rate: 1e-2
-    n_restarts: 4
-    jump_sdev: 0.1
+

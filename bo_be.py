@@ -9,7 +9,7 @@ import time
 import jax
 import jax.numpy as jnp
 from jax import random,vmap, grad
-from acquisition import EI, WIPV, Acquisition, optim_bobyqa, optim_scipy_bh, optimize_acq
+from acquisition import EI, WIPV, Acquisition, optim_bobyqa, optim_scipy_bh 
 from scipy.stats import qmc
 from jaxns import NestedSampler
 from nested_sampler import nested_sampling_jaxns, nested_sampling_Dy
@@ -116,11 +116,12 @@ class sampler:
                         log.info("".join(f" {key} = {val:.4f}, " for key,val in dict(zip(self.param_list,pt)).items()) )
                         self.train_x = np.concatenate([self.train_x,pt_unit])
                         self.train_y = np.concatenate([self.train_y,np.atleast_2d(ll)])
-            log.info(f" Initial loglikes \n{self.train_y}")
+            log.info(f" Initial loglikes \n{self.train_y.T}")
             log.info(f" Sampler will start with {len(self.train_y)} points and run for a maximum of {self.max_steps} steps")
             self.gp = saas_fbgp(self.train_x,self.train_y,
                                 **self.gp_settings)             
             self.gp.fit(rng_key)
+            log.info(f" Initialized {self.gp_method} GP with settings {self.gp_settings}")
 
         # once GP is initialized, we can now initialize the acquisition function and its optimizers
         self.init_aquisition(rng_key)
@@ -142,23 +143,26 @@ class sampler:
         while not self.converged:
             seed = num_step
             rng_key, _ = random.split(random.PRNGKey(seed), 2)
-
             # get new point from acquisition function optimization
-            x0 =  np.random.uniform(0,1,self.acq_batch_size*self.ndim) # get better initial point
+            # x0 =  np.random.uniform(0,1,self.acq_batch_size*self.ndim) # get better initial point
+            max_idx = np.argmax(self.train_y)
+            x0 = self.train_x[max_idx]
+            start_optim = time.time()
             pt,val = self.acq.optimize(x0)
             self.acq_val = abs(val)
             next_x = jnp.atleast_2d(pt)
             log.info(f" Next point at x = {self._print_point(pt)} with acquisition function value = {val:.4e}")
-            max_idx = jnp.argmax(self.train_y)
             # update gp with new point
+            start_l = time.time()
             next_y = self.logp(next_x)
+            log.info(f" Likelihood evaluation took {time.time()-start_l:.4f} s")
             self.train_x = jnp.concatenate([self.train_x,next_x])
             self.train_y = jnp.concatenate([self.train_y,next_y])
-            if (num_step%5==0 and num_step>0):
+            if (num_step%4==0 and num_step>0):
                 jax.clear_caches() # hack for managing memory until I implement GP pytree 
             log.info(f" Current best loglike = {self.train_y[max_idx]} at {self._print_point(self.train_x[max_idx])} \nLoglike at new point = {next_y}")
             if (num_step%self.gpfit_step==0):
-                self.gp.update(next_x,next_y,rng_key) # broke with my updates, need to fix
+                self.gp.update(next_x,next_y,rng_key)
                 self.acq.update_mc_points(rng_key)
             else:
                 self.gp.quick_update(next_x,next_y)
@@ -177,7 +181,9 @@ class sampler:
         log.info(f" Final LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
         log.info(" Run Completed")
         log.info(f" BO took {time.time() - start:.2f}s")
-        
+        samples = input_unstandardize(samples,self.param_bounds)
+        np.savez(self.save_file+'_samples.npz',*samples)
+
 
     def _check_converged(self,num_step):
         acq = (self.acq_val < self.acq_goal)
@@ -229,7 +235,7 @@ class sampler:
     
     def _print_point(self,x):
         x = input_unstandardize(x,self.param_bounds)
-        return dict(zip(self.param_list,x))
+        return dict(zip(self.param_list,np.array(x)))
 
     def init_run_settings(self):
         method = self.settings['BO']['method']
