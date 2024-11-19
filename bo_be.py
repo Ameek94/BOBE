@@ -14,11 +14,8 @@ from scipy.stats import qmc
 from jaxns import NestedSampler
 from nested_sampler import nested_sampling_jaxns, nested_sampling_Dy
 from bo_utils import input_standardize,input_unstandardize, output_standardize, output_unstandardize, plot_gp
-from plot_utils import acq_check_metric_plot, FBGP_hyperparameter_plot, FBGP_mll_plot, integral_accuracy_plot, integral_metrics_plot, timing_plot
 import logging
 from init import input_settings
-import matplotlib
-import matplotlib.pyplot as plt
 log = logging.getLogger("[BO]")
 np.set_printoptions(precision=4,suppress=False,floatmode='fixed')
 jnp.set_printoptions(precision=4,suppress=False,floatmode='fixed')
@@ -74,7 +71,6 @@ class sampler:
         
         self.timing = {'GP': [], 'NS': [], 'ACQ': [], 'Likelihood': []}
         self.integral_accuracy = {'mean': [], 'upper': [], 'lower': [], 'dlogz sampler': []}
-        self.plot_data = {'acq_check': [], 'outputscale': [], 'lengthscales': [], 'mll': []}
         # initialize BO settings
         self.init_run_settings()
         # then initialize the model, params, bounds
@@ -159,7 +155,6 @@ class sampler:
             start_optim = time.time()
             pt,val = self.acq.optimize(x0)
             self.acq_val = abs(val)
-            self.plot_data['acq_check'].append(self.acq_val)
             next_x = jnp.atleast_2d(pt)
             end_a = time.time()
             self.timing['ACQ'].append(end_a-start_a)
@@ -185,9 +180,6 @@ class sampler:
                 self.acq.update_mc_points(rng_key)
             else:
                 self.gp.quick_update(next_x,next_y)
-            self.plot_data['mll'].append(self.gp.samples['minus_log_prob'])
-            self.plot_data['lengthscales'].append(self.gp.get_median_lengthscales())
-            self.plot_data['outputscale'].append(self.gp.get_median_outputscales())
             end_gp = time.time()
             self.timing['GP'].append(end_gp-start_gp)
             log.info(f" GP Training took {self.timing['GP'][-1]:.4f} s")
@@ -204,30 +196,7 @@ class sampler:
             self.timing['NS'].append(end_ns-start_ns)
             log.info(f" Nested Sampling took {self.timing['NS'][-1]:.4f} s")
             #############################
-            ###       Plotting        ###
-            fig,ax = plt.subplots(4, 3, figsize=(25, 30))
-            fig.delaxes(ax[3,0])
-            fig.delaxes(ax[3,2])
-            fig.suptitle(f"Iteration: {num_step}, #Samples: {self.ninit+num_step}") #Add batch size
-            self.ax = ax
-            self.fig = fig
-            self.ax = acq_check_metric_plot(self, num_step+1)
-            self.ax = FBGP_hyperparameter_plot(self, num_step+1)
-            self.ax = FBGP_mll_plot(self, num_step+1)
-            if self.run_nested_sampler:
-                self.ax = integral_accuracy_plot(self, num_step+1)
-                self.ax = integral_metrics_plot(self, num_step+1)
-            self.ax = timing_plot(self, num_step+1)
-            plt.tight_layout()
-            plt.subplots_adjust(
-                        top=0.95,
-                        wspace=0.2, 
-                        hspace=0.2)
-            if self.save_plot:
-                fig.savefig(f"GIFs/{ndim}D/{loglike.__qualname__}_step_{curr_step}.png")
-            if self.show_plot:
-                plt.show()
-            #############################
+                
             log.info(f" --------------------Step {num_step+1} completed in {sum(values[-1] for values in self.timing.values()):.4f}s-------------------\n")
             
             # check convergence

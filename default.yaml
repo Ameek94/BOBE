@@ -13,8 +13,6 @@ BO:
     save: True
     save_file: 'run_data'
     save_step: 5
-    save_plot: False
-    show_plot: False
     ns_step: 10
     seed: 0
     feedback_lvl: 1
