@@ -11,8 +11,8 @@ import jax.numpy as jnp
 from jax import random,vmap, grad
 from acquisition import EI, WIPV, Acquisition, optim_bobyqa, optim_scipy_bh 
 from scipy.stats import qmc
-from jaxns import NestedSampler
-from nested_sampler import nested_sampling_jaxns, nested_sampling_Dy
+#from jaxns import NestedSampler
+from nested_sampler import NestedSampler, JaxNS, DynestyNS #nested_sampling_jaxns, nested_sampling_Dy
 from bo_utils import input_standardize,input_unstandardize, output_standardize, output_unstandardize, plot_gp
 import logging
 from ext_loglike import external_loglike
@@ -130,7 +130,8 @@ class sampler:
         self.init_aquisition(rng_key)
 
         # initialise NS settings
-        self.init_ns_settings()
+        #self.init_ns_settings()
+        self.init_nestedSampler()
         self.run_nested_sampler = False
 
         # testrun
@@ -181,7 +182,6 @@ class sampler:
                 self.acq.update_mc_points(rng_key)
             else:
                 self.gp.quick_update(next_x,next_y)
-
             end_gp = time.time()
             self.timing['GP'].append(end_gp-start_gp)
             log.info(f" GP Training took {self.timing['GP'][-1]:.4f} s")
@@ -189,11 +189,11 @@ class sampler:
             ###    Nested Sampling    ###
             start_ns = time.time()
             if num_step%self.ns_step==0 and self.run_nested_sampler:
-                _, logz_dict = nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.dlogz_goal,maxcall=self.max_call)
+                _, logz_dict = self.NestedSampler.run(final_run=False) #nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.dlogz_goal,maxcall=self.max_call)
                 log.info(f"Current evidence estimate: {logz_dict['mean']:.4f} ± {(logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']:.4f}")
                 log.info(f"Mean: {logz_dict['mean']:.4f}, Upper Bound: {logz_dict['upper']:.4f}, Lower Bound: {logz_dict['lower']:.4f}")
             else:
-                logz_dict = {'mean': logz_dict['mean'][-1], 'upper': logz_dict['upper'][-1], 'lower': logz_dict['lower'][-1], 'dlogz sampler': logz_dict['dlogz sampler'][-1]}
+                logz_dict = {'mean': self.integral_accuracy['mean'][-1], 'upper': self.integral_accuracy['upper'][-1], 'lower': self.integral_accuracy['lower'][-1], 'dlogz sampler': self.integral_accuracy['dlogz sampler'][-1]}
             self.integral_accuracy = {key: self.integral_accuracy[key] + [logz_dict[key]] for key in self.integral_accuracy.keys()}
             end_ns = time.time()
             self.timing['NS'].append(end_ns-start_ns)
@@ -201,16 +201,20 @@ class sampler:
             #############################
                 
             log.info(f" --------------------Step {num_step+1} completed in {sum(values[-1] for values in self.timing.values()):.4f}s-------------------\n")
+            
+            # check convergence
+            num_step+=1
+            self.converged = self._check_converged(num_step)
 
             # save if needed
             if ((num_step%self.save_step==0 and self.save) or self.converged):
                 self.gp.save(self.save_file)
                 log.info(f" Run training data and hyperparameters saved at step {num_step}")
 
-        samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.final_ns_dlogz,difficult_model=True)
+        samples, logz_dict = self.NestedSampler.run(final_run=True) #nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.final_ns_dlogz,difficult_model=True)
         log.info(f" Final LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
         log.info(" Run Completed")
-        log.info(f" BO took {time.time() - start:.2f}s")
+        log.info(f" BO took {time.time() - start:.2f}s took {self.ninit+self.acq_batch_size*num_step} samples for a final evidence of {logz_dict['mean']:.4f} ± { ((logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']):.4f}")
         samples = input_unstandardize(samples,self.param_bounds)
         np.savez(self.save_file+'_samples.npz',*samples)
 
@@ -275,10 +279,20 @@ class sampler:
         for key,val in self.settings['BO'][method].items():
             setattr(self,key,val)
             
-    def init_ns_settings(self):
-        method = self.settings['NS']['method']
-        for key,val in self.settings['NS'][method].items():
-            setattr(self,key,val)
+    def init_nestedSampler(self):
+        ns_method = self.settings['NS']['method']
+        ns_kwargs = self.settings['NS'][ns_method]
+        if ns_method=="jaxns":
+            self.NestedSampler = JaxNS(gp=self.gp
+                                      ,ndim=self.ndim,
+                                       ns_kwargs=ns_kwargs)
+        elif ns_method=="dynesty":
+            self.NestedSampler = DynestyNS(gp=self.gp
+                                      ,ndim=self.ndim,
+                                       ns_kwargs=ns_kwargs)
+
+        else:
+            raise ValueError('Not a valid Nested Sampler')
 
     def init_aquisition(self,rng_key):
         # acqs = {EI: "EI", WIPV: "WIPV"}

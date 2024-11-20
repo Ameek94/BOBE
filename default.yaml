@@ -36,11 +36,13 @@ NS:
     #upper_lower: False
     max_call: 1e5
     final_ns_dlogz: 0.01
+    difficult_model: True
   dynesty:
     dlogz_goal: 0.1
     #upper_lower: True
     max_call: 1e5
     final_ns_dlogz: 0.01
+    dynamic: False
 ACQ:
   method: 'WIPV'
   WIPV:
