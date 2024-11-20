@@ -188,7 +188,7 @@ class sampler:
         log.info(" Run Completed")
         log.info(f" BO took {time.time() - start:.2f}s")
         samples = input_unstandardize(samples,self.param_bounds)
-        np.savez(self.save_file+'_samples.npz',*samples)
+        np.savez(self.save_file+'_samples.npz',*samples.T)
 
 
     def _check_converged(self,num_step):
