@@ -70,7 +70,6 @@ def matern_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True):
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
     return k
-
 @jit
 def get_var_from_cho(k11_cho,k12,k22):
     vv = solve_triangular(k11_cho,k12,lower=True)
