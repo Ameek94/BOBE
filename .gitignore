@@ -11,3 +11,6 @@
 *.covmat
 *.png
 *.pdf
+*checkpoint.py
+*checkpoint.yaml
+*checkpoint.ipynb
