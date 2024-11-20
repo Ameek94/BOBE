@@ -36,7 +36,7 @@ NS:
     #upper_lower: False
     max_call: 1e5
     final_ns_dlogz: 0.01
-    difficult_model: True
+    difficult_model: False
   dynesty:
     dlogz_goal: 0.1
     #upper_lower: True

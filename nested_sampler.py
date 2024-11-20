@@ -107,18 +107,20 @@ class JaxNS(NestedSampler):
 
     def run(self, final_run: bool, boost_maxcall: int = 1):
         
+        
         model = Model(prior_model=self.prior_model, log_likelihood=self.log_likelihood)
         if final_run:
-            term_cond = TerminationCondition(evidence_uncert=self.final_ns_dlogz)
+            difficult_model = True
+            term_cond = TerminationCondition(evidence_uncert=self.final_ns_dlogz, max_samples=self.max_call*boost_maxcall)
         else:
-            term_cond = TerminationCondition(evidence_uncert=self.dlogz_goal)
+            difficult_model = self.difficult_model
+            term_cond = TerminationCondition(evidence_uncert=self.dlogz_goal, max_samples=self.max_call*boost_maxcall)
         
         start = time.time()
         log.info(" Running Jaxns for logZ computation")
         ns = JaxNestedSampler(model=model,
-                            max_samples=self.max_call*boost_maxcall,
                             parameter_estimation=True,
-                            difficult_model=self.difficult_model)
+                            difficult_model=difficult_model)
                 
         # Run the sampler
         termination_reason, state = ns(jax.random.PRNGKey(42),term_cond=term_cond)

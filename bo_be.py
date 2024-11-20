@@ -189,7 +189,7 @@ class sampler:
             ###    Nested Sampling    ###
             start_ns = time.time()
             if num_step%self.ns_step==0 and self.run_nested_sampler:
-                _, logz_dict = self.NestedSampler.run(final_run=False) #nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.dlogz_goal,maxcall=self.max_call)
+                _, logz_dict = self.NestedSampler.run(final_run=False)
                 log.info(f"Current evidence estimate: {logz_dict['mean']:.4f} ± {(logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']:.4f}")
                 log.info(f"Mean: {logz_dict['mean']:.4f}, Upper Bound: {logz_dict['upper']:.4f}, Lower Bound: {logz_dict['lower']:.4f}")
             else:
@@ -211,10 +211,13 @@ class sampler:
                 self.gp.save(self.save_file)
                 log.info(f" Run training data and hyperparameters saved at step {num_step}")
 
-        samples, logz_dict = self.NestedSampler.run(final_run=True) #nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.final_ns_dlogz,difficult_model=True)
+        samples, logz_dict = self.NestedSampler.run(final_run=True)
         log.info(f" Final LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
         log.info(" Run Completed")
-        log.info(f" BO took {time.time() - start:.2f}s took {self.ninit+self.acq_batch_size*num_step} samples for a final evidence of {logz_dict['mean']:.4f} ± { ((logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']):.4f}")
+        final_logz = logz_dict['mean']
+        final_dlogz = (logz_dict['upper'] - logz_dict['lower'])/2
+        final_dlogz_err = logz_dict['dlogz sampler']
+        log.info(f" BO took {time.time() - start:.2f}s took {self.ninit+self.acq_batch_size*num_step} samples for a final evidence of {final_logz:.4f} ± {final_dlogz:.4f} ± {final_dlogz_err:.4f}")
         samples = input_unstandardize(samples,self.param_bounds)
         np.savez(self.save_file+'_samples.npz',*samples)
 
