@@ -45,13 +45,13 @@ class input_settings:
             try:
                 assert file is not None
                 with open(file,'r') as f:
-                    self.settings = yaml.load(f,Loader=loader) 
+                    self.settings = yaml.load(f,Loader=loader)
             except FileNotFoundError:
                 self.settings = self.defaults
                 print("Run settings not found, reverting to defaults")
         else:
             self.settings = input_dict # type: ignore
-            
+
         self.set_gp_settings()
         self.set_acq_settings()
         self.set_ns_settings()

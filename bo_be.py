@@ -66,10 +66,11 @@ class sampler:
                                 ,input_dict=None)
         self.settings = inputs.settings
         log.info(" Loaded input settings")
-
+        
+        self.timing = {'GP': [], 'NS': [], 'ACQ': [], 'Likelihood': []}
+        self.integral_accuracy = {'mean': [0], 'upper': [100000], 'lower': [-100000], 'dlogz sampler': [10]}
         # initialize BO settings
         self.init_run_settings()
-
         # then initialize the model, params, bounds
         if cobaya_model:
             points, lls = self._cobaya_init(cobaya_input_file,cobaya_start=cobaya_start) # type: ignore
@@ -128,7 +129,9 @@ class sampler:
         # once GP is initialized, we can now initialize the acquisition function and its optimizers
         self.init_aquisition(rng_key)
 
-        # need to properly set up the nested sampler with the input settings
+        # initialise NS settings
+        self.init_ns_settings()
+        self.run_nested_sampler = False
 
         # testrun
         # samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.1,difficult_model=False
@@ -147,43 +150,64 @@ class sampler:
             rng_key, _ = random.split(random.PRNGKey(seed), 2)
             # get new point from acquisition function optimization
             # x0 =  np.random.uniform(0,1,self.acq_batch_size*self.ndim) # get better initial point
+            ###  Acquisition Function  ###
+            start_a = time.time()
             max_idx = np.argmax(self.train_y)
             x0 = self.train_x[max_idx]
             pt,val = self.acq.optimize(x0)
             self.acq_val = abs(val)
             next_x = jnp.atleast_2d(pt)
+            end_a = time.time()
+            self.timing['ACQ'].append(end_a-start_a)
+            log.info(f" Acquisition Optimisation took {self.timing['ACQ'][-1]:.4f} s")
             log.info(f" Next point at x = {self._print_point(pt)} with acquisition function value = {val:.4e}")
-            # update gp with new point
+            #############################
+            ###   Evaluate New Point  ###
             start_l = time.time()
             next_y = self.logp(next_x)
-            log.info(f" Likelihood evaluation took {time.time()-start_l:.4f} s")
-            self.train_x = jnp.concatenate([self.train_x,next_x])
-            self.train_y = jnp.concatenate([self.train_y,next_y])
+            end_l = time.time()
+            self.timing['Likelihood'].append(end_l-start_l)
+            log.info(f" Likelihood evaluation took {self.timing['Likelihood'][-1]:.4f} s")
+            log.info(f" Current best loglike = {self.train_y[max_idx]} at {self._print_point(self.train_x[max_idx])} \nLoglike at new point = {next_y}")
+            #############################
             if (num_step%4==0 and num_step>0):
                 jax.clear_caches() # hack for managing memory until I implement GP pytree 
-            log.info(f" Current best loglike = {self.train_y[max_idx]} at {self._print_point(self.train_x[max_idx])} \nLoglike at new point = {next_y}")
+            ###       Train GP        ###
+            start_gp = time.time()
+            self.train_x = jnp.concatenate([self.train_x,next_x])
+            self.train_y = jnp.concatenate([self.train_y,next_y])
             if (num_step%self.gpfit_step==0):
                 self.gp.update(next_x,next_y,rng_key)
                 self.acq.update_mc_points(rng_key)
             else:
                 self.gp.quick_update(next_x,next_y)
-            
-            if (num_step % self.ns_step==0 and num_step>0):
-                _, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.1,difficult_model=False)
-                log.info(f" LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
+
+            end_gp = time.time()
+            self.timing['GP'].append(end_gp-start_gp)
+            log.info(f" GP Training took {self.timing['GP'][-1]:.4f} s")
+            #############################
+            ###    Nested Sampling    ###
+            start_ns = time.time()
+            if num_step%self.ns_step==0 and self.run_nested_sampler:
+                _, logz_dict = nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.dlogz_goal,maxcall=self.max_call)
+                log.info(f"Current evidence estimate: {logz_dict['mean']:.4f} ± {(logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']:.4f}")
+                log.info(f"Mean: {logz_dict['mean']:.4f}, Upper Bound: {logz_dict['upper']:.4f}, Lower Bound: {logz_dict['lower']:.4f}")
+            else:
+                logz_dict = {'mean': logz_dict['mean'][-1], 'upper': logz_dict['upper'][-1], 'lower': logz_dict['lower'][-1], 'dlogz sampler': logz_dict['dlogz sampler'][-1]}
+            self.integral_accuracy = {key: self.integral_accuracy[key] + [logz_dict[key]] for key in self.integral_accuracy.keys()}
+            end_ns = time.time()
+            self.timing['NS'].append(end_ns-start_ns)
+            log.info(f" Nested Sampling took {self.timing['NS'][-1]:.4f} s")
+            #############################
+                
+            log.info(f" --------------------Step {num_step+1} completed in {sum(values[-1] for values in self.timing.values()):.4f}s-------------------\n")
 
             # save if needed
             if ((num_step%self.save_step==0 and self.save) or self.converged):
                 self.gp.save(self.save_file)
                 log.info(f" Run training data and hyperparameters saved at step {num_step}")
 
-            # check convergence
-            log.info(f" ----------------------Step {num_step+1} complete----------------------\n")
-            num_step+=1
-            self.converged = self._check_converged(num_step)
-
-
-        samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.01,difficult_model=True)
+        samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=self.final_ns_dlogz,difficult_model=True)
         log.info(f" Final LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
         log.info(" Run Completed")
         log.info(f" BO took {time.time() - start:.2f}s")
@@ -193,12 +217,15 @@ class sampler:
 
     def _check_converged(self,num_step):
         acq = (self.acq_val < self.acq_goal)
+        ns_converged = (self.integral_accuracy['upper'][-1] - self.integral_accuracy['lower'][-1] < self.precision_goal)
         steps = (num_step >= self.max_steps)
         if acq:
-            log.info(" Acquisition goal reached")
+            self.run_nested_sampler = True
+            if ns_converged:
+                log.info(" Acquisition goal reached")
         if steps:
             log.info(" Max steps reached")
-        return acq or steps
+        return ns_converged or steps
 
     def _ext_logp(self,x,loglike):
         x  = input_unstandardize(x,self.param_bounds)
@@ -247,7 +274,11 @@ class sampler:
         method = self.settings['BO']['method']
         for key,val in self.settings['BO'][method].items():
             setattr(self,key,val)
-
+            
+    def init_ns_settings(self):
+        method = self.settings['NS']['method']
+        for key,val in self.settings['NS'][method].items():
+            setattr(self,key,val)
 
     def init_aquisition(self,rng_key):
         # acqs = {EI: "EI", WIPV: "WIPV"}
