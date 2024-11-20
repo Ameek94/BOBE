@@ -2,8 +2,6 @@ BO:
   method: evidence
   evidence:
     max_steps: 100
-    # cobaya_model_file: ./examples/cosmo_input/LCDM_2D.yaml
-    # external_model: model.py
     acq_goal: 1e-8
     acq_batch_size: 1
     precision_goal: 5e-1
@@ -25,21 +23,20 @@ GP:
     thinning: 16
     vmap_size: 8
     standardise_y: True
-    noise: 1e-6
+    noise: 1e-8
     kernel: rbf
     min_lengthscale: 1e-3
     max_lengthscale: 100.
 NS:
   method: 'jaxns'
   jaxns:
-    dlogz_goal: 0.1
-    #upper_lower: False
+    dlogz_goal: 0.3
     max_call: 1e5
-    final_ns_dlogz: 0.01
+    final_ns_dlogz: 0.1
     difficult_model: False
+    parameter_estimation: False
   dynesty:
     dlogz_goal: 0.1
-    #upper_lower: True
     max_call: 1e5
     final_ns_dlogz: 0.01
     dynamic: False
@@ -54,7 +51,7 @@ ACQ:
   EI:
     zeta: 0.
 optimizer:
-  method: 'scipy_bh'
+  method: 'optax'
   bobyqa:
     seek_global_minimum: False
   scipy_bh: 
