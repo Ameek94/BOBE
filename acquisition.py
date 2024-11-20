@@ -214,7 +214,7 @@ def optim_optax(acq_func,x0: np.ndarray,ndim: int
     if jax.device_count()>1:
         res = jax.pmap(findoptim,devices=jax.devices())(xi)
     else:
-        res = jax.vmap(findoptim,)(xi) # or jax.lax.map(findoptim,x0)
+        res = jax.vmap(findoptim,)(xi) # or jax.lax.map(findoptim,xi)
 
     best_val, idx = np.min(res[1]), np.argmin(res[1])
     best_params = res[0][idx]
