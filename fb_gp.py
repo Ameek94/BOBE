@@ -120,7 +120,7 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True
     mcmc.run(rng_key,gp.train_x,extra_fields=("potential_energy",),init_params=init_params)
     if verbose:
         mcmc.print_summary(exclude_deterministic=False)
-    print(f"MCMC took {time.time()-start:.4f} s")
+    log.info(f" Sampled parameters MCMC took {time.time()-start:.4f} s")
     nuts_samples = mcmc.get_samples()['x'] 
     return nuts_samples
 
@@ -178,7 +178,7 @@ class numpyro_model:
         if verbose:
             mcmc.print_summary(exclude_deterministic=False)
         extras = mcmc.get_extra_fields()
-        log.info(f" MCMC elapsed time: {time.time() - start:.2f}s")
+        log.info(f" Hyperparameters MCMC elapsed time: {time.time() - start:.2f}s")
 
         return mcmc.get_samples(), extras # type: ignore
 
@@ -364,6 +364,7 @@ class saas_fbgp:
         var = get_var_from_cho(k11_cho,k12,k22)
         return (var,)
     
+    # is vmap/map or batching mc_points needed?
     def fantasy_var_fb(self,x_new,mc_points): 
         vmap_func = lambda l,o: self._fantasy_var_fb(x_new=x_new,lengthscales=l,outputscales=o,mc_points=mc_points)
         vmap_arrays = (self.samples["kernel_length"], self.samples["kernel_var"])

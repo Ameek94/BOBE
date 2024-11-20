@@ -16,7 +16,7 @@ GP:
   method: fullybayesian
   fullybayesian:
     warmup_steps: 512
-    num_samples: 512
+    num_samples: 1024
     thinning: 16
     vmap_size: 8
     standardise_y: True
@@ -40,22 +40,22 @@ ACQ:
   method: WIPV
   WIPV:
     num_samples: 512
-    warmup_steps: 512
+    warmup_steps: 1024
     thinning: 8
     batch_size: 1
   # EI:
   #   zeta: 0.
   #   batch_size: 1
 optimizer:
-  method: optax
+  method: scipy_bh
   # bobyqa:
   #   seek_global_minimum: False
-  # scipy_bh:
-  #   stepsize: 1/5
-  #   niter: 15
-  #   minimizer_kwargs:
-  #     method: L-BFGS-B  
-  optax: 
-    steps: 250
-    start_learning_rate: 1e-2
+  scipy_bh:
+    stepsize: 0.1
+    niter: 8
+    minimizer_kwargs:
+      method: L-BFGS-B  
+  # optax: 
+  #   steps: 100
+  #   start_learning_rate: 1e-2
 

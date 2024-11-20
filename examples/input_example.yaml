@@ -1,16 +1,16 @@
 BO:
   method: evidence
   evidence:
-    max_steps: 12
+    max_steps: 24
     acq_goal: 1e-8
     feedback_lvl: 1
     init_strat: Sobol
-    ninit: 16
+    ninit: 8
     gpfit_step: 1
     save: True
     save_file: 'test'
     save_step: 5
-    ns_step: 10
+    ns_step: 25
     seed: 0
 GP:
   method: fullybayesian

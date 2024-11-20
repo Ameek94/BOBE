@@ -5,8 +5,7 @@ os.environ['XLA_FLAGS'] = f"--xla_force_host_platform_device_count={num_devices}
 sys.path.append('../')
 from bo_be import sampler
 import jax
-print(f"Num deivecs = {jax.device_count()}")
-from nested_sampler import nested_sampling_jaxns
+print(f"Num devices = {jax.device_count()}")
 
 
 
