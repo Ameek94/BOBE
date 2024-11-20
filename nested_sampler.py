@@ -54,35 +54,6 @@ class NestedSampler():
     def run(self, *args: Any, **kwds: Any) -> Any:
         raise NotImplementedError
 
-
-
-#-------------JAXNS functions---------------------
-
-class JaxNS(NestedSampler):
-    
-    def __init__(self
-                ,gp: saas_fbgp
-                ,ns_kwargs: dict[str,Any]
-                #,dlogz_goal: float
-                #,final_ns_dlogz: float
-                ,ndim: int
-                #,max_call: int
-                #,difficult_model: bool
-                ,batch_size: int = 1000) -> None:
-        
-        super().__init__(gp, ndim, ns_kwargs, name="JaxNS")
-        self.difficult_model=ns_kwargs['difficult_model']
-        self.batch_size = batch_size
-    
-    def log_likelihood(self, x):
-        mu, var = self.gp.posterior(x,single=True,unstandardize=True)
-        mu = mu.squeeze(-1)
-        return mu
-        
-    def prior_model(self):
-        x = yield Prior(tfpd.Uniform(low=jnp.zeros(self.ndim), high= jnp.ones(self.ndim)), name='x') # type: ignore
-        return x
-
     def compute_integrals(self, logl=None, logvol=None, reweight=None):
         assert logl is not None
         assert logvol is not None
@@ -105,6 +76,33 @@ class JaxNS(NestedSampler):
             saved_logwt = saved_logwt + reweight
         saved_logz = np.logaddexp.accumulate(saved_logwt)
         return saved_logz
+
+#-------------JAXNS functions---------------------
+
+class JaxNS(NestedSampler):
+    
+    def __init__(self
+                ,gp: saas_fbgp
+                ,ns_kwargs: dict[str,Any]
+                #,dlogz_goal: float
+                #,final_ns_dlogz: float
+                ,ndim: int
+                #,max_call: int
+                #,difficult_model: bool
+                ,batch_size: int = 50) -> None:
+        
+        super().__init__(gp, ndim, ns_kwargs, name="JaxNS")
+        self.difficult_model=ns_kwargs['difficult_model']
+        self.batch_size = batch_size
+    
+    def log_likelihood(self, x):
+        mu, var = self.gp.posterior(x,single=True,unstandardize=True)
+        mu = mu.squeeze(-1)
+        return mu
+        
+    def prior_model(self):
+        x = yield Prior(tfpd.Uniform(low=jnp.zeros(self.ndim), high= jnp.ones(self.ndim)), name='x') # type: ignore
+        return x
 
 
     def run(self, final_run: bool, boost_maxcall: int = 1):
@@ -178,30 +176,6 @@ class DynestyNS(NestedSampler):
         
     def prior_transform(self, x):
         return x
-    
-    # dynesty utility function for computing evidence
-    def compute_integrals(self, logl=None, logvol=None, reweight=None):
-        assert logl is not None
-        assert logvol is not None
-        loglstar_pad = np.concatenate([[-1.e300], logl])
-        # we want log(exp(logvol_i)-exp(logvol_(i+1)))
-        # assuming that logvol0 = 0
-        # log(exp(LV_{i})-exp(LV_{i+1})) =
-        # = LV{i} + log(1-exp(LV_{i+1}-LV{i}))
-        # = LV_{i+1} - (LV_{i+1} -LV_i) + log(1-exp(LV_{i+1}-LV{i}))
-        dlogvol = np.diff(logvol, prepend=0)
-        logdvol = logvol - dlogvol + np.log1p(-np.exp(dlogvol))
-        # logdvol is log(delta(volumes)) i.e. log (X_i-X_{i-1})
-        logdvol2 = logdvol + math.log(0.5)
-        # These are log(1/2(X_(i+1)-X_i))
-        dlogvol = -np.diff(logvol, prepend=0)
-        # this are delta(log(volumes)) of the run
-        # These are log((L_i+L_{i_1})*(X_i+1-X_i)/2)
-        saved_logwt = np.logaddexp(loglstar_pad[1:], loglstar_pad[:-1]) + logdvol2
-        if reweight is not None:
-            saved_logwt = saved_logwt + reweight
-        saved_logz = np.logaddexp.accumulate(saved_logwt)
-        return saved_logz
         
     def loglike(self, x) -> Any:
         mu, var = self.gp.posterior(x,single=True,unstandardize=True)
