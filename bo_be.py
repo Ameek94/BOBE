@@ -130,14 +130,8 @@ class sampler:
         self.init_aquisition(rng_key)
 
         # initialise NS settings
-        #self.init_ns_settings()
         self.init_nestedSampler()
-        self.run_nested_sampler = False
-
-        # testrun
-        # samples, logz_dict =  nested_sampling_jaxns(self.gp,ndim=self.ndim,dlogz=0.1,difficult_model=False
-        #                                             ,logz_std=True,batch_size=50)
-        # log.info(f" Initial LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
+        self.run_nested_sampler = -1
 
     def run(self):
         """
@@ -149,8 +143,6 @@ class sampler:
         while not self.converged:
             seed = num_step
             rng_key, _ = random.split(random.PRNGKey(seed), 2)
-            # get new point from acquisition function optimization
-            # x0 =  np.random.uniform(0,1,self.acq_batch_size*self.ndim) # get better initial point
             ###  Acquisition Function  ###
             start_a = time.time()
             max_idx = np.argmax(self.train_y)
@@ -188,12 +180,16 @@ class sampler:
             #############################
             ###    Nested Sampling    ###
             start_ns = time.time()
-            if num_step%self.ns_step==0 and self.run_nested_sampler:
-                _, logz_dict = self.NestedSampler.run(final_run=False)
-                log.info(f"Current evidence estimate: {logz_dict['mean']:.4f} ± {(logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']:.4f}")
-                log.info(f"Mean: {logz_dict['mean']:.4f}, Upper Bound: {logz_dict['upper']:.4f}, Lower Bound: {logz_dict['lower']:.4f}")
+            if self.run_nested_sampler > 0:
+                if (num_step - self.run_nested_sampler)%self.ns_step==0:
+                    _, logz_dict = self.NestedSampler.run(final_run=False)
+                    log.info(f"Current evidence estimate: {logz_dict['mean']:.4f} ± {(logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']:.4f}")
+                    log.info(f"Mean: {logz_dict['mean']:.4f}, Upper Bound: {logz_dict['upper']:.4f}, Lower Bound: {logz_dict['lower']:.4f}")
+                else:
+                    logz_dict = {'mean': self.integral_accuracy['mean'][-1], 'upper': self.integral_accuracy['upper'][-1], 'lower': self.integral_accuracy['lower'][-1], 'dlogz sampler': self.integral_accuracy['dlogz sampler'][-1]}
             else:
                 logz_dict = {'mean': self.integral_accuracy['mean'][-1], 'upper': self.integral_accuracy['upper'][-1], 'lower': self.integral_accuracy['lower'][-1], 'dlogz sampler': self.integral_accuracy['dlogz sampler'][-1]}
+                
             self.integral_accuracy = {key: self.integral_accuracy[key] + [logz_dict[key]] for key in self.integral_accuracy.keys()}
             end_ns = time.time()
             self.timing['NS'].append(end_ns-start_ns)
@@ -227,7 +223,7 @@ class sampler:
         ns_converged = (self.integral_accuracy['upper'][-1] - self.integral_accuracy['lower'][-1] < self.precision_goal)
         steps = (num_step >= self.max_steps)
         if acq:
-            self.run_nested_sampler = True
+            self.run_nested_sampler = num_step
             if ns_converged:
                 log.info(" Acquisition goal reached")
         if steps:
