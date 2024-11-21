@@ -63,9 +63,10 @@ def matern_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True):
     """
     The Matern-5/2 kernel
     """
-    _dist = jnp.sqrt(dist_sq(xa/lengthscales,xb/lengthscales))
-    exp = jnp.exp(-sqrt5*_dist)
-    poly = 1 + _dist*(sqrt5 + _dist*5/3)
+    dsq = dist_sq(xa/lengthscales,xb/lengthscales)
+    d = jnp.sqrt(jnp.where(dsq<1e-30,1e-30,dsq))
+    exp = jnp.exp(-sqrt5*d)
+    poly = 1. + d*(sqrt5 + d*5./3.)
     k = outputscale*poly*exp
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
