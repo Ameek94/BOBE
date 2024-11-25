@@ -13,7 +13,8 @@ enable_x64()
 from fb_gp import saas_fbgp
 
 try:
-    from dynesty import NestedSampler,DynamicNestedSampler
+    from dynesty import NestedSampler as DynestyNestedSampler
+    from dynesty import DynamicNestedSampler as DynestyDynamicNestedSampler
 except ModuleNotFoundError:
     print("Proceeding without dynesty since not installed")
 import math
@@ -25,8 +26,6 @@ from jaxns.framework.prior import Prior
 from jaxns import NestedSampler as JaxNestedSampler
 from jaxns import TerminationCondition, resample
 
-from dynesty import NestedSampler as DynestyNestedSampler
-from dynesty import DynamicNestedSampler as DynestyDynamicNestedSampler
 import logging
 log = logging.getLogger("[NS]")
 
@@ -54,6 +53,7 @@ class NestedSampler():
     def run(self, *args: Any, **kwds: Any) -> Any:
         raise NotImplementedError
 
+    # utility function taken from Dynesty
     def compute_integrals(self, logl=None, logvol=None, reweight=None):
         assert logl is not None
         assert logvol is not None
@@ -83,16 +83,17 @@ class JaxNS(NestedSampler):
     
     def __init__(self
                 ,gp: saas_fbgp
-                ,ns_kwargs: dict[str,Any]
                 #,dlogz_goal: float
                 #,final_ns_dlogz: float
                 ,ndim: int
                 #,max_call: int
                 #,difficult_model: bool
+                ,ns_kwargs: dict[str,Any] = {'difficult_model': False, 'parameter_estimation': False}
                 ,batch_size: int = 50) -> None:
         
         super().__init__(gp, ndim, ns_kwargs, name="JaxNS")
         self.difficult_model=ns_kwargs['difficult_model']
+        self.parameter_estimation = ns_kwargs['parameter_estimation']
         self.batch_size = batch_size
     
     def log_likelihood(self, x):
@@ -111,15 +112,17 @@ class JaxNS(NestedSampler):
         model = Model(prior_model=self.prior_model, log_likelihood=self.log_likelihood)
         if final_run:
             difficult_model = True
+            parameter_estimation = False
             term_cond = TerminationCondition(evidence_uncert=self.final_ns_dlogz, max_samples=self.max_call*boost_maxcall)
         else:
             difficult_model = self.difficult_model
+            parameter_estimation = self.parameter_estimation
             term_cond = TerminationCondition(evidence_uncert=self.dlogz_goal, max_samples=self.max_call*boost_maxcall)
         
         start = time.time()
         log.info(" Running Jaxns for logZ computation")
         ns = JaxNestedSampler(model=model,
-                            parameter_estimation=True,
+                            parameter_estimation=parameter_estimation,
                             difficult_model=difficult_model)
                 
         # Run the sampler

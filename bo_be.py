@@ -70,8 +70,8 @@ class sampler:
         self.timing = {'GP': [], 'NS': [], 'ACQ': [], 'Likelihood': []}
         self.integral_accuracy = {'mean': [np.nan], 'upper': [np.nan], 'lower': [np.nan], 'dlogz sampler': [np.nan]}
         self.plot_data = {'acq_check': [], 'outputscale': [], 'lengthscales': [], 'mll': []} #To store data for summary plot
-        self.save_plot = False #DEBUG: SHOULD NOT BE COMMITED
-        self.show_plot = True #DEBUG: SHOULD NOT BE COMMITED
+        self.save_plot = True #DEBUG: SHOULD NOT BE COMMITED
+        self.show_plot = False #DEBUG: SHOULD NOT BE COMMITED
         # initialize BO settings
         self.init_run_settings()
         # then initialize the model, params, bounds
@@ -108,7 +108,7 @@ class sampler:
                 lengthscales = jnp.array(run_data["lengthscales"])
                 outputscales = jnp.array(run_data["outputscales"])
             self.gp = saas_fbgp(self.train_x,self.train_y,
-                                sample_lengthscales=lengthscales,sample_outputscales=outputscales,
+                                sample_lengthscales=lengthscales,sample_outputscales=outputscales,num_chains=jax.device_count()
                                 **self.gp_settings) 
             log.info(f"Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
         else:
@@ -124,7 +124,8 @@ class sampler:
                         self.train_y = np.concatenate([self.train_y,np.atleast_2d(ll)])
             log.info(f" Initial loglikes \n{self.train_y.T}")
             log.info(f" Sampler will start with {len(self.train_y)} points and run for a maximum of {self.max_steps} steps")
-            self.gp = saas_fbgp(self.train_x,self.train_y,
+            log.info(f" Number of Chains Initialised as: {jax.device_count()}")
+            self.gp = saas_fbgp(self.train_x,self.train_y,num_chains=jax.device_count(),
                                 **self.gp_settings)             
             self.gp.fit(rng_key)
             log.info(f" Initialized {self.gp_method} GP with settings {self.gp_settings}")
@@ -225,7 +226,8 @@ class sampler:
                         wspace=0.2, 
                         hspace=0.2)
             if self.save_plot:
-                fig.savefig(f"GIFs/{ndim}D/{loglike.__qualname__}_step_{curr_step}.png")
+                log.info(f"Saving Plot to GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
+                fig.savefig(f"GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
             if self.show_plot:
                 plt.show()
             #############################
@@ -249,7 +251,7 @@ class sampler:
         final_dlogz_err = logz_dict['dlogz sampler']
         log.info(f" BO took {time.time() - start:.2f}s took {self.ninit+self.acq_batch_size*num_step} samples for a final evidence of {final_logz:.4f} ± {final_dlogz:.4f} ± {final_dlogz_err:.4f}")
         samples = input_unstandardize(samples,self.param_bounds)
-        np.savez(self.save_file+'_samples.npz',*samples)
+        np.savez(self.save_file+'_samples.npz',*samples.T)
 
 
     def _check_converged(self,num_step):

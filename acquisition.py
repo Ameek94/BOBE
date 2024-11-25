@@ -209,9 +209,10 @@ def optim_optax(acq_func,x0: np.ndarray,ndim: int
         opt_state = optimizer.init(params)
         (params, _ ), acqvals = scan(step,(params,opt_state),length=max_iters) # scan is much faster but more complicated to terminate early
         return (params,acqvals[-1])
-    
-    xi = x0 + jump_sdev*np.random.randn(jax.device_count(),ndim)
-    if jax.device_count()>1:
+    num_jax_devices = jax.device_count()
+    xi = x0 + jump_sdev*np.random.randn(num_jax_devices,ndim)
+    log.info(f" Acquisition Function Optimisation running on {num_jax_devices} devices")
+    if num_jax_devices>1:
         res = jax.pmap(findoptim,devices=jax.devices())(xi)
     else:
         res = jax.vmap(findoptim,)(xi) # or jax.lax.map(findoptim,xi)
@@ -248,6 +249,7 @@ def optim_optax(acq_func,x0: np.ndarray,ndim: int
     #     params = optax.projections.projection_hypercube(params)
 
     return best_params, best_val
+
 
 # some gradient free optimizers (e.g. from iminuit or pybobyqa)
 
