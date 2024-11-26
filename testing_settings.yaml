@@ -1,9 +1,9 @@
 BO:
   method: evidence
   evidence:
-    max_steps: 200
-    acq_goal: 1e-1
-    precision_goal: 0.01
+    max_steps: 300
+    acq_goal: 1e-6
+    precision_goal: 0.1
     feedback_lvl: 1
     init_strat: Sobol
     ninit: 16

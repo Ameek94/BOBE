@@ -157,11 +157,12 @@ class numpyro_model:
         tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(0.1))
         inv_length_sq = numpyro.sample("_kernel_inv_length_sq",dist.HalfCauchy(jnp.ones(self.ndim))) # type: ignore
         lengthscales = numpyro.deterministic("kernel_length",1/jnp.sqrt(tausq*inv_length_sq)) # type: ignore
+        mean = numpyro.sample("mean", dist.Normal(0, 1))
         k = self.kernel_func(self.train_x,self.train_x,lengthscales,outputscale,noise=self.noise,include_noise=True) 
         mll = numpyro.sample(
                 "Y",
                 dist.MultivariateNormal(
-                    loc=jnp.zeros(self.train_x.shape[0]), # type: ignore
+                    loc = mean,  #jnp.zeros(self.train_x.shape[0]), # type: ignore
                     covariance_matrix=k,
                 ),
                 obs=self.train_y.squeeze(-1),)
@@ -171,7 +172,7 @@ class numpyro_model:
     # how can we speed up the MCMC when we already have a large number of samples? main bottleneck -> inversion of kernel
    def run_mcmc(self,rng_key,dense_mass=True,max_tree_depth=6,
                 warmup_steps=512,num_samples=512,num_chains=1,thinning=16,
-                progbar=True,verbose=False,init_params=None,
+                progbar=True,verbose=True,init_params=None,
                 ) -> dict:
         start = time.time()
         kernel = NUTS(self.model,
