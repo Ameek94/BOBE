@@ -2,18 +2,16 @@ BO:
   method: evidence
   evidence:
     max_steps: 300
-    acq_goal: 1e-6
-    precision_goal: 0.1
+    acq_goal: 1e-5
+    precision_goal: 5e-1
     feedback_lvl: 1
     init_strat: Sobol
     ninit: 16
     gpfit_step: 1
-    save: False
-    save_file: 'test'
+    save: True
+    save_file: 'cosmo'
     save_step: 5
     ns_step: 10
-    save_plot: True
-    show_plot: False
     seed: 0
 GP:
   method: fullybayesian
@@ -23,7 +21,7 @@ GP:
     thinning: 16
     vmap_size: 8
     standardise_y: True
-    noise: 1e-8
+    noise: 1e-6
     kernel: rbf
     min_lengthscale: 1.e-3
     max_lengthscale: 100.
@@ -51,7 +49,12 @@ ACQ:
 optimizer:
   method: optax
   optax: 
-    steps: 100
+    steps: 50
     start_learning_rate: 1e-2
-    n_restarts: 4
+    n_restarts: 16
     jump_sdev: 0.1
+  scipy_bh: 
+    stepsize: 0.2
+    niter: 15
+    minimizer_kwargs:
+      method: L-BFGS-B  

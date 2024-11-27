@@ -69,9 +69,9 @@ class sampler:
         
         self.timing = {'GP': [], 'NS': [], 'ACQ': [], 'Likelihood': []}
         self.integral_accuracy = {'mean': [np.nan], 'upper': [np.nan], 'lower': [np.nan], 'dlogz sampler': [np.nan]}
-        self.plot_data = {'acq_check': [], 'outputscale': [], 'lengthscales': [], 'mll': []} #To store data for summary plot
-        self.save_plot = True #DEBUG: SHOULD NOT BE COMMITED
-        self.show_plot = False #DEBUG: SHOULD NOT BE COMMITED
+        self.plot_data = {'acq_check': [], 'outputscale': [], 'lengthscales': [], 'mean': [], 'mll': []} #To store data for summary plot
+        self.save_plot = False #DEBUG: SHOULD NOT BE COMMITED
+        self.show_plot = True #DEBUG: SHOULD NOT BE COMMITED
         # initialize BO settings
         self.init_run_settings()
         # then initialize the model, params, bounds
@@ -184,11 +184,13 @@ class sampler:
             self.plot_data['mll'].append(self.gp.samples['minus_log_prob']) #DEBUG: SHOULD NOT BE COMMITED
             self.plot_data['lengthscales'].append(self.gp.get_median_lengthscales()) #DEBUG: SHOULD NOT BE COMMITED
             self.plot_data['outputscale'].append(self.gp.get_median_outputscales()) #DEBUG: SHOULD NOT BE COMMITED
+            self.plot_data['mean'].append(self.gp.samples['mean'])
             log.info(f" GP Training took {self.timing['GP'][-1]:.4f} s")
             #############################
             ###    Nested Sampling    ###
             start_ns = time.time()
             if self.run_nested_sampler > 0:
+                log.info(f"Nested Sampler Step {num_step-self.run_nested_sampler}, {(num_step - self.run_nested_sampler)%self.ns_step}")
                 if (num_step - self.run_nested_sampler)%self.ns_step==0:
                     _, logz_dict = self.NestedSampler.run(final_run=False)
                     log.info(f"Current evidence estimate: {logz_dict['mean']:.4f} ± {(logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']:.4f}")
@@ -207,9 +209,9 @@ class sampler:
             import matplotlib
             import matplotlib.pyplot as plt
             from plot_utils import acq_check_metric_plot, FBGP_hyperparameter_plot, FBGP_mll_plot, integral_accuracy_plot, integral_metrics_plot, timing_plot
-            fig,ax = plt.subplots(4, 3, figsize=(25, 30))
-            fig.delaxes(ax[3,0])
-            fig.delaxes(ax[3,2])
+            fig,ax = plt.subplots(3, 3, figsize=(25, 30))
+            #fig.delaxes(ax[3,0])
+            #fig.delaxes(ax[3,2])
             fig.suptitle(f"Iteration: {num_step}, #Samples: {self.ninit+num_step}") #Add batch size
             self.ax = ax
             self.fig = fig
@@ -259,7 +261,8 @@ class sampler:
         ns_converged = (self.integral_accuracy['upper'][-1] - self.integral_accuracy['lower'][-1] < self.precision_goal)
         steps = (num_step >= self.max_steps)
         if acq:
-            self.run_nested_sampler = num_step
+            if self.run_nested_sampler == -1:
+                self.run_nested_sampler = num_step
             if ns_converged:
                 log.info(" Acquisition goal reached")
         if steps:

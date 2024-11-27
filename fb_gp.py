@@ -88,7 +88,7 @@ def get_mean_from_cho(k11_cho,k12,train_y):
     mean = mu[:,0]  
     return mean
 
-def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True,thinning=2,verbose=False
+def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=False,thinning=2,verbose=False
                    ,init_params=None):
     """
     Sample x using the GP mean as the logprob
@@ -297,7 +297,7 @@ class saas_fbgp:
         self.fitted = True
         self.update_choleskys()
 
-    def update(self,x_new,y_new,rng_key,progbar=True,verbose=False):
+    def update(self,x_new,y_new,rng_key,progbar=False,verbose=False):
         """
         Updates train_x and train_y, numpyro model and refit the GP using NUTS
         """
@@ -411,7 +411,11 @@ class saas_fbgp:
         vmap_arrays = (self.samples["kernel_length"], self.samples["kernel_var"])
         var = split_vmap(vmap_func,vmap_arrays,batch_size=self.vmap_size)[0]
         return var
-    
+    def fantasy_var_fb_acq(self, x_new, mc_points):
+        l, o = MAP_lengthscale, MAP_outputscale = self.get_map_hyperparams()
+        var = self._fantasy_var_fb(x_new=x_new,lengthscales=l,outputscales=o,mc_points=mc_points)[0]
+        return var
+
     def get_map_hyperparams(self):
         map_idx = jnp.argmin(self.samples["minus_log_prob"])
         l = self.samples["kernel_length"][map_idx,:]

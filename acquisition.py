@@ -137,7 +137,7 @@ class WIPV(Acquisition):
                 ,ndim: int
                 ,batch_size: int
                 ,optimizer_settings: dict[str,Any]
-                ,mcmc_kwargs: dict[str,Any] = {'num_samples': 512, 'warmup_steps': 512, 'thinning': 16, 'progress_bar': True, 'verbose': False}
+                ,mcmc_kwargs: dict[str,Any] = {'num_samples': 512, 'warmup_steps': 512, 'thinning': 16, 'progress_bar': False, 'verbose': False}
                 )-> None:
         super().__init__(gp,ndim,optimizer_settings,name="WIPV")
         self.mcmc_kwargs = mcmc_kwargs
@@ -152,9 +152,10 @@ class WIPV(Acquisition):
         return self.variance(X)
     
     def variance(self,X):
-        var = self.gp.fantasy_var_fb(X,self.mc_points)
+        #var = self.gp.fantasy_var_fb(X,self.mc_points)
+        var = self.gp.fantasy_var_fb_acq(X, self.mc_points)
         var = var.mean(axis=-1)
-        var = var.mean(axis=-1)
+        #var = var.mean(axis=-1)
         return var
         # +ve can be directly minimized
 
@@ -190,63 +191,35 @@ def optim_optax(acq_func,x0: np.ndarray,ndim: int
     optimizer = optax.adam(start_learning_rate)
     params = jnp.array(x0)
     opt_state = optimizer.init(params)
-    # start = time.time()
     max_iters = ndim*steps
 
     @jit
     def step(carry,xs):
         params, opt_state = carry
-     # grads = acq_grad(params)
-        acqval, gradval = value_and_grad(acq_func)(params)
+        acqval, gradval = value_and_grad(acq_func)(params) 
         updates, opt_state = optimizer.update(gradval, opt_state)
         params = optax.apply_updates(params, updates)
         params = optax.projections.projection_hypercube(params)
         carry = params, opt_state
         return carry, acqval
-
+    @jit
     def findoptim(x0):
         params = x0
         opt_state = optimizer.init(params)
         (params, _ ), acqvals = scan(step,(params,opt_state),length=max_iters) # scan is much faster but more complicated to terminate early
         return (params,acqvals[-1])
-    num_jax_devices = jax.device_count()
-    xi = x0 + jump_sdev*np.random.randn(num_jax_devices,ndim)
-    log.info(f" Acquisition Function Optimisation running on {num_jax_devices} devices")
-    if num_jax_devices>1:
-        res = jax.pmap(findoptim,devices=jax.devices())(xi)
-    else:
-        res = jax.vmap(findoptim,)(xi) # or jax.lax.map(findoptim,xi)
-
+        
+    
+    log.info(f" Acquisition Function Optimisation running on {jax.device_count()} devices")
+    #if jax.device_count()>1:
+    #    xi = x0 + jump_sdev*np.random.randn(jax.device_count() ,ndim)
+    #    res = jax.pmap(findoptim,devices=jax.devices())(xi)
+    #else:
+    xi = x0 + jump_sdev*np.random.randn(n_restarts ,ndim)
+    res = jax.lax.map(findoptim, xi) # or jax.vmap(findoptim,)(xi)
     best_val, idx = np.min(res[1]), np.argmin(res[1])
     best_params = res[0][idx]
 
-        # xi = x0
-        # for i in range(n_restarts):
-        #     xi = x0 + jump_sdev*np.random.randn(ndim)  # jump from x0 always or previous xi?
-        #     params = jnp.array(xi)
-        #     params = optax.projections.projection_hypercube(xi)
-        #     opt_state = optimizer.init(params)
-        #     (params, _ ), acqvals = scan(step,(params,opt_state),length=max_iters)
-        #     if best_val>acqvals[-1]:
-        #         best_val = acqvals[-1]
-        #         best_params = params
-
-    #(params, _ ), fvals = scan(step,(params,opt_state),length=max_iters) # scan is much faster but more complicated to terminate early
-    # print(f"Optax optimizer took {time.time() - start:.4f}s")
-
-    # just for testing
-    # plt.semilogy(np.arange(max_iters),fvals)
-    # plt.xlabel(r'Step')
-    # plt.ylabel(r'Acq val')
-    # plt.tight_layout()
-    # plt.show()
-
-    # acq_grad = grad(acq_func)
-    # for _ in range(max_iters):
-    #     grads = acq_grad(params)
-    #     updates, opt_state = optimizer.update(grads, opt_state)
-    #     params = optax.apply_updates(params, updates)
-    #     params = optax.projections.projection_hypercube(params)
 
     return best_params, best_val
 
