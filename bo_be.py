@@ -72,6 +72,9 @@ class sampler:
         self.plot_data = {'acq_check': [], 'outputscale': [], 'lengthscales': [], 'mean': [], 'mll': []} #To store data for summary plot
         self.save_plot = False #DEBUG: SHOULD NOT BE COMMITED
         self.show_plot = True #DEBUG: SHOULD NOT BE COMMITED
+        self.cobaya_model = cobaya_model #DEBUG: SHOULD NOT BE COMMITED
+        self.cobaya_input_file = cobaya_input_file #DEBUG: SHOULD NOT BE COMMITED
+        self.outputscale_prior_samples = [] #DEBUG: SHOULD NOT BE COMMITED
         # initialize BO settings
         self.init_run_settings()
         # then initialize the model, params, bounds
@@ -150,6 +153,7 @@ class sampler:
             ###  Acquisition Function  ###
             start_a = time.time()
             max_idx = np.argmax(self.train_y)
+            min_idx = np.argmin(self.train_y)
             x0 = self.train_x[max_idx]
             pt,val = self.acq.optimize(x0)
             self.acq_val = abs(val)
@@ -167,6 +171,7 @@ class sampler:
             self.timing['Likelihood'].append(end_l-start_l)
             log.info(f" Likelihood evaluation took {self.timing['Likelihood'][-1]:.4f} s")
             log.info(f" Current best loglike = {self.train_y[max_idx]} at {self._print_point(self.train_x[max_idx])} \nLoglike at new point = {next_y}")
+            log.info(f" Current worst loglike = {self.train_y[min_idx]} at {self._print_point(self.train_x[min_idx])}")
             #############################
             if (num_step%4==0 and num_step>0):
                 jax.clear_caches() # hack for managing memory until I implement GP pytree 
@@ -183,8 +188,8 @@ class sampler:
             self.timing['GP'].append(end_gp-start_gp)
             self.plot_data['mll'].append(self.gp.samples['minus_log_prob']) #DEBUG: SHOULD NOT BE COMMITED
             self.plot_data['lengthscales'].append(self.gp.get_median_lengthscales()) #DEBUG: SHOULD NOT BE COMMITED
+            log.info(f" Std for Y Data: {self.gp.y_std}")
             self.plot_data['outputscale'].append(self.gp.get_median_outputscales()) #DEBUG: SHOULD NOT BE COMMITED
-            self.plot_data['mean'].append(self.gp.samples['mean'])
             log.info(f" GP Training took {self.timing['GP'][-1]:.4f} s")
             #############################
             ###    Nested Sampling    ###
@@ -208,13 +213,16 @@ class sampler:
             ###       Plotting        ###
             import matplotlib
             import matplotlib.pyplot as plt
-            from plot_utils import acq_check_metric_plot, FBGP_hyperparameter_plot, FBGP_mll_plot, integral_accuracy_plot, integral_metrics_plot, timing_plot
+            from plot_utils import acq_check_metric_plot, FBGP_hyperparameter_plot, FBGP_mll_plot, integral_accuracy_plot, integral_metrics_plot, timing_plot, get_outputscale_prior, plot_outputscale_prior
             fig,ax = plt.subplots(3, 3, figsize=(25, 30))
             #fig.delaxes(ax[3,0])
             #fig.delaxes(ax[3,2])
             fig.suptitle(f"Iteration: {num_step}, #Samples: {self.ninit+num_step}") #Add batch size
             self.ax = ax
             self.fig = fig
+            #if len(self.outputscale_prior_samples) == 0:
+            #    self.outputscale_prior_samples = get_outputscale_prior()
+            #self.ax = plot_outputscale_prior(self)
             self.ax = acq_check_metric_plot(self, num_step+1)
             self.ax = FBGP_hyperparameter_plot(self, num_step+1)
             self.ax = FBGP_mll_plot(self, num_step+1)
@@ -228,10 +236,15 @@ class sampler:
                         wspace=0.2, 
                         hspace=0.2)
             if self.save_plot:
-                log.info(f"Saving Plot to GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
-                fig.savefig(f"GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
+                if self.cobaya_model == False:
+                    log.info(f"Saving Plot to GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
+                    fig.savefig(f"GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
+                else:
+                    log.info(f"Saving Plot to GIFs/{self.ndim}D/{self.cobaya_input_file}_step_{num_step}.png")
+                    fig.savefig(f"GIFs/{self.ndim}D/{self.cobaya_input_file}_step_{num_step}.png")
             if self.show_plot:
                 plt.show()
+            plt.close(fig)
             #############################
                 
             log.info(f" --------------------Step {num_step+1} completed in {sum(values[-1] for values in self.timing.values()):.4f}s-------------------\n")
@@ -251,6 +264,7 @@ class sampler:
         final_logz = logz_dict['mean']
         final_dlogz = (logz_dict['upper'] - logz_dict['lower'])/2
         final_dlogz_err = logz_dict['dlogz sampler']
+        
         log.info(f" BO took {time.time() - start:.2f}s took {self.ninit+self.acq_batch_size*num_step} samples for a final evidence of {final_logz:.4f} ± {final_dlogz:.4f} ± {final_dlogz_err:.4f}")
         samples = input_unstandardize(samples,self.param_bounds)
         np.savez(self.save_file+'_samples.npz',*samples.T)

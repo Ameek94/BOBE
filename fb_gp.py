@@ -2,6 +2,7 @@
 # doi: 10.1080/00401706.2018.1469433 (see also SAASBO on GitHub) and the BoTorch FullyBayesianGP with minor changes
 #
 
+import math
 from math import sqrt
 import time
 from typing import Any,List
@@ -59,7 +60,7 @@ def rbf_kernel(xa,
     """
     sq_dist = dist_sq(xa/lengthscales,xb/lengthscales) 
     sq_dist = jnp.exp(-0.5*sq_dist)
-    k = outputscale*sq_dist
+    k = jnp.square(outputscale)*sq_dist
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
     return k
@@ -103,7 +104,7 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=Fals
             raise NotImplementedError
         @jit
         def log_prob(self,x):
-            val, _ = gp.GPSample_posterior(x,single=True,unstandardize=True)
+            val, _ = gp.posterior(x,single=True,unstandardize=True) #gp.GPSample_posterior(x,single=True,unstandardize=True)
             return val
 
     def model(train_x):
@@ -135,8 +136,12 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=Fals
     if verbose:
         mcmc.print_summary(exclude_deterministic=False)
     log.info(f" Sampled parameters MCMC took {time.time()-start:.4f} s")
-    nuts_samples = mcmc.get_samples()['x'] 
-    return nuts_samples
+    samples = mcmc.get_samples(group_by_chain=True)
+    flattened_samples = {k: v.reshape(-1, *v.shape[2:]) for k, v in samples.items()}
+    final_thinned_samples = {k: v[::num_chains] for k, v in flattened_samples.items()}
+    print({k: v.shape for k, v in final_thinned_samples.items()})
+    #nuts_samples = mcmc.get_samples()['x'] 
+    return final_thinned_samples['x']
 
 
 class numpyro_model:
@@ -157,12 +162,11 @@ class numpyro_model:
         tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(0.1))
         inv_length_sq = numpyro.sample("_kernel_inv_length_sq",dist.HalfCauchy(jnp.ones(self.ndim))) # type: ignore
         lengthscales = numpyro.deterministic("kernel_length",1/jnp.sqrt(tausq*inv_length_sq)) # type: ignore
-        mean = numpyro.sample("mean", dist.Normal(0, 1))
         k = self.kernel_func(self.train_x,self.train_x,lengthscales,outputscale,noise=self.noise,include_noise=True) 
         mll = numpyro.sample(
                 "Y",
                 dist.MultivariateNormal(
-                    loc = mean,  #jnp.zeros(self.train_x.shape[0]), # type: ignore
+                    loc = jnp.zeros(self.train_x.shape[0]), # type: ignore
                     covariance_matrix=k,
                 ),
                 obs=self.train_y.squeeze(-1),)
@@ -196,8 +200,11 @@ class numpyro_model:
             mcmc.print_summary(exclude_deterministic=False)
         extras = mcmc.get_extra_fields()
         log.info(f" Hyperparameters MCMC elapsed time: {time.time() - start:.2f}s")
-
-        return mcmc.get_samples(), extras # type: ignore
+        samples = mcmc.get_samples(group_by_chain=True)
+        flattened_samples = {k: v.reshape(-1, *v.shape[2:]) for k, v in samples.items()}
+        final_thinned_samples = {k: v[::num_chains] for k, v in flattened_samples.items()}
+        print({k: v.shape for k, v in final_thinned_samples.items()})
+        return final_thinned_samples, extras # type: ignore
 
     # add method to start from previous map hyperparams
    def fit_gp_NUTS(self,rng_key,dense_mass=True,max_tree_depth=6,

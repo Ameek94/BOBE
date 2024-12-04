@@ -167,7 +167,15 @@ class JaxNS(NestedSampler):
                         samples=results.samples,
                         log_weights=results.log_dp_mean, # type: ignore
                         replace=True,) 
-        
+        if final_run:
+            if self.save_plot:
+                if self.cobaya_model:
+                    log.info(f"Saving Final Posterior to GIFs/{self.ndim}D/{self.cobaya_input_file.split(".")[0]}_final_posterior.png")
+                    ns.plot_cornerplot(results, save_file=f"GIFs/{self.ndim}D/{self.cobaya_input_file.split(".")[0]}_final_posterior.png")
+                else:
+                    log.info(f"Saving Final Posterior to GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
+                    ns.plot_cornerplot(results, save_file=f"GIFs/{self.ndim}D/{self.objfun.name}_final_posterior.png")
+                    
         return np.array(samples['x']), logz_dict
 
 #-------------Dynesty functions---------------------

@@ -154,8 +154,8 @@ class WIPV(Acquisition):
     def variance(self,X):
         #var = self.gp.fantasy_var_fb(X,self.mc_points)
         var = self.gp.fantasy_var_fb_acq(X, self.mc_points)
-        var = var.mean(axis=-1)
         #var = var.mean(axis=-1)
+        var = var.mean(axis=-1)
         return var
         # +ve can be directly minimized
 

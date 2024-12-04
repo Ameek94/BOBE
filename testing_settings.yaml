@@ -2,12 +2,12 @@ BO:
   method: evidence
   evidence:
     max_steps: 300
-    acq_goal: 1e-5
+    acq_goal: 1e-10
     precision_goal: 5e-1
     feedback_lvl: 1
     init_strat: Sobol
     ninit: 16
-    gpfit_step: 1
+    gpfit_step: 10
     save: True
     save_file: 'cosmo'
     save_step: 5
@@ -16,9 +16,9 @@ BO:
 GP:
   method: fullybayesian
   fullybayesian:
-    warmup_steps: 512
-    num_samples: 512
-    thinning: 16
+    warmup_steps: 128
+    num_samples: 256
+    thinning: 8
     vmap_size: 8
     standardise_y: True
     noise: 1e-6
@@ -30,7 +30,7 @@ NS:
   jaxns:
     dlogz_goal: 0.1
     max_call: 1e5
-    difficult_model: True
+    difficult_model: False
     final_ns_dlogz: 0.01
     parameter_estimation: True
   dynesty:
@@ -42,16 +42,16 @@ NS:
 ACQ:
   method: WIPV
   WIPV:
-    num_samples: 512
+    num_samples: 256
     warmup_steps: 512
-    thinning: 8
+    thinning: 4
     batch_size: 1
 optimizer:
   method: optax
   optax: 
-    steps: 50
+    steps: 100
     start_learning_rate: 1e-2
-    n_restarts: 16
+    n_restarts: 4
     jump_sdev: 0.1
   scipy_bh: 
     stepsize: 0.2

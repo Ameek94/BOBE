@@ -7,6 +7,13 @@ import glob
 import contextlib
 from PIL import Image
 
+import numpyro
+import numpyro.distributions as dist
+from numpyro.infer import MCMC, NUTS
+import jax
+from jax import random
+import math
+
 
 def png2gif(curr_step, loglike_name, ndim):
     log.info(f"Generating GIF from plot frames: GIFs/{ndim}D/{loglike_name}_{curr_step}steps_{ndim}D.gif")
@@ -26,6 +33,36 @@ def png2gif(curr_step, loglike_name, ndim):
                  save_all=True, duration=300, loop=1)
 
 
+def get_outputscale_prior():
+    def model():
+        outputscale = numpyro.sample("kernel_var", dist.Gamma(concentration=2.,rate=0.15))
+
+    # Set up HMC
+    nuts_kernel = NUTS(model)
+    mcmc = MCMC(nuts_kernel, num_warmup=256, num_samples=512, num_chains=jax.device_count(), thinning=16)
+    rng_key = random.PRNGKey(0)
+    
+    # Run MCMC
+    mcmc.run(rng_key)
+    #samples = mcmc.get_samples()['kernel_var']
+
+    samples = mcmc.get_samples(group_by_chain=True)
+    flattened_samples = {k: v.reshape(-1, *v.shape[2:]) for k, v in samples.items()}
+    final_thinned_samples = {k: v[::jax.device_count()] for k, v in flattened_samples.items()}
+    print({k: v.shape for k, v in final_thinned_samples.items()})
+    return final_thinned_samples
+
+    
+
+def plot_outputscale_prior(BOBE):
+    ax = BOBE.ax
+    ax[0, 2].hist(BOBE.outputscale_prior_samples, histtype='step', color='r', label='prior')
+    ax[0, 2].hist(BOBE.gp.samples['kernel_var'], color='b')
+    ax[0, 2].set_title('Outputscale Prior vs Samples')
+    ax[0, 2].legend()
+    
+    return ax
+
 def acq_check_metric_plot(BOBE, curr_step):
     ax = BOBE.ax
     acq_goal = BOBE.acq_goal
@@ -44,20 +81,13 @@ def FBGP_hyperparameter_plot(BOBE, curr_step):
     ax = BOBE.ax
     FBGP_outputscale = BOBE.plot_data['outputscale']
     FBGP_lengthscales = BOBE.plot_data['lengthscales']
-    FBGP_mean = np.mean(np.array(BOBE.plot_data['mean']), axis=-1)
     ndim = np.array(FBGP_lengthscales).shape[-1]
     ### Outputscale ###
     ax[1, 0].plot(np.linspace(0, curr_step, curr_step), FBGP_outputscale, marker="o")
-    ax[1, 0].text(0.1, 0.99, f"Max: {np.max(FBGP_outputscale[-1])} Min: {np.min(FBGP_outputscale[-1])}", ha='left', va='top', transform=ax[1, 0].transAxes)
+    #ax[1, 0].text(0.1, 0.99, f"Max: {np.max(FBGP_outputscale[-1])} Min: {np.min(FBGP_outputscale[-1])}", ha='left', va='top', transform=ax[1, 0].transAxes)
     ax[1, 0].set_xlabel("Step Number")
     ax[1, 0].set_ylabel("Outputscale")
     ax[1, 0].set_title("FBGP Outputscale")
-
-    ax[0, 2].plot(np.linspace(0, curr_step, curr_step), FBGP_mean, marker="o")
-    #ax[0, 2].text(0.1, 0.99, f"Max: {np.max(FBGP_mean[-1])} Min: {np.min(FBGP_mean[-1])}", ha='left', va='top', transform=ax[1, 0].transAxes)
-    ax[0, 2].set_xlabel("Step Number")
-    ax[0, 2].set_ylabel("Mean")
-    ax[0, 2].set_title("FBGP mean")
     
     
     for l in range(1,  ndim+1):
@@ -67,13 +97,13 @@ def FBGP_hyperparameter_plot(BOBE, curr_step):
             lengthscale = np.array(FBGP_lengthscales)[..., l-1]
             ax[1, 1].plot(np.linspace(1, curr_step, curr_step),lengthscale, marker="o", label=f"Lengthscale x{l}")
             #We want to move the text label down each time we plot again on the same plot we know there have been n/2 + 1 even numbers
-            ax[1, 1].text(0.1, 0.99-(l/2)*(.05), f"Max: {np.array(FBGP_lengthscales)[..., l-1][-1].max()} Min: {np.array(FBGP_lengthscales)[:, l-1][-1].min()}", ha='left', va='top', transform=ax[1, 1].transAxes)
+            #ax[1, 1].text(0.1, 0.99-(l/2)*(.05), f"Max: {np.array(FBGP_lengthscales)[..., l-1][-1].max()} Min: {np.array(FBGP_lengthscales)[:, l-1][-1].min()}", ha='left', va='top', transform=ax[1, 1].transAxes)
         if l%2 == 1: #Odd for [1, 2]
             #lengthscale = np.mean(np.array(FBGP_lengthscales)[..., l], axis=1)
             lengthscale = np.array(FBGP_lengthscales)[..., l-1]
             ax[1, 2].plot(np.linspace(1, curr_step, curr_step),lengthscale, marker="o", label=f"Lengthscale x{l}")
             #We want to move the text label down each time we plot again on the same plot we know there have been floor(n/2 + 1) odd numbers
-            ax[1, 2].text(0.1, 0.99-(np.floor(l/2))*(.05), f"Max: {np.array(FBGP_lengthscales)[..., l-1][-1].max()} Min: {np.array(FBGP_lengthscales)[:, l-1][-1].min()}", ha='left', va='top', transform=ax[1, 2].transAxes)
+            #ax[1, 2].text(0.1, 0.99-(np.floor(l/2))*(.05), f"Max: {np.array(FBGP_lengthscales)[..., l-1][-1].max()} Min: {np.array(FBGP_lengthscales)[:, l-1][-1].min()}", ha='left', va='top', transform=ax[1, 2].transAxes)
     ax[1, 1].set_title('FBGP Lengthscales')
     ax[1, 1].sharey(ax[1, 2])
     ax[1, 1].legend(loc='lower left')
