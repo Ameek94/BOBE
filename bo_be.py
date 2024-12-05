@@ -336,6 +336,10 @@ class sampler:
         ns_kwargs = self.settings['NS'][ns_method]
         if ns_method=="jaxns":
             self.NestedSampler = JaxNS(gp=self.gp
+                                      ,save_plot = self.save_plot #DEBUG: SHOULD NOT BE COMMITED
+                                      ,cobaya_model = self.cobaya_model #DEBUG: SHOULD NOT BE COMMITED
+                                      ,cobaya_input_file = self.cobaya_input_file #DEBUG: SHOULD NOT BE COMMITED
+                                      ,objfun = self.objfun #DEBUG: SHOULD NOT BE COMMITED
                                       ,ndim=self.ndim,
                                        ns_kwargs=ns_kwargs)
         elif ns_method=="dynesty":
