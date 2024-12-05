@@ -147,7 +147,7 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=Fals
 class numpyro_model:
    # Note - train_x and train_y received here are already transformed, npoints x ndim and npoints x 1
    def __init__(self, train_x,  train_y, #train_yvar, 
-                kernel_func=rbf_kernel,noise=1e-8) -> None:
+                kernel_func=rbf_kernel,noise=1e-4) -> None:
       self.train_x = train_x 
       self.train_y = train_y
       self.ndim = train_x.shape[-1]

@@ -1,12 +1,12 @@
 BO:
   method: evidence
   evidence:
-    max_steps: 300
-    acq_goal: 1e-10
+    max_steps: 1000
+    acq_goal: 1e-8
     precision_goal: 5e-1
     feedback_lvl: 1
     init_strat: Sobol
-    ninit: 16
+    ninit: 8
     gpfit_step: 10
     save: True
     save_file: 'cosmo'
@@ -16,9 +16,9 @@ BO:
 GP:
   method: fullybayesian
   fullybayesian:
-    warmup_steps: 128
-    num_samples: 256
-    thinning: 8
+    warmup_steps: 64
+    num_samples: 128
+    thinning: 4
     vmap_size: 8
     standardise_y: True
     noise: 1e-6

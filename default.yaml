@@ -14,7 +14,6 @@ BO:
     save_step: 5
     ns_step: 10
     seed: 0
-    feedback_lvl: 1
 GP:
   method: fullybayesian
   fullybayesian:
