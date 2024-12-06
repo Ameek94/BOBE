@@ -70,11 +70,12 @@ class sampler:
         self.timing = {'GP': [], 'NS': [], 'ACQ': [], 'Likelihood': []}
         self.integral_accuracy = {'mean': [np.nan], 'upper': [np.nan], 'lower': [np.nan], 'dlogz sampler': [np.nan]}
         self.plot_data = {'acq_check': [], 'outputscale': [], 'lengthscales': [], 'mean': [], 'mll': []} #To store data for summary plot
-        self.save_plot = False #DEBUG: SHOULD NOT BE COMMITED
+        self.save_plot = True #DEBUG: SHOULD NOT BE COMMITED
         self.show_plot = True #DEBUG: SHOULD NOT BE COMMITED
         self.cobaya_model = cobaya_model #DEBUG: SHOULD NOT BE COMMITED
         self.cobaya_input_file = cobaya_input_file #DEBUG: SHOULD NOT BE COMMITED
         self.outputscale_prior_samples = [] #DEBUG: SHOULD NOT BE COMMITED
+        self.save_file_path = f"GIFs/{ndim}D/" #DEBUG: SHOULD NOT BE COMMITED
         # initialize BO settings
         self.init_run_settings()
         # then initialize the model, params, bounds
@@ -107,13 +108,12 @@ class sampler:
             with np.load(resume_file) as run_data:
                 self.train_x = jnp.array(run_data['train_x'])
                 self.train_y = jnp.array(run_data['train_y'])
-                self.param_bounds = run_data['param_bounds']
                 lengthscales = jnp.array(run_data["lengthscales"])
                 outputscales = jnp.array(run_data["outputscales"])
             self.gp = saas_fbgp(self.train_x,self.train_y,
-                                sample_lengthscales=lengthscales,sample_outputscales=outputscales,num_chains=jax.device_count()
+                                sample_lengthscales=lengthscales,sample_outputscales=outputscales,
                                 **self.gp_settings) 
-            log.info(f"Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
+            log.info(f" Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
         else:
             self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(self.ninit)
             self.train_y = np.reshape(self.logp(self.train_x),(self.ninit,1))
@@ -237,11 +237,11 @@ class sampler:
                         hspace=0.2)
             if self.save_plot:
                 if self.cobaya_model == False:
-                    log.info(f"Saving Plot to GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
-                    fig.savefig(f"GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
+                    log.info(f"Saving Plot to {self.save_file_path}/{self.objfun.name}_step_{num_step}.png")
+                    fig.savefig(f"{self.save_file_path}/{self.objfun.name}_step_{num_step}.png")
                 else:
-                    log.info(f"Saving Plot to GIFs/{self.ndim}D/{self.cobaya_input_file}_step_{num_step}.png")
-                    fig.savefig(f"GIFs/{self.ndim}D/{self.cobaya_input_file}_step_{num_step}.png")
+                    log.info(f"Saving Plot to {self.save_file_path}/{self.cobaya_input_file}_step_{num_step}.png")
+                    fig.savefig(f"{self.save_file_path}/{self.cobaya_input_file}_step_{num_step}.png")
             if self.show_plot:
                 plt.show()
             plt.close(fig)
@@ -255,7 +255,8 @@ class sampler:
 
             # save if needed
             if ((num_step%self.save_step==0 and self.save) or self.converged):
-                self.gp.save(self.save_file)
+                self.gp.save(self.save_file, 
+                             self.save_file_path) #DEBUG: SHOULD NOT BE COMMITED
                 log.info(f" Run training data and hyperparameters saved at step {num_step}")
 
         samples, logz_dict = self.NestedSampler.run(final_run=True)
@@ -267,7 +268,7 @@ class sampler:
         
         log.info(f" BO took {time.time() - start:.2f}s took {self.ninit+self.acq_batch_size*num_step} samples for a final evidence of {final_logz:.4f} ± {final_dlogz:.4f} ± {final_dlogz_err:.4f}")
         samples = input_unstandardize(samples,self.param_bounds)
-        np.savez(self.save_file+'_samples.npz',*samples.T)
+        np.savez(self.save_file_path + self.save_file+'_samples.npz',*samples.T)
 
 
     def _check_converged(self,num_step):
@@ -337,6 +338,8 @@ class sampler:
         if ns_method=="jaxns":
             self.NestedSampler = JaxNS(gp=self.gp
                                       ,save_plot = self.save_plot #DEBUG: SHOULD NOT BE COMMITED
+                                      ,show_plot = self.show_plot #DEBUG: SHOULD NOT BE COMMITEDs
+                                      ,save_file_path = self.save_file_path #DEBUG: SHOULD NOT BE COMMITED
                                       ,cobaya_model = self.cobaya_model #DEBUG: SHOULD NOT BE COMMITED
                                       ,cobaya_input_file = self.cobaya_input_file #DEBUG: SHOULD NOT BE COMMITED
                                       ,objfun = self.objfun #DEBUG: SHOULD NOT BE COMMITED

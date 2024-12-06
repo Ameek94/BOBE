@@ -84,6 +84,8 @@ class JaxNS(NestedSampler):
     def __init__(self
                 ,gp: saas_fbgp
                 ,save_plot: bool #DEBUG: SHOULD NOT BE COMMITED
+                ,show_plot: bool #DEBUG: SHOULD NOT BE COMMITED
+                ,save_file_path: str #DEBUG: SHOULD NOT BE COMMITED
                 ,cobaya_model: bool #DEBUG: SHOULD NOT BE COMMITED
                 ,cobaya_input_file: str #DEBUG: SHOULD NOT BE COMMITED
                 ,objfun #DEBUG: SHOULD NOT BE COMMITED
@@ -100,6 +102,8 @@ class JaxNS(NestedSampler):
         self.parameter_estimation = ns_kwargs['parameter_estimation']
         self.batch_size = batch_size
         self.save_plot = save_plot
+        self.show_plot = show_plot
+        self.save_file_path = save_file_path
         self.cobaya_model = cobaya_model
         self.objfun = objfun
     
@@ -180,8 +184,9 @@ class JaxNS(NestedSampler):
                     log.info(f"Saving Final Posterior to GIFs/{self.ndim}D/{self.cobaya_input_file.split('.')[0]}_final_posterior.png")
                     ns.plot_cornerplot(results, save_name=f"GIFs/{self.ndim}D/{self.cobaya_input_file.split('.')[0]}_final_posterior.png")
                 else:
-                    log.info(f"Saving Final Posterior to GIFs/{self.ndim}D/{self.objfun.name}_step_{num_step}.png")
-                    ns.plot_cornerplot(results)
+                    ns.plot_cornerplot(results, save_name=f"{self.save_file_path}/{self.objfun.name}_final_posterior.png")
+            if self.show_plot:
+                ns.plot_cornerplot(results)
                     
         return np.array(samples['x']), logz_dict
 

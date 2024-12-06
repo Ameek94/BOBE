@@ -2,15 +2,15 @@ BO:
   method: evidence
   evidence:
     max_steps: 1000
-    acq_goal: 1e-8
+    acq_goal: 1e-5
     precision_goal: 5e-1
     feedback_lvl: 1
     init_strat: Sobol
     ninit: 8
     gpfit_step: 10
     save: True
-    save_file: 'cosmo'
-    save_step: 5
+    save_file: 'restart'
+    save_step: 10
     ns_step: 10
     seed: 0
 GP:

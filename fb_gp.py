@@ -60,7 +60,7 @@ def rbf_kernel(xa,
     """
     sq_dist = dist_sq(xa/lengthscales,xb/lengthscales) 
     sq_dist = jnp.exp(-0.5*sq_dist)
-    k = jnp.square(outputscale)*sq_dist
+    k = outputscale*sq_dist #jnp.square(
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
     return k
@@ -448,8 +448,8 @@ class saas_fbgp:
         median_mll = jnp.median(mlls)
         return median_mll
     
-    def save(self,save_file):
-        jnp.savez(save_file+'.npz'
+    def save(self,save_file, save_file_path):
+        jnp.savez(save_file_path + save_file+'.npz'
                 ,train_x = self.train_x
                 ,train_y= self.train_y
                 ,lengthscales=self.samples["kernel_length"]
