@@ -111,8 +111,9 @@ class sampler:
                 lengthscales = jnp.array(run_data["lengthscales"])
                 outputscales = jnp.array(run_data["outputscales"])
             self.gp = saas_fbgp(self.train_x,self.train_y,
-                                sample_lengthscales=lengthscales,sample_outputscales=outputscales,
-                                **self.gp_settings) 
+                                sample_lengthscales=lengthscales,sample_outputscales=outputscales, num_chains=jax.device_count(),
+                                **self.gp_settings)
+            self.gp.fit(rng_key)
             log.info(f" Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
         else:
             self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(self.ninit)
@@ -237,10 +238,10 @@ class sampler:
                         hspace=0.2)
             if self.save_plot:
                 if self.cobaya_model == False:
-                    log.info(f"Saving Plot to {self.save_file_path}/{self.objfun.name}_step_{num_step}.png")
+                    log.info(f" Saving Plot to {self.save_file_path}/{self.objfun.name}_step_{num_step}.png")
                     fig.savefig(f"{self.save_file_path}/{self.objfun.name}_step_{num_step}.png")
                 else:
-                    log.info(f"Saving Plot to {self.save_file_path}/{self.cobaya_input_file}_step_{num_step}.png")
+                    log.info(f" Saving Plot to {self.save_file_path}/{self.cobaya_input_file}_step_{num_step}.png")
                     fig.savefig(f"{self.save_file_path}/{self.cobaya_input_file}_step_{num_step}.png")
             if self.show_plot:
                 plt.show()
