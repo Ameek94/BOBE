@@ -25,8 +25,12 @@ from jaxns.framework.prior import Prior
 from jaxns import NestedSampler as JaxNestedSampler
 from jaxns import TerminationCondition, resample
 
-from dynesty import NestedSampler as DynestyNestedSampler
-from dynesty import DynamicNestedSampler as DynestyDynamicNestedSampler
+try:
+    from dynesty import NestedSampler as DynestyNestedSampler
+    from dynesty import DynamicNestedSampler as DynestyDynamicNestedSampler
+except ModuleNotFoundError:
+    print("Proceeding without dynesty since not installed")
+
 import logging
 log = logging.getLogger("[NS]")
 

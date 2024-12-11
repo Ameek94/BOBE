@@ -106,7 +106,7 @@ class sampler:
                 outputscales = jnp.array(run_data["outputscales"])
             self.gp = saas_fbgp(self.train_x,self.train_y,
                                 sample_lengthscales=lengthscales,sample_outputscales=outputscales,
-                                **self.gp_settings) 
+                                num_chains=jax.device_count(), **self.gp_settings) 
             log.info(f"Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
         else:
             self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(self.ninit)
@@ -122,7 +122,7 @@ class sampler:
             log.info(f" Initial loglikes \n{self.train_y.T}")
             log.info(f" Sampler will start with {len(self.train_y)} points and run for a maximum of {self.max_steps} steps")
             self.gp = saas_fbgp(self.train_x,self.train_y,
-                                **self.gp_settings)             
+                                num_chains=jax.device_count(), **self.gp_settings)             
             self.gp.fit(rng_key)
             log.info(f" Initialized {self.gp_method} GP with settings {self.gp_settings}")
 

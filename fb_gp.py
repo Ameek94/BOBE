@@ -106,22 +106,32 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True
         numpyro.sample('y',gp_dist(gp),obs=x)
 
     start = time.time()
+    
+    num_chains=gp.num_chains
+    log.info(f" Posterior Sampling running with {num_chains} chains")
+    
     kernel = NUTS(model,dense_mass=False,
                 max_tree_depth=6)
+
     mcmc = MCMC(kernel,num_warmup=warmup_steps,
                 num_samples=num_samples,
-                num_chains=1,
+                num_chains=num_chains,
                 progress_bar=progress_bar,
-                thinning=thinning,)
-                #jit_model_args=True)
+                thinning=thinning)
+               
     if init_params is not None:
         init_params = util.unconstrain_fn(model,model_args=gp.train_x,model_kwargs=None,params=init_params)
-    mcmc.run(rng_key,gp.train_x,extra_fields=("potential_energy",),init_params=init_params)
+        
+    mcmc.run(rng_key,gp.train_x,init_params=init_params) #,extra_fields=("potential_energy",)
+    
     if verbose:
         mcmc.print_summary(exclude_deterministic=False)
     log.info(f" Sampled parameters MCMC took {time.time()-start:.4f} s")
-    nuts_samples = mcmc.get_samples()['x'] 
-    return nuts_samples
+    samples = mcmc.get_samples(group_by_chain=True)
+    flattened_samples = {k: v.reshape(-1, *v.shape[2:]) for k, v in samples.items()}
+    final_thinned_samples = {k: v[::num_chains] for k, v in flattened_samples.items()}
+    print({k: v.shape for k, v in final_thinned_samples.items()})
+    return final_thinned_samples['x']
 
 
 class numpyro_model:
@@ -162,11 +172,12 @@ class numpyro_model:
         kernel = NUTS(self.model,
                 dense_mass=dense_mass,
                 max_tree_depth=max_tree_depth)
+        log.info(f" MCMC Running with {num_chains} chains")
         mcmc = MCMC(
                 kernel,
                 num_warmup=warmup_steps,
                 num_samples=num_samples,
-                num_chains=1,
+                num_chains=num_chains,
                 progress_bar=progbar,
                 thinning=thinning,
                 )
@@ -177,9 +188,13 @@ class numpyro_model:
         if verbose:
             mcmc.print_summary(exclude_deterministic=False)
         extras = mcmc.get_extra_fields()
-        log.info(f" Hyperparameters MCMC elapsed time: {time.time() - start:.2f}s")
 
-        return mcmc.get_samples(), extras # type: ignore
+        samples = mcmc.get_samples(group_by_chain=True)
+        flattened_samples = {k: v.reshape(-1, *v.shape[2:]) for k, v in samples.items()}
+        final_thinned_samples = {k: v[::num_chains] for k, v in flattened_samples.items()}
+        print({k: v.shape for k, v in final_thinned_samples.items()})
+        log.info(f" Hyperparameters MCMC elapsed time: {time.time() - start:.2f}s")
+        return final_thinned_samples, extras # type: ignore
 
     # add method to start from previous map hyperparams
    def fit_gp_NUTS(self,rng_key,dense_mass=True,max_tree_depth=6,
