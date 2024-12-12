@@ -366,7 +366,30 @@ class saas_fbgp:
             mean = mean.mean(axis=0) 
             var = var.mean(axis=0)    
         return mean, var
+        
+    def GPSample_predict(self,X):
+        X = jnp.atleast_2d(X) # move it to external 
+        vmap_func = lambda cho, l, o :  self.get_mean_var(X=X,k11_cho=cho,lengthscales=l,outputscales=o)
+        MAP_lengthscale, MAP_outputscale = self.get_map_hyperparams()
+        MAP_cholesky = self.get_map_cholesky()
+        #vmap_arrays = (MAP_cholesky, MAP_lengthscale, MAP_outputscale)
+                       #(self.cholesky,
+                       #self.samples["kernel_length"],
+                       #self.samples["kernel_var"])
+        #mean, var = split_vmap(vmap_func,vmap_arrays,batch_size=self.vmap_size)
+        mean, var = vmap_func(MAP_cholesky, MAP_lengthscale, MAP_outputscale)
+        return mean, var
 
+    def GPSample_posterior(self,X,single=False,unstandardize=True): # for use externally
+        mean, var = self.GPSample_predict(X)
+        if unstandardize:
+            mean = mean*self.y_std + self.y_mean
+            var = var*self.y_std**2           
+        if single:
+            mean = mean.mean(axis=0) 
+            var = var.mean(axis=0)    
+        return mean, var
+        
     # think about doing sequential optimization, at the moment joint acquisition is supported
     def _fantasy_var_fb(self,x_new,lengthscales,outputscales,mc_points):
         x_new = jnp.atleast_2d(x_new)
@@ -383,6 +406,11 @@ class saas_fbgp:
         vmap_func = lambda l,o: self._fantasy_var_fb(x_new=x_new,lengthscales=l,outputscales=o,mc_points=mc_points)
         vmap_arrays = (self.samples["kernel_length"], self.samples["kernel_var"])
         var = split_vmap(vmap_func,vmap_arrays,batch_size=self.vmap_size)[0]
+        return var
+
+    def fantasy_var_fb_acq(self, x_new, mc_points):
+        l, o = MAP_lengthscale, MAP_outputscale = self.get_map_hyperparams()
+        var = self._fantasy_var_fb(x_new=x_new,lengthscales=l,outputscales=o,mc_points=mc_points)[0]
         return var
     
     def get_map_hyperparams(self):
