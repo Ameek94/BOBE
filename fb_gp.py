@@ -97,7 +97,7 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True
             raise NotImplementedError
     
         def log_prob(self,x):
-            val, _ = gp.posterior(x,single=True,unstandardize=True)
+            val, _ = gp.GPSample_posterior(x,single=True,unstandardize=True) #gp.posterior(x,single=True,unstandardize=True)
             return val
 
     def model(train_x):
@@ -418,6 +418,10 @@ class saas_fbgp:
         l = self.samples["kernel_length"][map_idx,:]
         o = self.samples["kernel_var"][map_idx]
         return l, o
+        
+    def get_map_cholesky(self):
+        map_idx = jnp.argmin(self.samples["minus_log_prob"])
+        return self.cholesky[map_idx, :]
     
     def get_median_lengthscales(self):
         lengthscales = self.samples["kernel_length"]
