@@ -68,7 +68,9 @@ class sampler:
         log.info(" Loaded input settings")
         
         self.timing = {'GP': [], 'NS': [], 'ACQ': [], 'Likelihood': []}
-        self.integral_accuracy = {'mean': [0], 'upper': [100000], 'lower': [-100000], 'dlogz sampler': [10]}
+        self.integral_accuracy = {'mean': [np.nan], 'upper': [np.nan], 'lower': [np.nan], 'dlogz sampler': [np.nan]}
+        self.plot_data = {'acq_check': [], 'outputscale': [], 'lengthscales': [], 'mean': [], 'mll': []} #To store data for summary plot
+
         # initialize BO settings
         self.init_run_settings()
         # then initialize the model, params, bounds
@@ -132,6 +134,7 @@ class sampler:
         # initialise NS settings
         self.init_nestedSampler()
         self.run_nested_sampler = -1
+        self.final_ns_samples = None
 
     def run(self):
         """
@@ -149,6 +152,7 @@ class sampler:
             x0 = self.train_x[max_idx]
             pt,val = self.acq.optimize(x0)
             self.acq_val = abs(val)
+            self.plot_data['acq_check'].append(self.acq_val)
             next_x = jnp.atleast_2d(pt)
             end_a = time.time()
             self.timing['ACQ'].append(end_a-start_a)
@@ -176,6 +180,9 @@ class sampler:
                 self.gp.quick_update(next_x,next_y)
             end_gp = time.time()
             self.timing['GP'].append(end_gp-start_gp)
+            self.plot_data['mll'].append(self.gp.samples['minus_log_prob']) 
+            self.plot_data['lengthscales'].append(self.gp.get_median_lengthscales()) 
+            self.plot_data['outputscale'].append(self.gp.get_median_outputscales())
             log.info(f" GP Training took {self.timing['GP'][-1]:.4f} s")
             #############################
             ###    Nested Sampling    ###
@@ -207,7 +214,7 @@ class sampler:
                 self.gp.save(self.save_file)
                 log.info(f" Run training data and hyperparameters saved at step {num_step}")
 
-        samples, logz_dict = self.NestedSampler.run(final_run=True)
+        samples, logz_dict, self.final_ns_samples = self.NestedSampler.run(final_run=True)
         log.info(f" Final LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
         log.info(" Run Completed")
         final_logz = logz_dict['mean']
@@ -313,4 +320,48 @@ class sampler:
                             ,optimizer_settings=optimizer_settings
                             ,ei_kwargs=acq_settings)       
         else:
-            raise ValueError('Not a valid acquisition function')    
+            raise ValueError('Not a valid acquisition function')
+            
+    def plot_summary(self, save_file=None, posterior=False, posterior_save_file=None):
+        import matplotlib
+        import matplotlib.pyplot as plt
+        from plot_utils import acq_check_metric_plot, FBGP_hyperparameter_plot, FBGP_mll_plot, integral_accuracy_plot, integral_metrics_plot, timing_plot
+        import getdist
+        from getdist import MCSamples, plots
+        fig,ax = plt.subplots(3, 3, figsize=(25, 30))
+        #fig.delaxes(ax[3,0])
+        #fig.delaxes(ax[3,2])
+        num_step = self.train_x.shape[0] - self.ninit  #Add batch size
+        fig.suptitle(f"Iteration: {num_step}, #Samples: {self.ninit+self.train_x.shape[0]}")
+        self.ax = ax
+        self.fig = fig
+        self.ax = acq_check_metric_plot(self, num_step)
+        self.ax = FBGP_hyperparameter_plot(self, num_step)
+        self.ax = FBGP_mll_plot(self, num_step)
+        if self.run_nested_sampler:
+            self.ax = integral_accuracy_plot(self, num_step)
+            self.ax = integral_metrics_plot(self, num_step)
+        self.ax = timing_plot(self, num_step)
+        plt.tight_layout()
+        plt.subplots_adjust(
+                    top=0.95,
+                    wspace=0.2, 
+                    hspace=0.2)
+        if save_file != None:
+            log.info(f" Saving Plot to {save_file}.png")
+            fig.savefig(f"{save_file}.png")    
+        else:
+            plt.show()
+        plt.close(fig)
+        
+        if posterior:
+            fig = plt.figure()
+            g = MCSamples(samples=self.final_ns_samples) #, labels=self.param_labels)
+            g.plot_triangle(show_titles=True, contour_colors='blue', filled=True)
+            if posterior_save_file != None:
+                plt.savefig(f"{posterior_save_file}.png")
+            else:
+                g.show()
+        plt.close(fig)
+        
+    

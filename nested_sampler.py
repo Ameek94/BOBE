@@ -169,7 +169,7 @@ class JaxNS(NestedSampler):
                         log_weights=results.log_dp_mean, # type: ignore
                         replace=True,) 
         
-        return np.array(samples['x']), logz_dict
+        return (np.array(samples['x']), logz_dict, results) if final_run else (np.array(samples['x']), logz_dict)
 
 #-------------Dynesty functions---------------------
 class DynestyNS(NestedSampler):
