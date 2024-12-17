@@ -97,7 +97,10 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True
             raise NotImplementedError
     
         def log_prob(self,x):
-            val, _ = gp.GPSample_posterior(x,single=True,unstandardize=True) #gp.posterior(x,single=True,unstandardize=True)
+            if gp.simplified_posterior:
+                val, _ = gp.GPSample_posterior(x,single=True,unstandardize=True) 
+            else:
+                val, _ = gp.posterior(x,single=True,unstandardize=True)
             return val
 
     def model(train_x):
@@ -232,6 +235,7 @@ class saas_fbgp:
                  ,num_samples:int = 256
                  ,thinning:int = 16
                  ,dense_mass: bool = True
+                 ,simplified_posterior: bool = False
                  ,max_tree_depth:int = 6
                  ,num_chains: int = 1
                  ,min_lengthscale: float = 1e-3
@@ -258,6 +262,7 @@ class saas_fbgp:
         self.noise = noise
         self.fitted = False
         self.num_samples = 0
+        self.simplified_posterior = simplified_posterior
         self.vmap_size = vmap_size # to process vmap in vmap_size batches
         self.kernel_func = rbf_kernel if kernel=="rbf" else matern_kernel
         

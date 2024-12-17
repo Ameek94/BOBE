@@ -20,6 +20,7 @@ BO:
 GP:
   method: fullybayesian
   fullybayesian:
+    simplified_posterior: False
     warmup_steps: 256
     num_samples: 256
     thinning: 16
@@ -67,4 +68,5 @@ optimizer:
     start_learning_rate: 1e-2
     n_restarts: 4
     jump_sdev: 0.1
+    simplified: False
 

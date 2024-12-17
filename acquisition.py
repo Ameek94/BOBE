@@ -40,6 +40,7 @@ class Acquisition():
         self.ndim = ndim
         self.optimizer_method = optimizer_settings['method']
         self.optimizer_kwargs = optimizer_settings[self.optimizer_method]
+        self.simplified_sampling = self.optimizer_kwargs['simplified']
         self.name = name
         log.info(f" Initialized {name} Acquisition function")
         log.info(f" Acquisition optimizer is {self.optimizer_method} with settings {self.optimizer_kwargs}")
@@ -140,6 +141,7 @@ class WIPV(Acquisition):
                 ,mcmc_kwargs: dict[str,Any] = {'num_samples': 512, 'warmup_steps': 512, 'thinning': 16, 'progress_bar': True, 'verbose': False}
                 )-> None:
         super().__init__(gp,ndim,optimizer_settings,name="WIPV")
+        log.info(f" Simplified Sampling: {self.simplified_sampling}")
         self.mcmc_kwargs = mcmc_kwargs
         self.mc_points = sample_GP_NUTS(gp,rng_key,**mcmc_kwargs)
         log.info(" MC points generated")
@@ -152,10 +154,13 @@ class WIPV(Acquisition):
         return self.variance(X)
     
     def variance(self,X):
-        #var = self.gp.fantasy_var_fb(X,self.mc_points)
-        #var = var.mean(axis=-1)
-        var = self.gp.fantasy_var_fb_acq(X, self.mc_points)
-        var = var.mean(axis=-1)
+        if self.simplified_sampling:
+            var = self.gp.fantasy_var_fb_acq(X, self.mc_points)
+            var = var.mean(axis=-1)
+        else:
+            var = self.gp.fantasy_var_fb(X,self.mc_points)
+            var = var.mean(axis=-1)
+            var = var.mean(axis=-1)
         return var
         # +ve can be directly minimized
 
@@ -187,7 +192,7 @@ def optim_scipy_bh(acq_func,x0,ndim,minimizer_kwargs={'method': 'L-BFGS-B'  },st
 # add here jax based optax or optuna optimizers
 
 def optim_optax(acq_func,x0: np.ndarray,ndim: int
-                ,steps=100,start_learning_rate=1e-2, n_restarts = 4,jump_sdev = 0.1): # needs more work
+                ,steps=100,start_learning_rate=1e-2, n_restarts = 4,jump_sdev = 0.1, simplified= False): # needs more work
     optimizer = optax.adam(start_learning_rate)
     params = jnp.array(x0)
     opt_state = optimizer.init(params)

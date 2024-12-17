@@ -47,7 +47,7 @@ class sampler:
     def __init__(self,
             ndim: Optional[int] = None,
             settings_file: Optional[str] = None,
-            cobaya_model = True,
+            cobaya_model = False,
             cobaya_start: int = 8,
             cobaya_input_file: Optional[str] = None,
             resume_from_file=False,
@@ -355,13 +355,13 @@ class sampler:
         plt.close(fig)
         
         if posterior:
-            fig = plt.figure()
-            g = MCSamples(samples=self.final_ns_samples) #, labels=self.param_labels)
-            g.plot_triangle(show_titles=True, contour_colors='blue', filled=True)
+            g = plots.get_subplot_plotter()
+            samples = MCSamples(samples=self.final_ns_samples.samples['x'], names=self.param_labels, labels=self.param_labels)
+            g.triangle_plot(samples)
             if posterior_save_file != None:
                 plt.savefig(f"{posterior_save_file}.png")
-            else:
-                g.show()
-        plt.close(fig)
+            #else:
+            #    g.show()
+        #plt.close(fig)
         
     
