@@ -188,10 +188,11 @@ class sampler:
             ###    Nested Sampling    ###
             start_ns = time.time()
             if self.run_nested_sampler > 0:
+                log.info(f" NS Step: {(num_step - self.run_nested_sampler)}, {self.ns_step}")
                 if (num_step - self.run_nested_sampler)%self.ns_step==0:
                     _, logz_dict = self.NestedSampler.run(final_run=False)
-                    log.info(f"Current evidence estimate: {logz_dict['mean']:.4f} ± {(logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']:.4f}")
-                    log.info(f"Mean: {logz_dict['mean']:.4f}, Upper Bound: {logz_dict['upper']:.4f}, Lower Bound: {logz_dict['lower']:.4f}")
+                    log.info(f" Current evidence estimate: {logz_dict['mean']:.4f} ± {(logz_dict['upper'] - logz_dict['lower'])/2 + logz_dict['dlogz sampler']:.4f}")
+                    log.info(f" Mean: {logz_dict['mean']:.4f}, Upper Bound: {logz_dict['upper']:.4f}, Lower Bound: {logz_dict['lower']:.4f}")
                 else:
                     logz_dict = {'mean': self.integral_accuracy['mean'][-1], 'upper': self.integral_accuracy['upper'][-1], 'lower': self.integral_accuracy['lower'][-1], 'dlogz sampler': self.integral_accuracy['dlogz sampler'][-1]}
             else:
@@ -230,7 +231,8 @@ class sampler:
         ns_converged = (self.integral_accuracy['upper'][-1] - self.integral_accuracy['lower'][-1] < self.precision_goal)
         steps = (num_step >= self.max_steps)
         if acq:
-            self.run_nested_sampler = num_step
+            if self.run_nested_sampler < 0:
+                self.run_nested_sampler = num_step
             if ns_converged:
                 log.info(" Acquisition goal reached")
         if steps:
@@ -357,7 +359,7 @@ class sampler:
         if posterior:
             g = plots.get_subplot_plotter()
             samples = MCSamples(samples=self.final_ns_samples.samples['x'], names=self.param_labels, labels=self.param_labels)
-            g.triangle_plot(samples)
+            g.triangle_plot(samples, filled=True)
             if posterior_save_file != None:
                 plt.savefig(f"{posterior_save_file}.png")
             #else:
