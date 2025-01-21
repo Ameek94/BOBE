@@ -75,7 +75,8 @@ class sampler:
         self.init_run_settings()
         # then initialize the model, params, bounds
         if cobaya_model:
-            points, lls = self._cobaya_init(cobaya_input_file,cobaya_start=cobaya_start) # type: ignore
+            self.cobaya_start = cobaya_start
+            points, lls = self._cobaya_init(cobaya_input_file,cobaya_start=self.cobaya_start) # type: ignore
         else: # for external model, to clean up
             if isinstance(objfun,external_loglike):
                 self.objfun = objfun
@@ -103,13 +104,14 @@ class sampler:
             with np.load(resume_file) as run_data:
                 self.train_x = jnp.array(run_data['train_x'])
                 self.train_y = jnp.array(run_data['train_y'])
-                self.param_bounds = run_data['param_bounds']
+                #self.param_bounds = run_data['param_bounds']
                 lengthscales = jnp.array(run_data["lengthscales"])
                 outputscales = jnp.array(run_data["outputscales"])
             self.gp = saas_fbgp(self.train_x,self.train_y,
                                 sample_lengthscales=lengthscales,sample_outputscales=outputscales,
                                 num_chains=jax.device_count(), **self.gp_settings) 
-            log.info(f"Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
+            log.info(f" Resuming from file {resume_file} with {self.train_x.shape[0]} previous points")
+            self.gp.fit(rng_key)
         else:
             self.train_x = qmc.Sobol(self.ndim, scramble=True,seed=seed).random(self.ninit)
             self.train_y = np.reshape(self.logp(self.train_x),(self.ninit,1))
@@ -149,6 +151,7 @@ class sampler:
             ###  Acquisition Function  ###
             start_a = time.time()
             max_idx = np.argmax(self.train_y)
+            min_idx = np.argmin(self.train_y)
             x0 = self.train_x[max_idx]
             pt,val = self.acq.optimize(x0)
             self.acq_val = abs(val)
@@ -166,6 +169,7 @@ class sampler:
             self.timing['Likelihood'].append(end_l-start_l)
             log.info(f" Likelihood evaluation took {self.timing['Likelihood'][-1]:.4f} s")
             log.info(f" Current best loglike = {self.train_y[max_idx]} at {self._print_point(self.train_x[max_idx])} \nLoglike at new point = {next_y}")
+            log.info(f" Current Worst loglike = {self.train_y[min_idx]} at {self._print_point(self.train_x[min_idx])}")
             #############################
             if (num_step%4==0 and num_step>0):
                 jax.clear_caches() # hack for managing memory until I implement GP pytree 
@@ -228,7 +232,7 @@ class sampler:
 
     def _check_converged(self,num_step):
         acq = (self.acq_val < self.acq_goal)
-        ns_converged = (self.integral_accuracy['upper'][-1] - self.integral_accuracy['lower'][-1] < self.precision_goal)
+        ns_converged = ((self.integral_accuracy['upper'][-1] - self.integral_accuracy['lower'][-1])/2 < self.precision_goal)
         steps = (num_step >= self.max_steps)
         if acq:
             if self.run_nested_sampler < 0:
@@ -333,8 +337,12 @@ class sampler:
         fig,ax = plt.subplots(3, 3, figsize=(25, 30))
         #fig.delaxes(ax[3,0])
         #fig.delaxes(ax[3,2])
-        num_step = self.train_x.shape[0] - self.ninit  #Add batch size
-        fig.suptitle(f"Iteration: {num_step}, #Samples: {self.ninit+self.train_x.shape[0]}")
+        if self.cobaya_model:
+            num_step = self.train_x.shape[0] - (self.ninit+self.cobaya_start)  #Add batch size
+            fig.suptitle(f"Iteration: {num_step}, #Samples: {self.cobaya_start + self.ninit+self.train_x.shape[0]}")
+        else:
+            num_step = self.train_x.shape[0] - (self.ninit)  #Add batch size
+            fig.suptitle(f"Iteration: {num_step}, #Samples: {self.ninit+self.train_x.shape[0]}")
         self.ax = ax
         self.fig = fig
         self.ax = acq_check_metric_plot(self, num_step)
