@@ -1,0 +1,27 @@
+from jaxbo.bo import BOBE, plot_final_samples
+from jaxbo.loglike import cobaya_loglike
+import time
+
+cobaya_input_file = 'LCDM_6D.yaml'
+
+likelihood = cobaya_loglike(cobaya_input_file, confidence_for_unbounded=0.9999995,
+        minus_inf=-1e5, noise_std=0.0,name='LCDM_6D_lite')
+
+start = time.time()
+sampler = BOBE(n_cobaya_init=4, n_sobol_init = 16, 
+        miniters=75, maxiters=120,max_gp_size=200,
+        confidence_for_unbounded=0.9999995,
+        loglikelihood=likelihood,
+        fit_step = 5, update_mc_step = 5, ns_step = 25,
+        num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
+        lengthscale_priors='DSLP', use_svm=False,minus_inf=-1e5,)
+
+gp, ns_samples, logz_dict = sampler.run()
+end = time.time()
+print(f"Total time taken = {end-start:.4f} seconds")
+
+
+plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
+                   param_labels=sampler.param_labels,output_file=likelihood.name,
+                   reference_file='./JaxBo/examples/cosmo_input/chains/Planck_lite_LCDM',reference_ignore_rows=0.3,
+                   reference_label='MCMC',scatter_points=True,)

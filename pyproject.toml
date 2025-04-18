@@ -1,0 +1,40 @@
+[build-system]
+requires = [
+    "setuptools>=61.0",
+    "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaxbo"
+version = "0.1.0"
+description = "A Bayesian Optimization package for cosmology using JAX"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    {name = "Ameek Malhotra", email = "ameekmalhotra@gmail.com"},
+    {name = "Nathan Cohen", email = "nathan.cohen@unsw.edu.au"},
+    {name = "Jan Hamman"},  
+]
+dependencies = [
+    "jax",
+    "jaxlib",
+    "numpy",
+    "numpyro",
+    "optax",
+    "scipy",
+    "getdist",
+    "tqdm",
+    "cobaya",
+    "dynesty"
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+
+[tool.setuptools.packages.find]
+# where = ["src"]
+exclude = ["examples", "tests", "docs"]
