@@ -73,10 +73,16 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
             mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(1e6)
                                             , dynamic=False, dlogz=0.1,equal_weights=True,
             )
-    else:
+    elif method=='NS':
         mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(1e6)
                                             , dynamic=False, dlogz=0.1,equal_weights=True,
         )
+    elif method=='uniform':
+        mc_samples = {}
+        points = qmc.Sobol(gp.ndim, scramble=True).random(num_samples)
+        mc_samples['x'] = points
+    else:
+        raise ValueError(f"Unknown method {method} for sampling GP")
     return mc_samples
 
 

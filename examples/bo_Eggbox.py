@@ -13,8 +13,9 @@ param_bounds = np.array([[0,10],[0,10]]).T
 
 
 pi = np.pi
+a = 0.4 # 0.5
 def loglike(theta):
-    return np.power(2. + np.cos(0.5 *pi* theta[0])*np.sin(0.5*pi*theta[1]), 5)
+    return np.power(2. + np.cos(a *pi* theta[0])*np.sin(a*pi*theta[1]), 5)
 
 
 def prior_transform(x):
@@ -39,7 +40,7 @@ reference_samples = MCSamples(samples=samples, names=param_list, labels=param_la
 
 
 likelihood = external_loglike(loglikelihood=loglike,ndim=ndim,param_list=param_list,
-        param_bounds=param_bounds,param_labels=param_labels,
+        param_bounds=param_bounds,paramx_labels=param_labels,
         name='Eggbox',noise_std=0.0,minus_inf=-1e5)
 start = time.time()
 sampler = BOBE(n_cobaya_init=4, n_sobol_init = 32, 
@@ -48,7 +49,7 @@ sampler = BOBE(n_cobaya_init=4, n_sobol_init = 32,
         loglikelihood=likelihood,
         fit_step = 5, update_mc_step = 5, ns_step = 20,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
-        mc_points_method='NS',
+        mc_points_method='uniform',
         logz_threshold=0.1,
         lengthscale_priors='DSLP', use_svm=False,minus_inf=-1e5,)
 

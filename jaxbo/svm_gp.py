@@ -73,10 +73,6 @@ class SVM_GP:
         self.train_x = train_x_gp
         self.train_y = train_y_gp
 
-        # self.support_vectors = jnp.array(support_vectors)
-        # self.dual_coef = jnp.array(dual_coef)
-        # self.intercept = intercept
-        # self.gamma_eff = gamma_eff
         self.svm_data_size = 0
         self.svm_use_size = svm_use_size
         self.minus_inf = minus_inf

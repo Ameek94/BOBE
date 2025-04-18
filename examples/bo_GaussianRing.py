@@ -44,13 +44,13 @@ likelihood = external_loglike(loglikelihood=loglike,ndim=ndim,param_list=param_l
         param_bounds=param_bounds,param_labels=param_labels,
         name='GaussianRing',noise_std=0.0,minus_inf=-1e5)
 start = time.time()
-sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8, 
-        miniters=75, maxiters=120,max_gp_size=200,
+sampler = BOBE(n_cobaya_init=4, n_sobol_init = 16, 
+        miniters=75, maxiters=150,max_gp_size=200,
         confidence_for_unbounded=0.9999995,
         loglikelihood=likelihood,
         fit_step = 4, update_mc_step = 4, ns_step = 20,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
-        logz_threshold=0.1,
+        logz_threshold=0.1,mc_points_method='NS',
         lengthscale_priors='DSLP', use_svm=False,minus_inf=-1e5,)
 
 gp, ns_samples, logz_dict = sampler.run()
