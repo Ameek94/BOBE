@@ -1,4 +1,4 @@
-# Bayesian Optimization for Bayesian Evidence
+# Bayesian Optimization for Bayesian Evidence using Jax
 
 ## References
 
