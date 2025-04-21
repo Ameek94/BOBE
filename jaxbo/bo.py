@@ -296,11 +296,11 @@ class BOBE:
         """
         Run the iterative Bayesian Optimization loop.
 
-        Arguments:
+        Arguments
         ---------
         None
 
-        Returns:
+        Returns
         ---------
         gp : GP object
             The fitted GP object.

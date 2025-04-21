@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+
+<html lang="[en]" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>jaxbo &#8212; JaxBo 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d1102ebc" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
+    <script src="_static/documentation_options.js?v=13309f08"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="jaxbo package" href="jaxbo.html" />
+    <link rel="prev" title="JaxBo documentation" href="index.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="jaxbo">
+<h1>jaxbo<a class="headerlink" href="#jaxbo" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="jaxbo.html">jaxbo package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.acquisition">acquisition</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.acquisition.EI"><code class="docutils literal notranslate"><span class="pre">EI()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.acquisition.WIPV"><code class="docutils literal notranslate"><span class="pre">WIPV()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.bo">bo</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo.BOBE"><code class="docutils literal notranslate"><span class="pre">BOBE</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.bo.BOBE.check_convergence"><code class="docutils literal notranslate"><span class="pre">BOBE.check_convergence()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.bo.BOBE.run"><code class="docutils literal notranslate"><span class="pre">BOBE.run()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo.InfoFilter"><code class="docutils literal notranslate"><span class="pre">InfoFilter</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.bo.InfoFilter.filter"><code class="docutils literal notranslate"><span class="pre">InfoFilter.filter()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo.get_mc_points"><code class="docutils literal notranslate"><span class="pre">get_mc_points()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo.get_mc_samples"><code class="docutils literal notranslate"><span class="pre">get_mc_samples()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo.optimize_acq"><code class="docutils literal notranslate"><span class="pre">optimize_acq()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.bo_utils">bo_utils</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo_utils.input_standardize"><code class="docutils literal notranslate"><span class="pre">input_standardize()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo_utils.input_unstandardize"><code class="docutils literal notranslate"><span class="pre">input_unstandardize()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo_utils.output_standardize"><code class="docutils literal notranslate"><span class="pre">output_standardize()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo_utils.output_unstandardize"><code class="docutils literal notranslate"><span class="pre">output_unstandardize()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo_utils.plot_final_samples"><code class="docutils literal notranslate"><span class="pre">plot_final_samples()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo_utils.split_vmap"><code class="docutils literal notranslate"><span class="pre">split_vmap()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.bo_utils.suppress_stdout_stderr"><code class="docutils literal notranslate"><span class="pre">suppress_stdout_stderr()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.fb_gp">fb_gp</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.add"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.add()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.fantasy_var"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.fantasy_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.fantasy_var_bayes"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.fantasy_var_bayes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.fit"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.fit()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.get_kernels"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.get_kernels()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.get_map_hyperparams"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.get_map_hyperparams()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.get_median_lengthscales"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.get_median_lengthscales()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.get_median_mll"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.get_median_mll()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.get_median_outputscales"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.get_median_outputscales()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.numpyro_model"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.numpyro_model()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.predict"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.predict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.predict_mean"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.predict_mean()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.predict_var"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.predict_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.save"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.save()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.tree_flatten"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.tree_flatten()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.tree_unflatten"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.tree_unflatten()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.update"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.update()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SAAS_FBGP.update_choleskys"><code class="docutils literal notranslate"><span class="pre">SAAS_FBGP.update_choleskys()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SVM_SAAS_FBGP"><code class="docutils literal notranslate"><span class="pre">SVM_SAAS_FBGP</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SVM_SAAS_FBGP.fit"><code class="docutils literal notranslate"><span class="pre">SVM_SAAS_FBGP.fit()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SVM_SAAS_FBGP.predict_mean"><code class="docutils literal notranslate"><span class="pre">SVM_SAAS_FBGP.predict_mean()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SVM_SAAS_FBGP.predict_var"><code class="docutils literal notranslate"><span class="pre">SVM_SAAS_FBGP.predict_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SVM_SAAS_FBGP.tree_flatten"><code class="docutils literal notranslate"><span class="pre">SVM_SAAS_FBGP.tree_flatten()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SVM_SAAS_FBGP.tree_unflatten"><code class="docutils literal notranslate"><span class="pre">SVM_SAAS_FBGP.tree_unflatten()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SVM_SAAS_FBGP.update"><code class="docutils literal notranslate"><span class="pre">SVM_SAAS_FBGP.update()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.SVM_SAAS_FBGP.update_svm"><code class="docutils literal notranslate"><span class="pre">SVM_SAAS_FBGP.update_svm()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.dist_sq"><code class="docutils literal notranslate"><span class="pre">dist_sq()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.get_mean_from_cho"><code class="docutils literal notranslate"><span class="pre">get_mean_from_cho()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.get_var_from_cho"><code class="docutils literal notranslate"><span class="pre">get_var_from_cho()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.matern_kernel"><code class="docutils literal notranslate"><span class="pre">matern_kernel()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.numpyro_model"><code class="docutils literal notranslate"><span class="pre">numpyro_model</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.numpyro_model.fit_gp_NUTS"><code class="docutils literal notranslate"><span class="pre">numpyro_model.fit_gp_NUTS()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.numpyro_model.model"><code class="docutils literal notranslate"><span class="pre">numpyro_model.model()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.numpyro_model.run_mcmc"><code class="docutils literal notranslate"><span class="pre">numpyro_model.run_mcmc()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.numpyro_model.update"><code class="docutils literal notranslate"><span class="pre">numpyro_model.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.rbf_kernel"><code class="docutils literal notranslate"><span class="pre">rbf_kernel()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.fb_gp.sample_GP_NUTS"><code class="docutils literal notranslate"><span class="pre">sample_GP_NUTS()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.gp">gp</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.DSLP_GP"><code class="docutils literal notranslate"><span class="pre">DSLP_GP</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.DSLP_GP.fantasy_var"><code class="docutils literal notranslate"><span class="pre">DSLP_GP.fantasy_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.DSLP_GP.fit"><code class="docutils literal notranslate"><span class="pre">DSLP_GP.fit()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.DSLP_GP.predict"><code class="docutils literal notranslate"><span class="pre">DSLP_GP.predict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.DSLP_GP.predict_mean"><code class="docutils literal notranslate"><span class="pre">DSLP_GP.predict_mean()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.DSLP_GP.predict_var"><code class="docutils literal notranslate"><span class="pre">DSLP_GP.predict_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.DSLP_GP.tree_flatten"><code class="docutils literal notranslate"><span class="pre">DSLP_GP.tree_flatten()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.DSLP_GP.tree_unflatten"><code class="docutils literal notranslate"><span class="pre">DSLP_GP.tree_unflatten()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.DSLP_GP.update"><code class="docutils literal notranslate"><span class="pre">DSLP_GP.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP"><code class="docutils literal notranslate"><span class="pre">GP</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.add"><code class="docutils literal notranslate"><span class="pre">GP.add()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.fantasy_var"><code class="docutils literal notranslate"><span class="pre">GP.fantasy_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.fit"><code class="docutils literal notranslate"><span class="pre">GP.fit()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.get_phys_points"><code class="docutils literal notranslate"><span class="pre">GP.get_phys_points()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.predict"><code class="docutils literal notranslate"><span class="pre">GP.predict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.predict_mean"><code class="docutils literal notranslate"><span class="pre">GP.predict_mean()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.predict_var"><code class="docutils literal notranslate"><span class="pre">GP.predict_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.save"><code class="docutils literal notranslate"><span class="pre">GP.save()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.update"><code class="docutils literal notranslate"><span class="pre">GP.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.SAAS_GP"><code class="docutils literal notranslate"><span class="pre">SAAS_GP</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.SAAS_GP.fit"><code class="docutils literal notranslate"><span class="pre">SAAS_GP.fit()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.SAAS_GP.predict"><code class="docutils literal notranslate"><span class="pre">SAAS_GP.predict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.SAAS_GP.predict_mean"><code class="docutils literal notranslate"><span class="pre">SAAS_GP.predict_mean()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.SAAS_GP.predict_var"><code class="docutils literal notranslate"><span class="pre">SAAS_GP.predict_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.SAAS_GP.tree_flatten"><code class="docutils literal notranslate"><span class="pre">SAAS_GP.tree_flatten()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.SAAS_GP.tree_unflatten"><code class="docutils literal notranslate"><span class="pre">SAAS_GP.tree_unflatten()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.SAAS_GP.update"><code class="docutils literal notranslate"><span class="pre">SAAS_GP.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.dist_sq"><code class="docutils literal notranslate"><span class="pre">dist_sq()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.get_mean_from_cho"><code class="docutils literal notranslate"><span class="pre">get_mean_from_cho()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.get_var_from_cho"><code class="docutils literal notranslate"><span class="pre">get_var_from_cho()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.gp_mll"><code class="docutils literal notranslate"><span class="pre">gp_mll()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.gp_predict"><code class="docutils literal notranslate"><span class="pre">gp_predict()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.matern_kernel"><code class="docutils literal notranslate"><span class="pre">matern_kernel()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.rbf_kernel"><code class="docutils literal notranslate"><span class="pre">rbf_kernel()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.gp.sample_GP_NUTS"><code class="docutils literal notranslate"><span class="pre">sample_GP_NUTS()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.loglike">loglike</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.loglike.cobaya_loglike"><code class="docutils literal notranslate"><span class="pre">cobaya_loglike</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.loglike.cobaya_loglike.get_initial_points"><code class="docutils literal notranslate"><span class="pre">cobaya_loglike.get_initial_points()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.loglike.external_loglike"><code class="docutils literal notranslate"><span class="pre">external_loglike</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.loglike.external_loglike.get_initial_points"><code class="docutils literal notranslate"><span class="pre">external_loglike.get_initial_points()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.nested_sampler">nested_sampler</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.compute_integrals"><code class="docutils literal notranslate"><span class="pre">compute_integrals()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.nested_sampling_Dy"><code class="docutils literal notranslate"><span class="pre">nested_sampling_Dy()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.nested_sampling_jaxns"><code class="docutils literal notranslate"><span class="pre">nested_sampling_jaxns()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.prior_transform"><code class="docutils literal notranslate"><span class="pre">prior_transform()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.renormalise_log_weights"><code class="docutils literal notranslate"><span class="pre">renormalise_log_weights()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.optim">optim</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.optim.optim_optax"><code class="docutils literal notranslate"><span class="pre">optim_optax()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.run">run</a></li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.svm_gp">svm_gp</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP"><code class="docutils literal notranslate"><span class="pre">SVM_GP</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP.fantasy_var"><code class="docutils literal notranslate"><span class="pre">SVM_GP.fantasy_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP.fit"><code class="docutils literal notranslate"><span class="pre">SVM_GP.fit()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP.predict_mean"><code class="docutils literal notranslate"><span class="pre">SVM_GP.predict_mean()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP.predict_var"><code class="docutils literal notranslate"><span class="pre">SVM_GP.predict_var()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP.prune"><code class="docutils literal notranslate"><span class="pre">SVM_GP.prune()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP.save"><code class="docutils literal notranslate"><span class="pre">SVM_GP.save()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP.svm_volume_estimate"><code class="docutils literal notranslate"><span class="pre">SVM_GP.svm_volume_estimate()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP.update"><code class="docutils literal notranslate"><span class="pre">SVM_GP.update()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.SVM_GP.update_svm"><code class="docutils literal notranslate"><span class="pre">SVM_GP.update_svm()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.svm_predict"><code class="docutils literal notranslate"><span class="pre">svm_predict()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.svm_predict_batch"><code class="docutils literal notranslate"><span class="pre">svm_predict_batch()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.svm_gp.train_svm"><code class="docutils literal notranslate"><span class="pre">train_svm()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo">Contents</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">JaxBo</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">jaxbo</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html">jaxbo package</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="index.html" title="previous chapter">JaxBo documentation</a></li>
+      <li>Next: <a href="jaxbo.html" title="next chapter">jaxbo package</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, Ameek Malhotra, Nathan Cohen and Jan Hamann.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="_sources/modules.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
