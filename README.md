@@ -4,9 +4,9 @@ To install run
 
 ``python -m pip install .``
 
-from the package directory, for an editable install do
+from the package directory. For an editable install do
 
-``python -m pip install -e .``
+``python -m pip install -e .`` instead.
 
 See the examples folder for guidance on how to run the code, documentation is currently a work in progress.
 
