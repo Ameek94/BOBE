@@ -56,21 +56,56 @@ def output_unstandardize(y,std,mean):
     """
     return y*std + mean
 
-def plot_gp(samples,gp,names,labels,param_bounds,thin=1):
-    ranges =  param_bounds.T
-    gp_samples = MCSamples(samples=samples[::thin],names=names, labels = labels,ranges=ranges) # a comparison run
-    g = plots.get_subplot_plotter(subplot_size=2.5,subplot_size_ratio=1)
-    # g.settings.num_plot_contours = 2
-    g.settings.axes_labelsize = 18
-    g.settings.axes_fontsize = 16
-    g.settings.legend_fontsize = 14
-    g.settings.title_limit_fontsize = 14
-    if samples.shape[1]==1:
-        g.plot_1d(gp_samples,'x_1',filled=[True,False],colors=['red','blue'],
-                        legend_labels=[f'GP fit, N = {gp.train_y.shape[0]} samples','True Distribution'],title_limit=1)
+def plot_final_samples(gp,ns_samples,param_list,param_labels,plot_params=None,param_bounds=None,
+                       reference_samples = None,
+                       reference_file = None, reference_ignore_rows=0.,reference_label='MCMC',
+                       scatter_points=False,output_file='output'):
+    """
+    Plot the final samples from the nested sampling.
+    """
 
-    else:
-        g.triangle_plot([gp_samples], names,contour_colors=['red','blue'],
-                                legend_labels=[f'GP fit, N = {gp.train_y.shape[0]} ','True Distribution'],
-                                filled=[True,False],contour_lws=[1,1.5],title_limit=1,) # type: ignore
-    plt.show()
+    if plot_params is None:
+        plot_params = param_list
+    ranges = dict(zip(param_list,param_bounds.T))
+
+    samples = ns_samples['x']
+    samples = input_unstandardize(samples,param_bounds)
+    weights = ns_samples['weights']
+    gd_samples = MCSamples(samples=samples, names=param_list, labels=param_labels, 
+                           ranges=ranges, weights=weights)
+    
+
+    plot_samples = [gd_samples]
+
+    if reference_file is not None:
+        ref_samples = loadMCSamples(reference_file,settings={'ignore_rows': reference_ignore_rows})
+        plot_samples.append(ref_samples)
+    elif reference_samples is not None:
+        plot_samples.append(reference_samples)
+
+    labels = ['GP',reference_label]
+
+    for label,s in zip(labels,plot_samples):
+        print(f"\nParameter limits from {label}")
+        for key in plot_params:
+            print(s.getInlineLatex(key,limit=1))
+    
+    ndim = len(plot_params)
+
+    g = plots.get_subplot_plotter(subplot_size=2.5,subplot_size_ratio=1)
+    g.settings.legend_fontsize = 18
+    g.settings.axes_fontsize=16
+    g.settings.axes_labelsize=18
+    g.settings.title_limit_fontsize = 14   
+    g.triangle_plot(plot_samples, params = plot_params,filled=[True,False],
+                    contour_colors=['#006FED', 'black'],contour_lws=[1,1.5],
+                    legend_labels=['GP',f'{reference_label}']) 
+    if scatter_points:
+        points = input_unstandardize(gp.train_x,param_bounds)
+        for i in range(ndim):
+            # ax = g.subplots[i,i]
+            for j in range(i+1,ndim):
+                ax = g.subplots[j,i]
+                ax.scatter(points[:,i],points[:,j],alpha=0.5,color='forestgreen',s=8)
+
+    g.export(output_file+'_samples.pdf')

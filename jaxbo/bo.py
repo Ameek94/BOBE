@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 from scipy.stats import qmc
 import jax
@@ -5,6 +6,7 @@ import jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
+from .acquisition import WIPV, EI #, logEI
 from .gp import DSLP_GP, SAAS_GP, sample_GP_NUTS
 from .svm_gp import SVM_GP
 from .loglike import external_loglike,cobaya_loglike
@@ -18,15 +20,38 @@ import tqdm
 import time
 import logging
 
-log = logging.getLogger("[BO]")
+# log = logging.getLogger("[BO]")
 
-# Acquisition function
-def WIPV(x, gp, mc_points):
-    var = gp.fantasy_var(x, mc_points=mc_points)
-    return jnp.mean(var)
+# 1) Filter class: only allow exactly INFO
+class InfoFilter(logging.Filter):
+    def filter(self, record):
+        return record.levelno == logging.INFO
+
+# 2) Create and configure the stdout handler
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.setLevel(logging.INFO)       # accept INFO and above...
+stdout_handler.addFilter(InfoFilter())      # ...but filter down to only INFO
+stdout_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
+stdout_handler.setFormatter(stdout_fmt)
+
+# 3) Create and configure the stderr handler
+stderr_handler = logging.StreamHandler(sys.stderr)
+stderr_handler.setLevel(logging.WARNING)    # accept WARNING and above
+stderr_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
+stderr_handler.setFormatter(stderr_fmt)
+
+# 4) Get your logger, clear defaults, add both handlers
+log = logging.getLogger(name="[BO]")
+# stop this logger “bubbling” messages up to root
+log.propagate = False  
+log.handlers.clear()
+log.setLevel(logging.INFO)               # ensure INFO+ get processed
+log.addHandler(stdout_handler)
+log.addHandler(stderr_handler)
 
 # Acquisition optimizer
 def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimizer=4):
+    
     f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
 
     @jax.jit
@@ -57,10 +82,18 @@ def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_o
         # Perturb for next restart
         params = jnp.clip(best_params + 0.5 * jnp.array(np.random.normal(size=params.shape)), 0., 1.)
 
-    print(f"Best params: {best_params}, fval: {best_f}")
+    # print(f"Best params: {best_params}, fval: {best_f}")
     return jnp.atleast_2d(best_params), best_f
 
 # Utility functions
+
+# def get_point_with_large_value(train_x,train_y, n_points=1):
+#     """
+#     Get a point with large value from the training data
+#     """
+#     idx = jnp.argsort(train_y.flatten())[-n_points:]
+#     return train_x[idx].flatten()
+
 def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,method="NUTS",init_params=None):
     if method=='NUTS':
         try:
@@ -96,12 +129,14 @@ class BOBE:
 
     def __init__(self,
                  n_cobaya_init=4,
-                 n_sobol_init=64,
+                 n_sobol_init=32,
                  miniters=200,
                  maxiters=1500,
-                 max_gp_size=1350,
-                 confidence_for_unbounded=0.9999995,
+                 max_gp_size=1200,
                  loglikelihood=None,
+                 resume=False,
+                 resume_file=None,
+                 save=True,
                  fit_step=10,
                  update_mc_step=10,
                  ns_step=10,
@@ -111,6 +146,8 @@ class BOBE:
                  mc_points_method='NUTS',
                  lengthscale_priors='DSLP',
                  use_svm=True,
+                 svm_use_size = 300,
+                 svm_update_step=5,
                  logz_threshold=1.0,
                  minus_inf=-1e5):
         
@@ -118,30 +155,38 @@ class BOBE:
             raise ValueError("loglikelihood must be an instance of external_loglike")
 
         self.loglikelihood = loglikelihood
-        init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
-            n_init_sobol=n_sobol_init)
 
         self.param_list = self.loglikelihood.param_list
         self.param_bounds = self.loglikelihood.param_bounds
         self.param_labels = self.loglikelihood.param_labels
         self.ndim = len(self.param_list)
 
-        self.train_x = jnp.array(input_standardize(init_points, self.param_bounds))
-        self.train_y = jnp.array(init_vals)
+
+        if resume:
+            assert resume_file is not None, "resume_file must be provided if resume is True"
+            log.info(f" Resuming from file {resume_file}")
+            data = np.load(resume_file)
+            self.train_x = jnp.array(data['svm_train_x'])
+            self.train_y = jnp.array(data['svm_train_y'])
+        else:
+            init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
+                                    n_init_sobol=n_sobol_init)
+            self.train_x = jnp.array(input_standardize(init_points, self.param_bounds))
+            self.train_y = jnp.array(init_vals)
 
         # Best point so far
         idx_best = jnp.argmax(self.train_y)
-        self.best_pt = self.train_x[idx_best].flatten()
+        self.best_pt = input_unstandardize(self.train_x[idx_best],self.param_bounds).flatten()
         self.best_f = float(self.train_y.max())
-        best_initial = {name: f"{float(val):.4f}" for name, val in zip(self.param_list, self.best_pt)}
-        log.info(f" Initial best point {best_initial} with value = {self.best_f:.4f}")
+        self.best = {name: f"{float(val):.4f}" for name, val in zip(self.param_list, self.best_pt)}
+        log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
 
         # GP setup
         if use_svm:
             gp = SVM_GP(
                 train_x=self.train_x, train_y=self.train_y,
                 minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
-                kernel='rbf'
+                kernel='rbf',svm_use_size=svm_use_size,svm_update_step=svm_update_step,
             )
         else:
             gp = {
@@ -167,20 +212,13 @@ class BOBE:
         self.minus_inf = minus_inf
         self.output_file = self.loglikelihood.name
         self.mc_points_method = mc_points_method
+        self.save = save
 
         # Convergence control
         self.logz_threshold = logz_threshold
         self.converged = False
         self.termination_reason = "Max iterations reached"
 
-        # Monte Carlo points
-        self.mc_samples = get_mc_samples(gp, rng_key=jax.random.PRNGKey(0),
-            warmup_steps=num_hmc_warmup, num_samples=num_hmc_samples, thinning=1,method=mc_points_method)
-        # sample_GP_NUTS(
-        #     gp=self.gp, rng_key=jax.random.PRNGKey(0),
-        #     warmup_steps=num_hmc_warmup, num_samples=num_hmc_samples, thinning=1
-        # )
-        self.mc_points = get_mc_points(self.mc_samples, mc_points_size)
 
 
     def check_convergence(self, step, logz_dict, threshold=2.0):
@@ -199,6 +237,12 @@ class BOBE:
         """
         Execute the iterative BO process.
         """
+
+        # Monte Carlo points for acquisition function
+        self.mc_samples = get_mc_samples(self.gp, rng_key=jax.random.PRNGKey(0),
+            warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, thinning=1,method=self.mc_points_method)
+        self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
+
         for i in range(self.maxiters):
             ii = i + 1
             refit = (ii % self.fit_step == 0)
@@ -206,7 +250,7 @@ class BOBE:
             ns_flag = (ii % self.ns_step == 0)
 
             print("\n")
-            log.info(f" Iteration {ii}, refit={refit}, update_mc={update_mc}, ns={ns_flag}")
+            log.info(f" Iteration {ii}/{self.maxiters}, refit={refit}, update_mc={update_mc}, ns={ns_flag}")
             x0 = self.gp.train_x[jnp.argmax(self.gp.train_y)]
 
             new_pt_u, acq_val = optimize_acq(
@@ -218,11 +262,7 @@ class BOBE:
             new_val = self.loglikelihood(
                 new_pt, logp_args=(), logp_kwargs={}
             )
-            # logp(
-            #     new_pt_u, logprior_vol=self.logprior_vol,
-            #     cobaya_model=self.cobaya_model,
-            #     minus_inf=self.minus_inf, param_bounds=self.param_bounds
-            # )
+
             new = {name: f"{float(val):.4f}" for name, val in zip(self.param_list, new_pt.flatten())}
             log.info(f" New point {new} with value = {new_val.item():.4f}")
 
@@ -240,11 +280,15 @@ class BOBE:
             if float(new_val) > self.best_f:
                 self.best_f = float(new_val)
                 self.best_pt = new_pt
-                best = {name: f"{float(val):.4f}" for name, val in zip(self.param_list, self.best_pt.flatten())}
-                log.info(f" Current best point {best} with value = {self.best_f:.4f}")
+                self.best = {name: f"{float(val):.4f}" for name, val in zip(self.param_list, self.best_pt.flatten())}
+            log.info(f" Current best point {self.best} with value = {self.best_f:.4f}")
 
             if i % 4 == 0 and i > 0:
                 jax.clear_caches()
+
+            if (ii % 50 == 0) and self.save:
+                log.info(" Saving GP to file")
+                self.gp.save(outfile=self.output_file)
 
             if ns_flag:
                 log.info(" Running Nested Sampling")
@@ -257,10 +301,6 @@ class BOBE:
                     self.termination_reason = "LogZ converged"
                     break
 
-            if ii % 50 == 0:
-                log.info(" Saving GP to file")
-                self.gp.save(outfile=self.output_file)
-
             if self.gp.train_x.shape[0] > self.max_gp_size:
                 self.termination_reason = "Max GP size exceeded"
                 log.info(f" {self.termination_reason}")
@@ -269,7 +309,8 @@ class BOBE:
         self.gp.fit()
 
         # Save and final nested sampling
-        self.gp.save(outfile=self.output_file)
+        if self.save:
+            self.gp.save(outfile=self.output_file)
         log.info(f" Sampling stopped: {self.termination_reason}")
 
         log.info(" Final Nested Sampling")
@@ -281,48 +322,3 @@ class BOBE:
         return self.gp, ns_samples, logz_dict
 
 
-def plot_final_samples(gp,ns_samples,param_list,param_labels,plot_params=None,param_bounds=None,
-                       reference_samples = None,
-                       reference_file = None, reference_ignore_rows=0.,reference_label='MCMC',
-                       scatter_points=False,output_file='output'):
-    """
-    Plot the final samples from the nested sampling.
-    """
-
-    if plot_params is None:
-        plot_params = param_list
-    ranges = dict(zip(param_list,param_bounds.T))
-
-    samples = ns_samples['x']
-    samples = input_unstandardize(samples,param_bounds)
-    weights = ns_samples['weights']
-    gd_samples = MCSamples(samples=samples, names=param_list, labels=param_labels, 
-                           ranges=ranges, weights=weights)
-    
-    plot_samples = [gd_samples]
-
-    if reference_file is not None:
-        ref_samples = loadMCSamples(reference_file,settings={'ignore_rows': reference_ignore_rows})
-        plot_samples.append(ref_samples)
-    elif reference_samples is not None:
-        plot_samples.append(reference_samples)
-    
-    ndim = len(plot_params)
-
-    g = plots.get_subplot_plotter(subplot_size=2.5,subplot_size_ratio=1)
-    g.settings.legend_fontsize = 18
-    g.settings.axes_fontsize=16
-    g.settings.axes_labelsize=18
-    g.settings.title_limit_fontsize = 14   
-    g.triangle_plot(plot_samples, params = plot_params,filled=[True,False],
-                    contour_colors=['#006FED', 'black'],contour_lws=[1,1.5],
-                    legend_labels=['GP',f'{reference_label}']) 
-    if scatter_points:
-        points = input_unstandardize(gp.train_x,param_bounds)
-        for i in range(ndim):
-            # ax = g.subplots[i,i]
-            for j in range(i+1,ndim):
-                ax = g.subplots[j,i]
-                ax.scatter(points[:,i],points[:,j],alpha=0.5,color='forestgreen',s=8)
-
-    g.export(output_file+'_samples.pdf')

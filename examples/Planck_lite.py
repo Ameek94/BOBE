@@ -1,4 +1,5 @@
-from jaxbo.bo import BOBE, plot_final_samples
+from jaxbo.bo import BOBE
+from jaxbo.bo_utils import plot_final_samples
 from jaxbo.loglike import cobaya_loglike
 import time
 
@@ -10,7 +11,6 @@ likelihood = cobaya_loglike(cobaya_input_file, confidence_for_unbounded=0.999999
 start = time.time()
 sampler = BOBE(n_cobaya_init=4, n_sobol_init = 16, 
         miniters=75, maxiters=120,max_gp_size=200,
-        confidence_for_unbounded=0.9999995,
         loglikelihood=likelihood,
         fit_step = 5, update_mc_step = 5, ns_step = 10,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,

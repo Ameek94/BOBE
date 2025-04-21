@@ -19,6 +19,7 @@ import logging
 log = logging.getLogger("[GP]")
 from optax import adam, apply_updates
 import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 # todo
 # 
@@ -122,6 +123,8 @@ class GP(ABC):
             raise ValueError("train_y must be 2D")
         if train_x.ndim != 2:
             raise ValueError("train_x must be 2D")
+        
+        log.info(f"GP training size = {self.train_x.shape[0]}")
 
         self.ndim = train_x.shape[1]
         self.npoints = train_x.shape[0]
@@ -193,6 +196,7 @@ class GP(ABC):
         self.y_std = jnp.std(self.train_y,axis=0)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
         self.npoints = self.train_x.shape[0]
+        log.info(f" GP training size = {self.npoints}")
 
     def fantasy_var(self,x_new,mc_points):
         """
@@ -337,18 +341,19 @@ class DSLP_GP(GP):
         for n in range(n_restarts):
             opt_state = optimizer.init(u_params)
             progress_bar = tqdm.tqdm(r,desc=f'Training GP')
-            for i in progress_bar:
-                (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
-                progress_bar.set_postfix({"fval": float(fval)})
-            if fval < best_f:
-                best_f = fval
-                best_params = u_params
+            with logging_redirect_tqdm():
+                for i in progress_bar:
+                    (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
+                    progress_bar.set_postfix({"fval": float(fval)})
+                    if fval < best_f:
+                        best_f = fval
+                        best_params = u_params
             u_params = jnp.clip(u_params + 0.25*np.random.normal(size=init_params.shape),0,1)
         params = input_unstandardize(best_params,bounds.T)
         hyperparams = 10 ** params
         self.lengthscales = hyperparams[0:-1]
         self.outputscale = hyperparams[-1]
-        print(f"Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+        log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
         k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
         self.cholesky = jnp.linalg.cholesky(k)
         self.fitted = True
@@ -438,7 +443,7 @@ class SAAS_GP(DSLP_GP):
         tausq = jnp.array([self.tausq])
         outputscale = jnp.array([self.outputscale])
         init_params = jnp.log10(jnp.concatenate([tausq,self.lengthscales,outputscale])) #jnp.zeros(self.ndim+2)
-        print(f"Fitting GP with initial params tausq = {self.tausq}, lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+        log.info(f"Fitting GP with initial params tausq = {self.tausq}, lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
         bounds = jnp.array(self.hyperparam_bounds)
         mins = bounds[:,0]
         maxs = bounds[:,1]
@@ -496,7 +501,7 @@ class SAAS_GP(DSLP_GP):
         self.tausq = hyperparams[0]
         self.lengthscales = hyperparams[1:-1]
         self.outputscale = hyperparams[-1]
-        print(f"Final hyperparams: tausq = {self.tausq}, lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+        log.info(f"Final hyperparams: tausq = {self.tausq}, lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
         k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
         self.cholesky = jnp.linalg.cholesky(k)
         self.fitted = True

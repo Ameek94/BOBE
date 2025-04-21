@@ -18,11 +18,6 @@ except ModuleNotFoundError:
     print("Proceeding without dynesty since not installed")
 import math
 
-try:
-    from nautilus import Sampler as NautilusSampler
-except ModuleNotFoundError:
-    print("Proceeding without nautilus since not installed")
-
 import tensorflow_probability.substrates.jax as tfp
 tfpd = tfp.distributions
 from jaxns.framework.model import Model
@@ -191,7 +186,7 @@ def nested_sampling_jaxns(gp
                           ,batch_size = 25 # what is the optimal size?
                           ,parameter_estimation = False
                           ,difficult_model = False
-                          ,return_samples=False):
+                        ,equal_weights: bool = False):
     """
     Nested Sampling using JaxNS
 
@@ -289,50 +284,21 @@ def nested_sampling_jaxns(gp
     # log.info(f" Mean LogZ: {mean}, Upper LogZ: {upper}, Lower LogZ: {lower}, Internal dLogZ: {logz_err}")
     logz_dict = {'upper': upper, 'mean': mean.item(), 'lower': lower,'dlogz sampler': logz_err.item()}
 
-    #Get uniform samples for getdist
-    # samples = resample(key=jax.random.PRNGKey(0),
-    #                 samples=results.samples,
-    #                 log_weights=results.log_dp_mean, # type: ignore
-    #                 replace=True,) 
+
+    ns_samples = {}
+    if equal_weights:
+        samples = resample(key=jax.random.PRNGKey(0),
+                    samples=results.samples,
+                    log_weights=results.log_dp_mean, # type: ignore
+                    replace=True,) 
+        weights = np.ones(samples.shape[0])
+
+    else:    
+        samples = results.samples
+        logwts = results.log_dp_mean
+        weights = renormalise_log_weights(logwts)
     
+    ns_samples['x'] = samples
+    ns_samples['weights'] = weights
 
-    samples = results.samples
-    logwts = results.log_dp_mean
-    weights = renormalise_log_weights(logwts)
-    samples['weights'] = weights
-    samples['logl'] = results.log_L_samples
-
-    if return_samples:
-        return samples, logz_dict
-    else:
-        return logz_dict
-    # return np.array(samples['x']), logz_dict/
-
-#-------------Nautilus functions---------------------
-
-def nested_sampling_nautilus(gp,frac_remain: float = 0.01,n_like_max=1e6,return_samples=True) -> None:
-
-    @jit
-    def log_likelihood(x):
-        mu = gp.predict_mean(x) # vmap(f,in_axes=(0),out_axes=(0,0))(x)
-        mu = mu #.squeeze(-1)
-        return mu
-    
-    def prior(x):
-        return x
-    
-    ndim = gp.train_x.shape[1]
-    sampler = NautilusSampler(prior, log_likelihood, ndim, vectorized=True, pool=(None,4))
-    start = time.time()
-    sampler.run(verbose=True, f_live=frac_remain, n_like_max=n_like_max)#, n_eff=2000*ndim)
-    samples, logl, logwt = sampler.posterior()
-    weights = renormalise_log_weights(logwt)
-    end = time.time()
-    print('Time taken: {:.4f} s'.format(end - start))
-    print('log Z: {:.2f}'.format(sampler.log_z))
-    logz_dict = { 'mean': sampler.log_z}
-    samples_dict = {'x': samples, 'logl': logl, 'weights': weights}
-    if return_samples:
-        return samples_dict, logz_dict
-    else:
-        return logz_dict
+    return ns_samples, logz_dict
