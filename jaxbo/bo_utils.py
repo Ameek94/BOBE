@@ -1,7 +1,5 @@
 from contextlib import contextmanager,redirect_stderr,redirect_stdout
 from os import devnull
-from typing import Dict
-import pandas as pd
 import numpy as np
 from getdist import plots,MCSamples,loadMCSamples
 import matplotlib.pyplot as plt
@@ -42,35 +40,53 @@ def input_unstandardize(x,param_bounds):
     x = x * (param_bounds[1] - param_bounds[0]) + param_bounds[0]
     return x
 
-def output_standardize(y): # y is N x 1 shaped
-    """
-    Convert training data to zero mean and unit variance
-    """
-    ystd = y.std(axis=0)
-    ymean = y.mean(axis=0)
-    return (y-ymean)/ystd
-
-def output_unstandardize(y,std,mean):
-    """
-    Convert training data from zero mean and unit variance to original domain
-    """
-    return y*std + mean
-
-def plot_final_samples(gp,ns_samples,param_list,param_labels,plot_params=None,param_bounds=None,
+def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,param_bounds=None,
                        reference_samples = None,
                        reference_file = None, reference_ignore_rows=0.,reference_label='MCMC',
                        scatter_points=False,output_file='output'):
     """
-    Plot the final samples from the nested sampling.
+    Plot the final samples from the Bayesian optimization process.
+
+    Arguments
+    ----------
+    gp : GP object
+        The Gaussian process object used for the optimization.
+    ns_samples : dict
+        The samples from the nested sampling or MCMC process.
+    param_list : list
+        The list of parameter names.
+    param_labels : list
+        The list of parameter labels for plotting.
+    plot_params : list, optional
+        The list of parameters to plot. If None, all parameters will be plotted.
+    param_bounds : np.ndarray, optional
+        The bounds of the parameters. If None, assumed to be [0,1] for all parameters.
+    reference_samples : MCSamples, optional
+        The reference getdist MCsamples from the MCMC/Nested Sampling to comparea gainst. 
+        If None, will be loaded from the reference_file.
+    reference_file : str, optional
+        The getdist file root containing the reference samples. If None, will be loaded from the reference_samples.
+        If both are None, no reference samples will be plotted.
+    reference_ignore_rows : float, optional
+        The fraction of rows to ignore in the reference file. Default is 0.0.
+    reference_label : str, optional
+        The label for the reference samples. Default is 'MCMC'.
+    scatter_points : bool, optional
+        If True, scatter the training points on the plot. Default is False.
+    output_file : str, optional
+        The output file name for the plot. Default is 'output'.
     """
 
     if plot_params is None:
         plot_params = param_list
     ranges = dict(zip(param_list,param_bounds.T))
 
-    samples = ns_samples['x']
+    samples = samples_dict['x']
+
+    if param_bounds is None:
+        param_bounds = np.array([[0,1]]*len(param_list)).T
     samples = input_unstandardize(samples,param_bounds)
-    weights = ns_samples['weights']
+    weights = samples_dict['weights']
     gd_samples = MCSamples(samples=samples, names=param_list, labels=param_labels, 
                            ranges=ranges, weights=weights)
     
