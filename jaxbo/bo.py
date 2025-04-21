@@ -24,7 +24,11 @@ import logging
 
 # 1) Filter class: only allow exactly INFO
 class InfoFilter(logging.Filter):
+    """
+    """
     def filter(self, record):
+        """
+        """
         return record.levelno == logging.INFO
 
 # 2) Create and configure the stdout handler
@@ -128,12 +132,12 @@ def get_mc_points(mc_samples, mc_points_size=64):
 class BOBE:
 
     def __init__(self,
+                loglikelihood=None,
                  n_cobaya_init=4,
                  n_sobol_init=32,
                  miniters=200,
                  maxiters=1500,
                  max_gp_size=1200,
-                 loglikelihood=None,
                  resume=False,
                  resume_file=None,
                  save=True,
@@ -150,7 +154,62 @@ class BOBE:
                  svm_update_step=5,
                  logz_threshold=1.0,
                  minus_inf=-1e5):
-        
+        """
+        Initialize the BOBE sampler class.
+
+        Arguments
+        ---------
+        loglikelihood : external_loglike
+            The loglikelihood function to be used. Must be an instance of external_loglike.
+        n_cobaya_init : int
+            Number of initial points from the cobaya reference distirbution when starting a run. 
+            Is only used when the likelihood is an instance of cobaya_loglike, otherwise ignored.
+        n_sobol_init : int
+            Number of initial Sobol points for sobol when starting a run. 
+        miniters : int
+            Minimum number of iterations before checking convergence.
+        maxiters : int
+            Maximum number of iterations.
+        max_gp_size : int
+            Maximum number of points used to train the GP. 
+            If using SVM, this is not the same as the number of points used to train the SVM.
+        resume : bool
+            If True, resume from a previous run. The resume_file argument must be provided.
+        resume_file : str
+            The file to resume from. Must be a .npz file containing the training data.
+        save : bool
+            If True, save the GP training data to a file so that it can be resumed from later.
+        fit_step : int
+            Number of iterations between GP refits.
+        update_mc_step : int
+            Number of iterations between MC point updates.
+        ns_step : int
+            Number of iterations between nested sampling runs.
+        num_hmc_warmup : int
+            Number of warmup steps for HMC sampling.
+        num_hmc_samples : int
+            Number of samples to draw from the GP.
+        mc_points_size : int
+            Number of points to use for the weighted integrated posterior variance acquisition function.
+        mc_points_method : str
+            Method to use for generating the MC points. Options are 'NUTS', 'NS', or 'uniform'. 
+            Recommend to use 'NUTS' for most cases, 'NS' can be a good choice if the underlying likelihood has a highly complex structure.
+        lengthscale_priors : str
+            Lengthscale priors to use. Options are 'DSLP' or 'SAAS'. See the GP class for more details.
+        use_svm : bool
+            If True, use SVM to filter the GP predictions. 
+            This is only required for high dimensional problems and when the scale of variation of the likelihood is extremely large. 
+            For cosmological likelihoods with nuisance parameters, this is highly recommended.
+        svm_use_size : int
+            Minimum size of the SVM training set before the SVM filter is used in the GP.
+        svm_update_step : int
+            Number of iterations between SVM updates.
+        logz_threshold : float
+            Threshold for convergence of the nested sampling logz. 
+            If the difference between the upper and lower bounds of logz is less than this value, the sampling will end.
+        minus_inf : float
+            Value to use for minus infinity. This is used to set the lower bound of the loglikelihood.
+        """
         if not isinstance(loglikelihood, external_loglike):
             raise ValueError("loglikelihood must be an instance of external_loglike")
 
@@ -235,7 +294,20 @@ class BOBE:
 
     def run(self):
         """
-        Execute the iterative BO process.
+        Run the iterative Bayesian Optimization loop.
+
+        Arguments:
+        ---------
+        None
+
+        Returns:
+        ---------
+        gp : GP object
+            The fitted GP object.
+        ns_samples : Nested sampling samples
+            The samples from the nested sampling run. This is a dictionary with the following keys ['x','weights'].
+        logz_dict : dict
+            The logz dictionary from the nested sampling run. This contains the upper and lower bounds of the logz.
         """
 
         # Monte Carlo points for acquisition function

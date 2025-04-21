@@ -13,7 +13,7 @@ def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
     """
     Compute the decision function for SVM with RBF kernel.
     
-    Parameters:
+    Arguments:
       x: Input data point, shape (n_features,)
       support_vectors: JAX array of support vectors, shape (n_sv, n_features)
       dual_coef: JAX array of dual coefficients, shape (n_sv,)
@@ -33,12 +33,15 @@ def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
     return decision
 
 def svm_predict_batch(x, support_vectors, dual_coef, intercept, gamma):
+    """
+    Compute the decision function for SVM with RBF kernel for a batch of inputs.    
+    """
     batched_predict = lambda x: svm_predict(x, support_vectors, dual_coef, intercept, gamma)
     return jax.lax.map(batched_predict, x, batch_size=400)
 
 def train_svm(x,y,gamma="scale",C=1e7):
     """
-    Train SVM on the data
+    Train the SVM on the data.
     """
     clf = SVC(kernel='rbf', gamma=gamma, C=C)
     clf.fit(x, y) 
@@ -58,6 +61,53 @@ class SVM_GP:
                  svm_use_size=400,svm_update_step=5,minus_inf=-1e5,svm_threshold = 250,gp_threshold = 10000,
                  train_x=None,train_y=None,noise=1e-8,kernel="rbf",optimizer="adam",
                  outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],lengthscale_priors='DSLP'):
+        """
+        SVM-GP class that combines a GP with an SVM classifier. The GP is trained on the data points
+        that are within the GP threshold of the maximum value of the GP. The SVM classification is trained on the data
+        points that are within the SVM threshold of the maximum value of the SVM. The SVM is used to classify the point as
+        either inside or outside the GP threshold, if outside the GP prediction is replaced by minus_inf, otherwise the GP prediction is used.
+
+        Arguments
+        ---------
+        support_vectors: JAX array of support vectors, shape (n_sv, n_features)
+            The support vectors of the SVM. You can pass None to train the SVM from scratch.
+        dual_coef: JAX array of dual coefficients, shape (n_sv,)
+            The dual coefficients of the SVM. You can pass None to train the SVM from scratch.
+        intercept: Scalar bias term.
+            The intercept of the SVM. You can pass None to train the SVM from scratch.
+        gamma_eff: Scalar RBF kernel gamma parameter.
+            The gamma parameter of the SVM. You can pass None to train the SVM from scratch.
+        svm_use_size: Minimum number of points to use the SVM
+            Default is 400. If the number of points is less than this, the SVM is not used.
+        svm_update_step: Number of points to update the SVM
+            Default is 5. The SVM is updated every svm_update_step points.
+        minus_inf: Value to replace minus infinity
+            Default is -1e5. This is also the value used to replace the GP mean if the point is outside the SVM threshold.
+        svm_threshold: Threshold for the SVM
+            This is the threshold used to train the SVM. Default is auto. The threshold is automatically determined based on the dimension of the parameter space.
+            If a point has a likelihood below this threshold, it is classified as 'bad' and the GP prediction is replace by minus_inf.
+        gp_threshold: Threshold for the GP
+            This is the threshold for the GP. Default is 20 times the svm_threshold. 
+            If a point is below this threshold, the it is not added to the GP training set but only to the SVM training set.
+        train_x: JAX array of training points, shape (n_samples, n_features)
+            The initial training points for the GP.
+        train_y: JAX array of training values, shape (n_samples,)
+            The initial training values for the GP.
+        noise: Scalar noise level for the GP
+            Default is 1e-8. This is the noise level for the GP.
+        kernel: Kernel type for the GP
+            Default is 'rbf'. This is the kernel type for the GP. Can be 'rbf' or 'matern'.
+        optimizer: Optimizer type for the GP
+            Default is 'adam'. This is the optimizer type for the GP.
+        outputscale_bounds: Bounds for the output scale of the GP (in log10 space) 
+            Default is [-4,4]. These are the bounds for the output scale of the GP.
+        lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
+            Default is [np.log10(0.05),2]. These are the bounds for the length scale of the GP.
+        lengthscale_priors: Lengthscale priors for the GP
+            Default is 'DSLP'. This is the lengthscale priors for the GP. Can be 'DSLP' or 'SAAS'. See the GP class for more details.
+        """
+
+
         self.train_x_svm = train_x
         self.train_y_svm = train_y
         self.svm_threshold = svm_threshold
@@ -136,12 +186,34 @@ class SVM_GP:
         return res
     
     def fantasy_var(self,x_new,mc_points):
-        # add svm gate to the fantasy variance?
+        """
+        Computes the variance of the GP at the mc_points assuming x_new is added to the training set
+        """
         return self.gp.fantasy_var(x_new,mc_points)
     
     def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=250,n_restarts=2):
         """
         Updates the SVM training set and the GP with new training points and refits the GP if refit is True
+
+        Arguments
+        ---------
+        new_x: JAX array of new training points, shape (n_samples, n_features)
+            The new training points for the GP.
+        new_y: JAX array of new training values, shape (n_samples,1)
+            The new training values for the GP.
+        refit: bool
+            Whether to refit the GP hyperparameters. Default is True.
+        lr: float
+            The learning rate for the optax optimizer. Default is 1e-2.
+        maxiter: int
+            The maximum number of iterations for the optax optimizer. Default is 250.
+        n_restarts: int
+            The number of restarts for the optax optimizer. Default is 2.
+
+        Returns
+        -------
+        repeat: bool
+            Whether the point new_x, new_y already exists in the training set.
         """
         # first check if new point does not already exist in the training set
         if jnp.any(jnp.all(jnp.isclose(self.train_x_svm, new_x, atol=1e-6,rtol=1e-4), axis=1)):
@@ -172,6 +244,9 @@ class SVM_GP:
             return repeat
         
     def update_svm(self):
+        """
+        Updates the SVM with the new training points
+        """
         # train the SVM
         labels = np.where(self.train_y_svm.flatten() < self.train_y_svm.max() - self.svm_threshold,0, 1)
         self.support_vectors, self.dual_coef, self.intercept, self.gamma_eff = train_svm(self.train_x_svm,labels)
@@ -180,7 +255,21 @@ class SVM_GP:
 
     def svm_volume_estimate(self,seed=0,n_samples=10000):
         """
-        Returns the volume of the SVM decision boundary
+        Returns an estimate of the volume of the SVM decision boundary using Monte Carlo sampling.
+
+        Arguments
+        ---------
+        seed: int
+            The random seed for the Monte Carlo sampling. Default is 0.
+        n_samples: int
+            The number of samples to use for the Monte Carlo sampling. Default is 10000.
+
+        Returns
+        -------
+        vol: float
+            The estimated volume of the SVM decision boundary.
+        err: float
+            The estimated error of the volume estimate.
         """
         rng = np.random.RandomState(seed)
         # Uniformly sample in [0,1]^d
@@ -194,11 +283,20 @@ class SVM_GP:
         return vol, err
     
     def prune(self):
+        """
+        Discards points from the GP which have extremely low likelihood values. 
+        TO BE IMPLEMENTED
+        """
         pass
 
     def save(self,outfile='gp'):
         """
         Saves the GP to a file
+
+        Arguments
+        ---------
+        outfile: str
+            The name of the file to save the GP to. Default is 'gp'.
         """
         np.savez(f'{outfile}.npz',train_x=self.train_x_svm,train_y=self.train_y_svm,noise=self.noise,
                  svm_threshold=self.svm_threshold,gp_threshold=self.gp_threshold,

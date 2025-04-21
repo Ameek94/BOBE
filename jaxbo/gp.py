@@ -237,14 +237,20 @@ class DSLP_GP(GP):
 
         Arguments
         ---------
-        train_x: jnp.ndarray
-            Training inputs, size (N x D)
-        train_y: jnp.ndarray
-            Objective function values at training points size (N x 1)
-        noise: float
-            Noise parameter to add to the diagonal of the kernel, default 1e-8
-        kernel: str
-            Kernel to use, either "rbf" or "matern"
+        train_x: JAX array of training points, shape (n_samples, n_features)
+            The initial training points for the GP.
+        train_y: JAX array of training values, shape (n_samples,)
+            The initial training values for the GP.
+        noise: Scalar noise level for the GP
+            Default is 1e-8. This is the noise level for the GP.
+        kernel: Kernel type for the GP
+            Default is 'rbf'. This is the kernel type for the GP. Can be 'rbf' or 'matern'.
+        optimizer: Optimizer type for the GP
+            Default is 'adam'. This is the optimizer type for the GP.
+        outputscale_bounds: Bounds for the output scale of the GP (in log10 space) 
+            Default is [-4,4]. These are the bounds for the output scale of the GP.
+        lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
+            Default is [np.log10(0.05),2]. These are the boundsfor the length scale of the GP.
         """
         super().__init__(train_x,train_y,noise,kernel,optimizer,outputscale_bounds,lengthscale_bounds)
 
@@ -293,7 +299,17 @@ class DSLP_GP(GP):
 
     def fit(self,lr=1e-2,maxiter=250,n_restarts=2):
         """
-        Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from initial hyperparameters
+        Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
+
+        Arguments
+        ---------
+        lr: float
+            The learning rate for the optax optimizer. Default is 1e-2.
+        maxiter: int
+            The maximum number of iterations for the optax optimizer. Default is 250.
+        n_restarts: int
+            The number of restarts for the optax optimizer. Default is 2.
+
         """
         ndim = self.ndim
         outputscale = jnp.array([self.outputscale])
@@ -369,7 +385,24 @@ class DSLP_GP(GP):
 
     def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=4):
         """
-        Updates the GP with new training points and refits the GP if refit is True
+        Updates the GP with new training points and refits the GP if refit is True.
+
+        Arguments
+        ---------        
+        refit: bool
+            Whether to refit the GP hyperparameters. Default is True.
+        lr: float
+            The learning rate for the optax optimizer. Default is 1e-2.
+        maxiter: int
+            The maximum number of iterations for the optax optimizer. Default is 250.
+        n_restarts: int
+            The number of restarts for the optax optimizer. Default is 2.
+
+        Returns
+        -------
+        repeat: bool
+            Whether the point new_x, new_y already exists in the training set.
+
         """
         if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
             log.info(f"Point {new_x} already exists in the training set, not updating")
@@ -406,6 +439,26 @@ class SAAS_GP(DSLP_GP):
         Class for the Gaussian Process with SAAS priors, using maximum likelihood hyperparameters. 
         The implementation is based on the paper "High-Dimensional Bayesian Optimization with Sparse Axis-Aligned Subspaces", 2021
         by David Eriksson and Martin Jankowiak.
+
+
+        Arguments
+        ---------
+        train_x: JAX array of training points, shape (n_samples, n_features)
+            The initial training points for the GP.
+        train_y: JAX array of training values, shape (n_samples,)
+            The initial training values for the GP.
+        noise: Scalar noise level for the GP
+            Default is 1e-8. This is the noise level for the GP.
+        kernel: Kernel type for the GP
+            Default is 'rbf'. This is the kernel type for the GP. Can be 'rbf' or 'matern'.
+        optimizer: Optimizer type for the GP
+            Default is 'adam'. This is the optimizer type for the GP.
+        outputscale_bounds: Bounds for the output scale of the GP (in log10 space) 
+            Default is [-4,4]. These are the bounds for the output scale of the GP.
+        lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
+            Default is [np.log10(0.05),2]. These are the bounds for the length scale of the GP.
+        tausq_bounds: Bounds for the tausq parameter of the GP (in log10 space)
+            Default is [-4,4]. These are the bounds for the tausq parameter of the GP.
         """
         super().__init__(train_x, train_y, noise, kernel, optimizer,outputscale_bounds,lengthscale_bounds)
         self.tausq = 1.
@@ -437,7 +490,17 @@ class SAAS_GP(DSLP_GP):
 
     def fit(self,lr=1e-2,maxiter=250,n_restarts=2):
         """
-        Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer
+        Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
+
+        Arguments
+        ---------
+        lr: float
+            The learning rate for the optax optimizer. Default is 1e-2.
+        maxiter: int
+            The maximum number of iterations for the optax optimizer. Default is 250.
+        n_restarts: int
+            The number of restarts for the optax optimizer. Default is 2.
+
         """
         # print(f"hyparam shapes {self.lengthscales.shape}")
         tausq = jnp.array([self.tausq])
@@ -507,6 +570,26 @@ class SAAS_GP(DSLP_GP):
         self.fitted = True
 
     def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=4):
+        """
+        Updates the GP with new training points and refits the GP if refit is True.
+
+        Arguments
+        ---------        
+        refit: bool
+            Whether to refit the GP hyperparameters. Default is True.
+        lr: float
+            The learning rate for the optax optimizer. Default is 1e-2.
+        maxiter: int
+            The maximum number of iterations for the optax optimizer. Default is 250.
+        n_restarts: int
+            The number of restarts for the optax optimizer. Default is 2.
+
+        Returns
+        -------
+        repeat: bool
+            Whether the point new_x, new_y already exists in the training set.
+
+        """
         if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
             log.info(f"Point {new_x} already exists in the training set, not updating")
             return True
@@ -539,7 +622,7 @@ jax.tree_util.register_pytree_node(
 def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True,thinning=8,verbose=False
                    ,init_params=None,temp=1.):
     """
-    Obtain samples from the posterior represented by the GP mean as the logprob
+    Obtain samples from the posterior represented by the GP mean as the logprob.
 
     Arguments
     ---------
@@ -559,6 +642,8 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True
         If True, prints the MCMC summary, default False
     init_params: dict
         Initial parameters for the MCMC, default None   
+    temp: float
+        Temperature parameter for the logprob, default 1.0
     """
     class gp_dist(dist.Distribution):
         support = dist.constraints.real

@@ -36,5 +36,4 @@ classifiers = [
 ]
 
 [tool.setuptools.packages.find]
-# where = ["src"]
 exclude = ["examples", "tests", "docs"]
