@@ -152,6 +152,8 @@ class BOBE:
                  use_svm=True,
                  svm_use_size = 300,
                  svm_update_step=5,
+                 svm_threshold=250,
+                 svm_gp_threshold=5000,
                  logz_threshold=1.0,
                  minus_inf=-1e5):
         """
@@ -246,6 +248,7 @@ class BOBE:
                 train_x=self.train_x, train_y=self.train_y,
                 minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
                 kernel='rbf',svm_use_size=svm_use_size,svm_update_step=svm_update_step,
+                svm_threshold=svm_threshold,gp_threshold=svm_gp_threshold,
             )
         else:
             gp = {
@@ -285,7 +288,8 @@ class BOBE:
         Check if the nested sampling has converged.
         """
         delta = logz_dict['upper'] - logz_dict['lower']
-        if delta < threshold and step > self.miniters:
+        mean = logz_dict['mean']
+        if (delta < threshold and mean>self.minus_inf)  and step > self.miniters:
             log.info(f" Convergence check: delta = {delta:.4f}, step = {step}")
             log.info(" Converged")
             return True

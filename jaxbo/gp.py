@@ -314,7 +314,7 @@ class DSLP_GP(GP):
         ndim = self.ndim
         outputscale = jnp.array([self.outputscale])
         init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
-        print(f"Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+        log.info(f" Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
         bounds = jnp.array(self.hyperparam_bounds)
         mins = bounds[:,0]
         maxs = bounds[:,1]
@@ -369,7 +369,7 @@ class DSLP_GP(GP):
         hyperparams = 10 ** params
         self.lengthscales = hyperparams[0:-1]
         self.outputscale = hyperparams[-1]
-        log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+        log.info(f" Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
         k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
         self.cholesky = jnp.linalg.cholesky(k)
         self.fitted = True
@@ -383,7 +383,7 @@ class DSLP_GP(GP):
     def predict(self,x):
         return super().predict(x)
 
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=4):
+    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 
@@ -569,7 +569,7 @@ class SAAS_GP(DSLP_GP):
         self.cholesky = jnp.linalg.cholesky(k)
         self.fitted = True
 
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=4):
+    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 

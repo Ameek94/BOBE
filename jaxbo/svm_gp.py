@@ -32,12 +32,12 @@ def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
     decision = jnp.sum(dual_coef * kernel_vals) + intercept
     return decision
 
-def svm_predict_batch(x, support_vectors, dual_coef, intercept, gamma):
+def svm_predict_batch(x, support_vectors, dual_coef, intercept, gamma,batch_size=200):
     """
     Compute the decision function for SVM with RBF kernel for a batch of inputs.    
     """
     batched_predict = lambda x: svm_predict(x, support_vectors, dual_coef, intercept, gamma)
-    return jax.lax.map(batched_predict, x, batch_size=400)
+    return jax.lax.map(batched_predict, x, batch_size=batch_size)
 
 def train_svm(x,y,gamma="scale",C=1e7):
     """
@@ -54,6 +54,53 @@ def train_svm(x,y,gamma="scale",C=1e7):
     dual_coef = jnp.array(dual_coef)
     return support_vectors, dual_coef, intercept, gamma_eff
 
+def svm_volume_estimate(train_x,labels,seed=0,n_samples=10000):
+    """
+    Returns an estimate of the volume of the SVM decision boundary using Monte Carlo sampling.
+    
+    Arguments
+    ---------
+    seed: int
+        The random seed for the Monte Carlo sampling. Default is 0.
+    n_samples: int
+        The number of samples to use for the Monte Carlo sampling. Default is 10000.
+
+    Returns
+    -------
+    vol: float
+        The estimated volume of the SVM decision boundary.
+    err: float
+        The estimated error of the volume estimate.
+    """
+    ndim = train_x.shape[1]
+    support_vectors, dual_coef, intercept, gamma_eff = train_svm(train_x,labels)
+
+    rng = np.random.RandomState(seed)
+    # Uniformly sample in [0,1]^d
+    samples = rng.rand(n_samples, ndim)
+    x = jnp.array(samples)
+    preds = svm_predict_batch(x, support_vectors,dual_coef,intercept, gamma_eff)
+    n_inside = np.sum(preds >= 0)
+    # Estimate volume and standard error
+    vol = n_inside / n_samples
+    err = np.sqrt(vol * (1 - vol) / n_samples)
+    return vol, err
+
+def set_svm_threshold(train_x,train_y,max_val,dlogz=0.01,method='volume'):
+    if method == 'volume':
+        # when using the SVM, the logZ is effectively bounded between 
+        # logZ_min =  \log_svm_volume + (max_val - threshold) and logZ_max = log_svm_volume + max_val
+        # since the points outside the SVM boundary are treated as minus_inf
+        # we want that their contribution relative to logZ_min is tiny
+        log10_th_min = 0.
+        log10_th_max = 5.
+
+        threshold = 0.
+    elif method == 'chi2':
+        threshold = 250
+    else:
+        raise ValueError("Method must be either 'volume' or 'chi2'")
+    return threshold
 
 class SVM_GP:
 
@@ -253,34 +300,6 @@ class SVM_GP:
         self.use_svm = True
         log.info(f" Trained SVM with {self.svm_data_size} points")
 
-    def svm_volume_estimate(self,seed=0,n_samples=10000):
-        """
-        Returns an estimate of the volume of the SVM decision boundary using Monte Carlo sampling.
-
-        Arguments
-        ---------
-        seed: int
-            The random seed for the Monte Carlo sampling. Default is 0.
-        n_samples: int
-            The number of samples to use for the Monte Carlo sampling. Default is 10000.
-
-        Returns
-        -------
-        vol: float
-            The estimated volume of the SVM decision boundary.
-        err: float
-            The estimated error of the volume estimate.
-        """
-        rng = np.random.RandomState(seed)
-        # Uniformly sample in [0,1]^d
-        samples = rng.rand(n_samples, self.ndim)
-        x = jnp.array(samples)
-        preds = svm_predict_batch(x, self.support_vectors, self.dual_coef, self.intercept, self.gamma_eff)
-        n_inside = np.sum(preds >= 0)
-        # Estimate volume and standard error
-        vol = n_inside / n_samples
-        err = np.sqrt(vol * (1 - vol) / n_samples)
-        return vol, err
     
     def prune(self):
         """

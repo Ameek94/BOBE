@@ -1,0 +1,134 @@
+theory:
+  camb:
+    path: 'global'
+    extra_args:
+      halofit_version: mead
+      bbn_predictor: PArthENoPE_880.2_standard.dat
+      lens_potential_accuracy: 1
+      num_massive_neutrinos: 1
+      nnu: 3.044
+      dark_energy_model: 'ppf'
+likelihood:
+  # one:
+  planck_2018_lowl.TT: null
+  planck_2018_lowl.EE: null
+  planck_2018_highl_plik.TTTEEE_lite_native: null
+  planck_2018_lensing.native: null
+  bao.desi_2024_bao_all: null
+  sn.pantheonplus: null
+params:
+  w:
+   prior:
+     min: -1.5
+     max: -0.4
+   ref:
+     dist: norm
+     loc: -1.
+     scale: 0.001
+   proposal: 0.05 # prev 0.001
+   latex: w_0
+  wa:
+   prior:
+     min: -2.4
+     max: 0.5
+   ref:
+     dist: norm
+     loc: 0.
+     scale: 0.01
+   proposal: 0.05 # prev 0.001
+   latex: w_a 
+  # Baseline cosmological parameters
+  omk:
+   latex: \Omega_K
+   ref:
+     dist: norm
+     loc: 0
+     scale: 0.0001   
+   prior:
+     min: -0.005
+     max: 0.005
+   proposal: 0.0001     
+  omch2:
+    latex: \Omega_\mathrm{c} h^2
+    prior:
+      min: 0.1
+      max: 0.14
+    ref:
+      dist: norm
+      loc: 0.12
+      scale: 0.001
+    proposal: 0.0005
+    renames:
+    - omegach2
+  ombh2:
+    prior:
+      min: 0.015
+      max: 0.028
+    ref:
+      dist: norm
+      loc: 0.0224
+      scale: 0.0001
+    proposal: 0.0001
+    latex: \Omega_\mathrm{b} h^2
+    renames:
+    - omegabh2
+  logA:
+    prior:
+      min: 2.9
+      max: 3.2
+    ref:
+      dist: norm
+      loc: 3.05
+      scale: 0.001
+    proposal: 0.001
+    latex: \log(10^{10} A_\mathrm{s})
+  As:
+    value: 'lambda logA: 1e-10*np.exp(logA)'
+    latex: A_\mathrm{s}
+    derived: true
+  ns:
+    prior:
+      min: 0.92
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.965
+      scale: 0.004
+    proposal: 0.002
+    latex: n_\mathrm{s}
+  H0:
+    latex: H_0
+    prior:
+      min: 62
+      max: 72
+    ref:
+      dist: norm
+      loc: 67.2
+      scale: 0.1
+    proposal: 0.05
+  tau:
+    latex: \tau_\mathrm{reio}
+    prior:
+      min: 0.03
+      max: 0.08
+    ref:
+      dist: norm
+      loc: 0.055
+      scale: 0.006
+    proposal: 0.003
+  A_planck:
+    latex: y_\mathrm{cal}
+    renames: calPlanck
+    value: 1.0
+sampler:
+  polychord:
+    nlive: 10d
+    precision_criterion: 0.01
+  # mcmc:
+  #   drag: False
+  #   oversample_power: 0.4
+  #   proposal_scale: 1.9
+  #   covmat: auto
+  #   Rminus1_stop: 0.01
+  #   Rminus1_cl_stop: 0.2   
+output: chains/Planck_lite_pchord
