@@ -303,7 +303,14 @@ class SVM_GP:
     
     def prune(self):
         """
-        Discards points from the GP which have extremely low likelihood values. 
+        Every time a new maximum is found, we discard points from the GP which do now lie outside the threshold. 
+        TO BE IMPLEMENTED
+        """
+        pass
+
+    def get_initial_point(self):
+        """
+        Get a random point from the training set within the svm boundary 
         TO BE IMPLEMENTED
         """
         pass
@@ -318,6 +325,7 @@ class SVM_GP:
             The name of the file to save the GP to. Default is 'gp'.
         """
         np.savez(f'{outfile}.npz',train_x=self.train_x_svm,train_y=self.train_y_svm,noise=self.noise,
+                 y_std = self.train_y_svm.std(),y_mean=self.train_y_svm.mean(),
                  svm_threshold=self.svm_threshold,gp_threshold=self.gp_threshold,
                 lengthscales=self.gp.lengthscales,outputscale=self.gp.outputscale
                 ,support_vectors=self.support_vectors,dual_coef=self.dual_coef,intercept=self.intercept,gamma_eff=self.gamma_eff,

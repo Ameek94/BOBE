@@ -131,4 +131,4 @@ sampler:
   #   covmat: auto
   #   Rminus1_stop: 0.01
   #   Rminus1_cl_stop: 0.2   
-output: chains/Planck_lite_pchord
+output: chains/Planck_lite_BAO_SN_pchord

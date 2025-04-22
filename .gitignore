@@ -23,6 +23,7 @@ test*.yaml
 lib/
 lib64/
 parts/
+chains/
 sdist/
 var/
 wheels/

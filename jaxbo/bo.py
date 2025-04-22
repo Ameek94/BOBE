@@ -107,11 +107,11 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
             )
         except:
             log.error("Error in sampling GP NUTS")
-            mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(1e6)
+            mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
                                             , dynamic=False, dlogz=0.1,equal_weights=True,
             )
     elif method=='NS':
-        mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(1e6)
+        mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
                                             , dynamic=False, dlogz=0.1,equal_weights=True,
         )
     elif method=='uniform':
@@ -227,8 +227,14 @@ class BOBE:
             assert resume_file is not None, "resume_file must be provided if resume is True"
             log.info(f" Resuming from file {resume_file}")
             data = np.load(resume_file)
-            self.train_x = jnp.array(data['svm_train_x'])
-            self.train_y = jnp.array(data['svm_train_y'])
+            self.train_x = jnp.array(data['train_x'])
+            self.train_y = jnp.array(data['train_y'])
+            x = input_unstandardize(self.train_x, self.param_bounds)
+            y = self.loglikelihood(
+                x, logp_args=(), logp_kwargs={}
+            )
+            self.train_y = y
+            print(f"Ymean and Ystd = {self.train_y.mean():.4f}, {self.train_y.std():.4f}")
         else:
             init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
                                     n_init_sobol=n_sobol_init)
@@ -289,7 +295,7 @@ class BOBE:
         """
         delta = logz_dict['upper'] - logz_dict['lower']
         mean = logz_dict['mean']
-        if (delta < threshold and mean>self.minus_inf)  and step > self.miniters:
+        if (delta < threshold and mean>self.minus_inf+10)  and step > self.miniters:
             log.info(f" Convergence check: delta = {delta:.4f}, step = {step}")
             log.info(" Converged")
             return True
@@ -319,6 +325,8 @@ class BOBE:
             warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, thinning=1,method=self.mc_points_method)
         self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
+        best_pt_iteration = 0
+
         for i in range(self.maxiters):
             ii = i + 1
             refit = (ii % self.fit_step == 0)
@@ -343,7 +351,7 @@ class BOBE:
             log.info(f" New point {new} with value = {new_val.item():.4f}")
 
             pt_exists = self.gp.update(new_pt_u, new_val, refit=refit)
-            if pt_exists:
+            if pt_exists and self.mc_points_method == 'NUTS':
                 update_mc = True
             if update_mc:
                 self.mc_samples = get_mc_samples(
@@ -357,7 +365,8 @@ class BOBE:
                 self.best_f = float(new_val)
                 self.best_pt = new_pt
                 self.best = {name: f"{float(val):.4f}" for name, val in zip(self.param_list, self.best_pt.flatten())}
-            log.info(f" Current best point {self.best} with value = {self.best_f:.4f}")
+                best_pt_iteration = ii
+            log.info(f" Current best point {self.best} with value = {self.best_f:.4f}, found at iteration {best_pt_iteration}")
 
             if i % 4 == 0 and i > 0:
                 jax.clear_caches()
