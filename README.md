@@ -5,7 +5,7 @@ To install run
 
 ``python -m pip install .``
 
-from the package directory. For an editable install do
+from the package directory. For an editable (dev) install do
 
 ``python -m pip install -e .`` instead.
 
