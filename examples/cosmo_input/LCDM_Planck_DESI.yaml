@@ -56,7 +56,7 @@ params:
     latex: H_0
     prior:
       min: 64
-      max: 70
+      max: 72
     ref:
      dist: norm
      loc: 6.771234910e+01

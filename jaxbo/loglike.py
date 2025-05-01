@@ -1,6 +1,6 @@
 # Class for implementing external loglikelihoods
 from jaxbo.bo_utils import input_standardize, input_unstandardize
-from typing import Any, Callable, List,Optional, Tuple, Union
+from typing import Any, Callable, List,Optional, Tuple, Union, Dict
 import numpy as np
 import tqdm
 from cobaya.yaml import yaml_load
@@ -84,12 +84,15 @@ class cobaya_loglike(external_loglike):
     """
 
     def __init__(self, 
-                 input_file: str,
+                 input_file_dict: str| Dict[str, Any],
                  confidence_for_unbounded: float = 0.9999995,
                  noise_std: float = 0,
                  minus_inf: float = -1e5,
                  name: str | None = 'cobaya_model') -> None:
-        info = yaml_load(input_file)
+        if isinstance(input_file_dict, str):
+            info = yaml_load(input_file_dict)
+        elif isinstance(input_file_dict, dict):
+            info = input_file_dict
         self.cobaya_model = get_model(info)
         rootlogger = logging.getLogger() 
         rootlogger.handlers.pop()    

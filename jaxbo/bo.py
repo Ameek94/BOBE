@@ -155,7 +155,9 @@ class BOBE:
                  svm_threshold=250,
                  svm_gp_threshold=5000,
                  logz_threshold=1.0,
-                 minus_inf=-1e5):
+                 minus_inf=-1e5,
+                 do_final_ns=True,
+                 return_gedsist_samples=False,):
         """
         Initialize the BOBE sampler class.
 
@@ -223,18 +225,12 @@ class BOBE:
         self.ndim = len(self.param_list)
 
 
-        if resume:
-            assert resume_file is not None, "resume_file must be provided if resume is True"
+        if resume and resume_file is not None:
+            # assert resume_file is not None, "resume_file must be provided if resume is True"
             log.info(f" Resuming from file {resume_file}")
             data = np.load(resume_file)
             self.train_x = jnp.array(data['train_x'])
             self.train_y = jnp.array(data['train_y'])
-            x = input_unstandardize(self.train_x, self.param_bounds)
-            y = self.loglikelihood(
-                x, logp_args=(), logp_kwargs={}
-            )
-            self.train_y = y
-            print(f"Ymean and Ystd = {self.train_y.mean():.4f}, {self.train_y.std():.4f}")
         else:
             init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
                                     n_init_sobol=n_sobol_init)
@@ -281,6 +277,8 @@ class BOBE:
         self.output_file = self.loglikelihood.name
         self.mc_points_method = mc_points_method
         self.save = save
+        self.return_gedsist_samples = return_gedsist_samples
+        self.do_final_ns = do_final_ns
 
         # Convergence control
         self.logz_threshold = logz_threshold
@@ -314,8 +312,8 @@ class BOBE:
         ---------
         gp : GP object
             The fitted GP object.
-        ns_samples : Nested sampling samples
-            The samples from the nested sampling run. This is a dictionary with the following keys ['x','weights'].
+        ns_samples : MCSamples | Nested sampling samples
+            The samples from the final nested sampling run. This is a either a getdist MCSamples instance or a dictionary with the following keys ['x','weights','logl'].
         logz_dict : dict
             The logz dictionary from the nested sampling run. This contains the upper and lower bounds of the logz.
         """
@@ -328,6 +326,7 @@ class BOBE:
         best_pt_iteration = 0
 
         for i in range(self.maxiters):
+
             ii = i + 1
             refit = (ii % self.fit_step == 0)
             update_mc = (ii % self.update_mc_step == 0)
@@ -335,10 +334,15 @@ class BOBE:
 
             print("\n")
             log.info(f" Iteration {ii}/{self.maxiters}, refit={refit}, update_mc={update_mc}, ns={ns_flag}")
-            x0 = self.gp.train_x[jnp.argmax(self.gp.train_y)]
+            
+            # start acq from mc_point with max var or max value 
+            # mc_points_var = jax.lax.map(self.gp.predict_var,self.mc_points)
+            # x0_acq = self.mc_points[jnp.argmax(mc_points_var)]
+
+            x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
 
             new_pt_u, acq_val = optimize_acq(
-                self.gp, WIPV, self.mc_points, x0=x0)
+                self.gp, WIPV, self.mc_points, x0=x0_acq)
             
             new_pt = input_unstandardize(new_pt_u, self.param_bounds) #.flatten()
 
@@ -354,10 +358,11 @@ class BOBE:
             if pt_exists and self.mc_points_method == 'NUTS':
                 update_mc = True
             if update_mc:
+                x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
                 self.mc_samples = get_mc_samples(
                     self.gp, rng_key=jax.random.PRNGKey(ii*10),
                     warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples,
-                    thinning=1, method=self.mc_points_method,init_params=x0
+                    thinning=1, method=self.mc_points_method,init_params=x0_hmc
                 )
             self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
@@ -398,12 +403,28 @@ class BOBE:
             self.gp.save(outfile=self.output_file)
         log.info(f" Sampling stopped: {self.termination_reason}")
 
-        log.info(" Final Nested Sampling")
-        ns_samples, logz_dict = nested_sampling_Dy(
-            self.gp, self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01
-        )
-        log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
+        log.info(f" Final GP training set size: {self.gp.train_x.shape[0]}, max size: {self.max_gp_size}")
+        log.info(f" Number of iterations: {ii}, max iterations: {self.maxiters}")
 
-        return self.gp, ns_samples, logz_dict
+        if self.do_final_ns:
+            log.info(" Final Nested Sampling")
+            ns_samples, logz_dict = nested_sampling_Dy(
+                self.gp, self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01
+            )
+            log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
+
+        if self.return_gedsist_samples:
+            ranges = dict(zip(self.param_list,self.param_bounds.T))
+            samples = ns_samples['x']
+            weights = ns_samples['weights']
+            loglikes = ns_samples['logl']
+            gd_samples = MCSamples(samples=samples, names=self.param_list, labels=self.param_labels, 
+                                ranges=ranges, weights=weights,loglikes=loglikes,label='GP',sampler='nested')
+            
+            output_samples = gd_samples
+        else:
+            output_samples = ns_samples
+                
+        return self.gp, output_samples, logz_dict
 
 

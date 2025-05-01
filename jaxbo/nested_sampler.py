@@ -62,13 +62,14 @@ def compute_integrals(logl=None, logvol=None, reweight=None):
 
 def nested_sampling_Dy(gp: GP
                        ,ndim: int = 1
-                       ,dlogz: float = 0.2
+                       ,dlogz: float = 0.1
                        ,dynamic: bool = True
                        ,logz_std: bool = True
                        ,maxcall: Optional[int] = None
                         ,boost_maxcall: Optional[int] = 1
-                        ,progress : bool = True
+                        ,print_progress : bool = True
                         ,equal_weights: bool = False
+                        ,sample_method='rwalk'
                        ,) -> tuple[np.ndarray,Dict]:
     """
     Nested Sampling using Dynesty
@@ -102,46 +103,30 @@ def nested_sampling_Dy(gp: GP
 
     if maxcall is None:
         if ndim<=4:
-            maxcall = int(3000*ndim*boost_maxcall) # type: ignore
+            maxcall = int(5000*ndim*boost_maxcall) # type: ignore
         else:
-            maxcall = max(int(6000*ndim*boost_maxcall),60000*boost_maxcall) # type: ignore
+            maxcall = max(int(10000*ndim*boost_maxcall),int(1e6)*boost_maxcall) # type: ignore
     else:
          maxcall = int(maxcall)
          
-    # def loglike(x,logz_std=logz_std) -> Any:
-    #     mu, var = gp.posterior(x,single=True,unstandardize=True)
-    #     mu = mu.squeeze(-1)
-    #     var = var.squeeze(-1)
-    #     # print(mu.shape)
-    #     if logz_std:
-    #         blob = np.zeros(2)
-    #         std = np.sqrt(var)
-    #         ul = mu + std
-    #         ll = mu - std
-    #         blob[0] = ll
-    #         blob[1] = ul
-    #         return mu, blob
-    #     else:
-    #         return mu     
-
-    @jit #partial(jit,static_argnums=())
+    @jit
     def loglike(x):
-        mu = gp.predict_mean(x) # vmap(f,in_axes=(0),out_axes=(0,0))(x)
-        var = gp.predict_var(x) # vmap(f,in_axes=(0),out_axes=(0,0))(x)
+        mu = gp.predict_mean(x) 
+        var = gp.predict_var(x) 
         std = jnp.sqrt(var)
-        mu = mu #.squeeze(-1)
-        # print(f"mu shape: {mu.shape}, std shape: {std.shape}")
-        return jnp.reshape(mu,()), jnp.reshape(std,()) #(mu - std, mu + std) # type: ignore
+        mu = mu 
+        return jnp.reshape(mu,()), jnp.reshape(std,()) 
 
     start = time.time()
     if dynamic:
-        sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=logz_std,
-                                       sample='rwalk') #,logl_args={'logz_std': logz_std})
-        sampler.run_nested(print_progress=progress,dlogz_init=dlogz,maxcall=maxcall) #tune? ,maxcall=20000
+        sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
+                                       sample=sample_method)
+        sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)
     else:
-        sampler = StaticNestedSampler(loglike,prior_transform,ndim=ndim,blob=logz_std,
-                                      sample='rwalk') #,logl_args={'logz_std': logz_std}) # type: ignore
-        sampler.run_nested(print_progress=progress,dlogz=dlogz,maxcall=maxcall) # type: ignore #tune? ,maxcall=20000
+        sampler = StaticNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
+                                      sample=sample_method) 
+        sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
+
     log.info(f" Nested Sampling took {time.time() - start:.2f}s")
     res = sampler.results  # type: ignore # grab our results
     logl = res['logl']
@@ -152,13 +137,13 @@ def nested_sampling_Dy(gp: GP
     logz_dict = {'mean': mean}
     logz_dict['dlogz sampler'] = logz_err
     if logz_std:
-        logl_lower,logl_upper = logl - res['blob'], logl + res['blob'] #res['blob'].T
+        logl_lower,logl_upper = logl - res['blob'], logl + res['blob'] 
         logvol = res['logvol']
         logl = res['logl']
         upper = compute_integrals(logl=logl_upper,logvol=logvol)
         lower = compute_integrals(logl=logl_lower,logvol=logvol)
-        logz_dict = {'upper': upper[-1], 'mean': mean, 'lower': lower[-1],'dlogz sampler': logz_err}
-    # samples = res.samples_equal()
+        logz_dict['upper'] = upper[-1]
+        logz_dict['lower'] = lower[-1]
     samples = {}
     if equal_weights:
         samples['x'] = res.samples_equal()
@@ -169,9 +154,6 @@ def nested_sampling_Dy(gp: GP
         weights = renormalise_log_weights(res['logwt'])
         samples['weights'] = weights    
         samples['logl'] = res['logl']
-    # samples['x'] = res['samples'] #res.samples_equal() #res['samples']
-    # samples['logl'] = res['logl']
-    # print(f"LogZ info: "+"".join(f"{key} = {value:.4f}, " for key, value in logz_dict.items()))
     return samples, logz_dict
 
 #-------------JAXNS functions---------------------
@@ -183,7 +165,7 @@ def nested_sampling_jaxns(gp
                           ,logz_std: bool = True
                           ,maxcall: int = 1e6 # type: ignore
                           ,boost_maxcall: int = 1
-                          ,batch_size = 25 # what is the optimal size?
+                          ,batch_size = 50 # what is the optimal size?
                           ,parameter_estimation = False
                           ,difficult_model = False
                         ,equal_weights: bool = False):
@@ -221,11 +203,9 @@ def nested_sampling_jaxns(gp
         
     @jit
     def log_likelihood(x):
-        mu = gp.predict_mean(x) # vmap(f,in_axes=(0),out_axes=(0,0))(x)
-        mu = mu #.squeeze(-1)
+        mu = gp.predict_mean(x) 
         return mu
         
-    # @jit
     def prior_model():
         x = yield Prior(tfpd.Uniform(low=jnp.zeros(ndim), high= jnp.ones(ndim)), name='x') # type: ignore
         return x

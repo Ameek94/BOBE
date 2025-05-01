@@ -43,7 +43,7 @@ def input_unstandardize(x,param_bounds):
 def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,param_bounds=None,
                        reference_samples = None,
                        reference_file = None, reference_ignore_rows=0.,reference_label='MCMC',
-                       scatter_points=False,output_file='output'):
+                       scatter_points=False,markers=None,output_file='output'):
     """
     Plot the final samples from the Bayesian optimization process.
 
@@ -115,7 +115,8 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
     g.settings.title_limit_fontsize = 14   
     g.triangle_plot(plot_samples, params = plot_params,filled=[True,False],
                     contour_colors=['#006FED', 'black'],contour_lws=[1,1.5],
-                    legend_labels=['GP',f'{reference_label}']) 
+                    legend_labels=['GP',f'{reference_label}']
+                    ,markers=markers,marker_args={'lw': 1, 'ls': ':'}) 
     if scatter_points:
         points = input_unstandardize(gp.train_x,param_bounds)
         for i in range(ndim):
