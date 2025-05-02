@@ -134,7 +134,7 @@ input_dict = {
             "drag": False,
             "oversample_power": 0.4,
             "proposal_scale": 1.9,
-            "covmat": './chains/Planck_lite_LCDM.covmat', #"./chains/Planck_DESI_LCDM.covmat",
+            "covmat": None, #'None', #'./chains/Planck_lite_LCDM.covmat', #"./chains/Planck_DESI_LCDM.covmat",
             "Rminus1_stop": 0.01,
             "Rminus1_cl_stop": 0.2,
         },

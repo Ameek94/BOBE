@@ -260,7 +260,6 @@ class BOBE:
                 train_x=self.train_x, train_y=self.train_y,
                 noise=1e-8, kernel='rbf'
             )
-        gp.fit()
         self.gp = gp
 
         # Store settings
@@ -318,12 +317,17 @@ class BOBE:
             The logz dictionary from the nested sampling run. This contains the upper and lower bounds of the logz.
         """
 
+        # Start by fitting the GP to the initial points
+        self.gp.fit()
+
         # Monte Carlo points for acquisition function
         self.mc_samples = get_mc_samples(self.gp, rng_key=jax.random.PRNGKey(0),
             warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, thinning=1,method=self.mc_points_method)
         self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
         best_pt_iteration = 0
+
+        ii = 0
 
         for i in range(self.maxiters):
 
@@ -396,7 +400,8 @@ class BOBE:
                 log.info(f" {self.termination_reason}")
                 break
 
-        self.gp.fit()
+        if not self.converged:
+            self.gp.fit()
 
         # Save and final nested sampling
         if self.save:
@@ -409,13 +414,15 @@ class BOBE:
         if self.do_final_ns:
             log.info(" Final Nested Sampling")
             ns_samples, logz_dict = nested_sampling_Dy(
-                self.gp, self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01
+                self.gp, self.ndim, maxcall=int(1e7), dynamic=True, dlogz=0.01
             )
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
+            if self.save:
+                np.savez(f'{self.output_file}_samples.npz',ns_samples = input_unstandardize(ns_samples['x'],self.param_bounds),param_bounds = self.param_bounds)
 
         if self.return_gedsist_samples:
             ranges = dict(zip(self.param_list,self.param_bounds.T))
-            samples = ns_samples['x']
+            samples = input_unstandardize(ns_samples['x'],self.param_bounds)
             weights = ns_samples['weights']
             loglikes = ns_samples['logl']
             gd_samples = MCSamples(samples=samples, names=self.param_list, labels=self.param_labels, 

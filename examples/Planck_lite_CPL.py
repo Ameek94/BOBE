@@ -13,14 +13,15 @@ likelihood = cobaya_loglike(cobaya_input_file, confidence_for_unbounded=0.999999
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=8, n_sobol_init = 32, 
-        miniters=500, maxiters=1200,max_gp_size=1200,
+        miniters=500, maxiters=1500,max_gp_size=1200,
         loglikelihood=likelihood,
         fit_step = 15, update_mc_step = 5, ns_step = 50,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
         resume=True,resume_file='./CPL_lite.npz',
         use_svm=True,svm_use_size=400,svm_threshold=150,svm_gp_threshold=5000,
         logz_threshold=5.,mc_points_method='NUTS',
-        lengthscale_priors='DSLP', minus_inf=-1e5,)
+        lengthscale_priors='DSLP', minus_inf=-1e5,
+        return_gedsist_samples=True)
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()
@@ -117,16 +118,39 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
 
     g.export(output_file+'_samples.pdf')
 
-plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
-                   param_labels=sampler.param_labels,output_file=likelihood.name,
-                   reference_file='./cosmo_input/chains/Planck_lite_BAO_SN_mcmc',reference_ignore_rows=0.3,
-                   reference_label='MCMC',scatter_points=True)
+# plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
+#                    param_labels=sampler.param_labels,output_file=likelihood.name,
+#                    reference_file='./cosmo_input/chains/Planck_lite_BAO_SN_mcmc',reference_ignore_rows=0.3,
+#                    reference_label='MCMC',scatter_points=True)
 
-plot_parameters = ['w0','wa']
-plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
-                   param_labels=sampler.param_labels,output_file='CPL_w0wa',plot_params=plot_parameters,
-                   reference_file='./cosmo_input/chains/Planck_lite_BAO_SN_mcmc',reference_ignore_rows=0.3,
-                   reference_label='MCMC',scatter_points=False)
+plot_samples = [ns_samples]
+
+ref_samples = loadMCSamples('./cosmo_input/chains/Planck_lite_BAO_SN_mcmc',settings={'ignore_rows': 0.3})
+plot_samples.append(ref_samples)
+
+
+plot_parameters = ['w','wa']
+# g = plots.get_subplot_plotter(subplot_size=2.5,subplot_size_ratio=1)
+g = plots.get_single_plotter(width_inch=6, ratio=4/5)
+g.settings.legend_fontsize = 15
+g.settings.axes_fontsize=16
+g.settings.axes_labelsize=18
+g.settings.title_limit_fontsize = 14   
+g.plot_2d(plot_samples,param1='w',param2='wa',filled=[True,False],colors=['#006FED', 'black'])
+g.add_x_marker(-1.,color='k',ls='--',lw=1)
+g.add_y_marker(0.,color='k',ls='--',lw=1)
+g.add_legend(['GP', 'MCMC'],legend_loc='upper right')
+# g.triangle_plot(plot_samples, params = plot_parameters,filled=[True,False],
+#                     contour_colors=['#006FED', 'black'],contour_lws=[1,1.5],
+#                     legend_labels=['GP','MCMC']
+#                     ,markers={'w': -1., 'wa': 0.},marker_args={'lw': 1, 'ls': ':'},title_limit=1) 
+g.export('CPL_w0wa_samples.pdf')
+
+
+# plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
+#                    param_labels=sampler.param_labels,output_file='CPL_w0wa',plot_params=plot_parameters,
+#                    reference_file='./cosmo_input/chains/Planck_lite_BAO_SN_mcmc',reference_ignore_rows=0.3,
+#                    reference_label='MCMC',scatter_points=False)
 
 
 # 2025-04-22 19:33:32,222 INFO:[BO]:  LogZ info: upper=-1228.2622, mean=-1231.9608, lower=-1232.2119, dlogz sampler=0.1881

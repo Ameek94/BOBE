@@ -45,8 +45,8 @@ params:
      loc: 0
      scale: 0.0001   
    prior:
-     min: -0.005
-     max: 0.005
+     min: -0.0075 # prev 0.005
+     max: 0.0075 # prev 0.005
    proposal: 0.0001     
   omch2:
    latex: \Omega_\mathrm{c} h^2
