@@ -9,7 +9,7 @@ import time
 cobaya_input_file = './cosmo_input/Planck_lite_BAO_SN_CPL.yaml'
 
 likelihood = cobaya_loglike(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e4, noise_std=0.0,name='CPL_lite')
+        minus_inf=-1e4, noise_std=0.0,name='CPL_lite_new')
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=8, n_sobol_init = 32, 
@@ -17,7 +17,7 @@ sampler = BOBE(n_cobaya_init=8, n_sobol_init = 32,
         loglikelihood=likelihood,
         fit_step = 15, update_mc_step = 5, ns_step = 50,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
-        resume=True,resume_file='./CPL_lite.npz',
+        resume=False,resume_file='./CPL_lite_new.npz',
         use_svm=True,svm_use_size=400,svm_threshold=150,svm_gp_threshold=5000,
         logz_threshold=5.,mc_points_method='NUTS',
         lengthscale_priors='DSLP', minus_inf=-1e5,
@@ -139,7 +139,7 @@ g.settings.title_limit_fontsize = 14
 g.plot_2d(plot_samples,param1='w',param2='wa',filled=[True,False],colors=['#006FED', 'black'])
 g.add_x_marker(-1.,color='k',ls='--',lw=1)
 g.add_y_marker(0.,color='k',ls='--',lw=1)
-g.add_legend(['GP', 'MCMC'],legend_loc='upper right')
+g.add_legend([f'GP, $N={gp.train_x.shape[0]}$', 'MCMC'],legend_loc='upper right')
 # g.triangle_plot(plot_samples, params = plot_parameters,filled=[True,False],
 #                     contour_colors=['#006FED', 'black'],contour_lws=[1,1.5],
 #                     legend_labels=['GP','MCMC']

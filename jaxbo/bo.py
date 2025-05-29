@@ -387,7 +387,7 @@ class BOBE:
             if ns_flag:
                 log.info(" Running Nested Sampling")
                 ns_samples, logz_dict = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(1e6), dynamic=False, dlogz=0.05
+                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.05
                 )
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
                 if self.check_convergence(i, logz_dict,threshold=self.logz_threshold):
