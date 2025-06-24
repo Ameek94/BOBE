@@ -45,7 +45,7 @@ start = time.time()
 sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8, 
         miniters=50, maxiters=120,max_gp_size=200,
         loglikelihood=likelihood,
-        fit_step = 2, update_mc_step = 2, ns_step = 20,
+        fit_step = 2, update_mc_step = 2, ns_step = 10,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 32,
         logz_threshold=0.1,
         lengthscale_priors='DSLP', use_svm=False,minus_inf=-1e5,)

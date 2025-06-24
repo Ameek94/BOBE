@@ -21,7 +21,7 @@ sampler = BOBE(n_cobaya_init=8, n_sobol_init = 32,
         use_svm=True,svm_use_size=400,svm_threshold=150,svm_gp_threshold=5000,
         logz_threshold=5.,mc_points_method='NUTS',
         lengthscale_priors='DSLP', minus_inf=-1e5,
-        return_gedsist_samples=True)
+        return_getdist_samples=True)
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()

@@ -37,16 +37,16 @@ params:
    proposal: 0.05 # prev 0.001
    latex: w_a 
   # Baseline cosmological parameters
-  omk:
-   latex: \Omega_K
-   ref:
-     dist: norm
-     loc: 0
-     scale: 0.0001   
-   prior:
-     min: -0.005
-     max: 0.005
-   proposal: 0.0001   
+  omk: 0.
+  #  latex: \Omega_K
+  #  ref:
+  #    dist: norm
+  #    loc: 0
+  #    scale: 0.0001   
+  #  prior:
+  #    min: -0.005
+  #    max: 0.005
+  #  proposal: 0.0001   
   omch2:
    latex: \Omega_\mathrm{c} h^2
    prior:

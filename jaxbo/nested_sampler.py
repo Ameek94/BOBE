@@ -13,7 +13,7 @@ from .gp import GP
 from scipy.special import logsumexp
 
 try:
-    from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler
+    from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
 except ModuleNotFoundError:
     print("Proceeding without dynesty since not installed")
 import math
@@ -118,6 +118,11 @@ def nested_sampling_Dy(gp: GP
         return jnp.reshape(mu,()), jnp.reshape(std,()) 
 
     start = time.time()
+    # with pool.Pool(njobs=4,loglike=loglike,prior_transform=prior_transform) as p:
+    #     sampler = DynamicNestedSampler(p.loglike,p.prior_transform,ndim=ndim,blob=True,
+    #                                    sample=sample_method,pool=p)
+    #     sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)
+
     if dynamic:
         sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
                                        sample=sample_method)

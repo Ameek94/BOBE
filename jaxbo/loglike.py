@@ -37,7 +37,7 @@ class external_loglike:
         self.vectorized = vectorized
         self.minus_inf = minus_inf
 
-        log.info(f"Loglikelihood {self.name} initialized with params : {param_list},  bounds: \n{param_bounds.T} \nand labels: \n{param_labels}")
+        log.info(f"Loglikelihood {self.name} initialized with params : {self.param_list},  bounds: \n{self.param_bounds.T} \nand labels: \n{self.param_labels}")
 
     def __call__(self, x: Union[np.ndarray, List[float]]
                  ,logp_args: tuple = ()

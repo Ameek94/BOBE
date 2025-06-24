@@ -15,17 +15,17 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init = 128,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step = 32, update_mc_step = 15, ns_step = 150,
+        fit_step = 32, update_mc_step = 10, ns_step = 150,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
-        lengthscale_priors='DSLP',logz_threshold=20.,svm_threshold=300,svm_gp_threshold=15000,
+        lengthscale_priors='DSLP',logz_threshold=20.,svm_threshold=300,svm_gp_threshold=10000,
         use_svm=True,svm_use_size=500,svm_update_step=5,minus_inf=-1e5,)
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()
 print(f"Total time taken = {end-start:.4f} seconds")
 
-
-plot_params = ['w','wa','omk','omch2','logA','ns','H0','ombh2','tau']
+ 
+plot_params = ['w','wa','omch2','logA','ns','H0','ombh2','tau'] #'omk'
 plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
                    plot_params=plot_params,
                    param_labels=sampler.param_labels,output_file=likelihood.name,

@@ -109,8 +109,8 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
     ndim = len(plot_params)
 
     g = plots.get_subplot_plotter(subplot_size=2.5,subplot_size_ratio=1)
-    g.settings.legend_fontsize = 18
-    g.settings.axes_fontsize=16
+    g.settings.legend_fontsize = 22
+    g.settings.axes_fontsize=18
     g.settings.axes_labelsize=18
     g.settings.title_limit_fontsize = 14   
     g.triangle_plot(plot_samples, params = plot_params,filled=[True,False],
@@ -123,6 +123,6 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
             # ax = g.subplots[i,i]
             for j in range(i+1,ndim):
                 ax = g.subplots[j,i]
-                ax.scatter(points[:,i],points[:,j],alpha=0.5,color='forestgreen',s=8)
+                ax.scatter(points[:,i],points[:,j],alpha=0.5,color='forestgreen',s=5)
 
     g.export(output_file+'_samples.pdf')

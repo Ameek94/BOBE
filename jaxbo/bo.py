@@ -157,7 +157,7 @@ class BOBE:
                  logz_threshold=1.0,
                  minus_inf=-1e5,
                  do_final_ns=True,
-                 return_gedsist_samples=False,):
+                 return_getdist_samples=False,):
         """
         Initialize the BOBE sampler class.
 
@@ -276,7 +276,7 @@ class BOBE:
         self.output_file = self.loglikelihood.name
         self.mc_points_method = mc_points_method
         self.save = save
-        self.return_gedsist_samples = return_gedsist_samples
+        self.return_getdist_samples = return_getdist_samples
         self.do_final_ns = do_final_ns
 
         # Convergence control
@@ -420,7 +420,7 @@ class BOBE:
             if self.save:
                 np.savez(f'{self.output_file}_samples.npz',ns_samples = input_unstandardize(ns_samples['x'],self.param_bounds),param_bounds = self.param_bounds)
 
-        if self.return_gedsist_samples:
+        if self.return_getdist_samples:
             ranges = dict(zip(self.param_list,self.param_bounds.T))
             samples = input_unstandardize(ns_samples['x'],self.param_bounds)
             weights = ns_samples['weights']
