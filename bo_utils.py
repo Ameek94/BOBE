@@ -1,7 +1,5 @@
 from contextlib import contextmanager,redirect_stderr,redirect_stdout
 from os import devnull
-from typing import Dict
-import pandas as pd
 import numpy as np
 from getdist import plots,MCSamples,loadMCSamples
 import matplotlib.pyplot as plt
@@ -42,35 +40,120 @@ def input_unstandardize(x,param_bounds):
     x = x * (param_bounds[1] - param_bounds[0]) + param_bounds[0]
     return x
 
-def output_standardize(y): # y is N x 1 shaped
-    """
-    Convert training data to zero mean and unit variance
-    """
-    ystd = y.std(axis=0)
-    ymean = y.mean(axis=0)
-    return (y-ymean)/ystd
 
-def output_unstandardize(y,std,mean):
-    """
-    Convert training data from zero mean and unit variance to original domain
-    """
-    return y*std + mean
-
-def plot_gp(samples,gp,names,labels,param_bounds,thin=1):
-    ranges =  param_bounds.T
-    gp_samples = MCSamples(samples=samples[::thin],names=names, labels = labels,ranges=ranges) # a comparison run
-    g = plots.get_subplot_plotter(subplot_size=2.5,subplot_size_ratio=1)
-    # g.settings.num_plot_contours = 2
-    g.settings.axes_labelsize = 18
-    g.settings.axes_fontsize = 16
-    g.settings.legend_fontsize = 14
-    g.settings.title_limit_fontsize = 14
-    if samples.shape[1]==1:
-        g.plot_1d(gp_samples,'x_1',filled=[True,False],colors=['red','blue'],
-                        legend_labels=[f'GP fit, N = {gp.train_y.shape[0]} samples','True Distribution'],title_limit=1)
-
-    else:
-        g.triangle_plot([gp_samples], names,contour_colors=['red','blue'],
-                                legend_labels=[f'GP fit, N = {gp.train_y.shape[0]} ','True Distribution'],
-                                filled=[True,False],contour_lws=[1,1.5],title_limit=1,) # type: ignore
+def plot_timing(sampler, total_time, output_file='timing_output'):
+    [plt.plot(v, label=k) for k, v in sampler.timing.items()]
+    plt.xlabel('Step Number')
+    plt.ylabel('Time (s)')
+    plt.yscale('log')
+    plt.title(f"Run Time: {total_time:.4f}s, # Samples: {sampler.gp.train_y.size}")
+    plt.legend()
+    plt.savefig(output_file+'.png')
     plt.show()
+    plt.close()
+    
+
+def plot_logz(sampler, ref_logz_mean=None, ref_logz_err=None, output_file='logz_output'):
+    logzs_dict = {k: [d[k] for d in sampler.logz_data] for k in sampler.logz_data[0]}
+    plt.plot()
+    x = np.linspace(1, len(sampler.logz_data), len(sampler.logz_data))
+    plt.plot(x, logzs_dict['mean'], label='mean', ls='--', color='black')
+    plt.fill_between(x, logzs_dict['upper'], logzs_dict['lower'], alpha=0.5, color='blue', label='∆LogZ')
+    if ref_logz_mean is not None and ref_logz_err is not None:
+        plt.axhline(xmin=x[0], xmax=x[-1], y=ref_logz_mean, label='Reference')
+        plt.fill_between(x, ref_logz_mean+ref_logz_err, ref_logz_mean-ref_logz_err, alpha=0.5, color='orange')
+        plt.title(f"BOBE LogZ: {logzs_dict['mean'][-1]:.3f} ± {logzs_dict['upper'][-1] - logzs_dict['lower'][-1]:.3f} \n Reference LogZ: {ref_logz_mean:.3f} ± {ref_logz_err:.3f} ")
+    else:
+        plt.title(f"BOBE LogZ: {logzs_dict['mean'][-1]:.3f} ± {logzs_dict['upper'][-1] - logzs_dict['lower'][-1]:.3f}") 
+    plt.savefig(output_file+'.png')
+    plt.show()
+    plt.close()
+
+def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,param_bounds=None,
+                       reference_samples = None,
+                       reference_file = None, reference_ignore_rows=0.,reference_label='MCMC',
+                       scatter_points=False,markers=None,output_file='output'):
+    """
+    Plot the final samples from the Bayesian optimization process.
+
+    Arguments
+    ----------
+    gp : GP object
+        The Gaussian process object used for the optimization.
+    ns_samples : dict
+        The samples from the nested sampling or MCMC process.
+    param_list : list
+        The list of parameter names.
+    param_labels : list
+        The list of parameter labels for plotting.
+    plot_params : list, optional
+        The list of parameters to plot. If None, all parameters will be plotted.
+    param_bounds : np.ndarray, optional
+        The bounds of the parameters. If None, assumed to be [0,1] for all parameters.
+    reference_samples : MCSamples, optional
+        The reference getdist MCsamples from the MCMC/Nested Sampling to comparea gainst. 
+        If None, will be loaded from the reference_file.
+    reference_file : str, optional
+        The getdist file root containing the reference samples. If None, will be loaded from the reference_samples.
+        If both are None, no reference samples will be plotted.
+    reference_ignore_rows : float, optional
+        The fraction of rows to ignore in the reference file. Default is 0.0.
+    reference_label : str, optional
+        The label for the reference samples. Default is 'MCMC'.
+    scatter_points : bool, optional
+        If True, scatter the training points on the plot. Default is False.
+    output_file : str, optional
+        The output file name for the plot. Default is 'output'.
+    """
+
+    if plot_params is None:
+        plot_params = param_list
+    ranges = dict(zip(param_list,param_bounds.T))
+
+    samples = samples_dict['x']
+
+    if param_bounds is None:
+        param_bounds = np.array([[0,1]]*len(param_list)).T
+    samples = input_unstandardize(samples,param_bounds)
+    weights = samples_dict['weights']
+    gd_samples = MCSamples(samples=samples, names=param_list, labels=param_labels, 
+                           ranges=ranges, weights=weights)
+    
+
+    plot_samples = [gd_samples]
+
+    if reference_file is not None:
+        ref_samples = loadMCSamples(reference_file,settings={'ignore_rows': reference_ignore_rows})
+        plot_samples.append(ref_samples)
+    elif reference_samples is not None:
+        plot_samples.append(reference_samples)
+
+    labels = ['GP',reference_label]
+
+    for label,s in zip(labels,plot_samples):
+        print(f"\nParameter limits from {label}")
+        for key in plot_params:
+            print(s.getInlineLatex(key,limit=1))
+    
+    ndim = len(plot_params)
+
+    g = plots.get_subplot_plotter(subplot_size=2.5,subplot_size_ratio=1)
+    g.settings.legend_fontsize = 18
+    g.settings.axes_fontsize=16
+    g.settings.axes_labelsize=18
+    g.settings.title_limit_fontsize = 14   
+    g.triangle_plot(plot_samples, params = plot_params,filled=[True,False],
+                    contour_colors=['#006FED', 'black'],contour_lws=[1,1.5],
+                    legend_labels=['GP',f'{reference_label}']
+                    ,markers=markers,marker_args={'lw': 1, 'ls': ':'}) 
+    if scatter_points:
+        points = input_unstandardize(gp.train_x,param_bounds)
+        for i in range(ndim):
+            # ax = g.subplots[i,i]
+            for j in range(i+1,ndim):
+                ax = g.subplots[j,i]
+                ax.scatter(points[:,i],points[:,j],alpha=0.5,color='forestgreen',s=8)
+
+    g.export(output_file+'_samples.pdf')
+    plt.show()
+    plt.close(g.fig)
