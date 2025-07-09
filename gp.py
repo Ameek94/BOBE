@@ -18,6 +18,7 @@ from functools import partial
 import logging
 log = logging.getLogger("[GP]")
 from optax import adam, apply_updates
+from .optim import optim_optax, optim_optax_vmap_early_term
 import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -102,7 +103,7 @@ class GP(ABC):
     """
     @abstractmethod
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam"
-                 ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2], prior_mean=0):
+                 ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2], prior_mean=0, improved_gp_opt=False):
         """
         Arguments
         ---------
@@ -129,6 +130,8 @@ class GP(ABC):
         
         self.ndim = train_x.shape[1]
         self.npoints = train_x.shape[0]
+
+        self.improved_gp_opt = improved_gp_opt
         
         self.y_mean = jnp.mean(train_y,axis=0) 
         self.y_std = jnp.std(train_y,axis=0)
@@ -142,6 +145,7 @@ class GP(ABC):
         self.lengthscales = jnp.ones(self.ndim)
         self.outputscale = 1.
         self.cholesky = None
+        self.mll_opt_val = 1
 
         self.lengthscales = jnp.ones(self.ndim)
         self.outputscale = 1.
@@ -223,7 +227,7 @@ class GP(ABC):
         """
         Returns the physical points
         """
-        x = input_unstandardize(self.train_x,x_bounds)
+        x = input_unstandardize(self.train_x,x_bounds.T)
         y = self.train_y*self.y_std + self.y_mean
         return x,y
     
@@ -237,7 +241,7 @@ class GP(ABC):
 class DSLP_GP(GP):
 
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam",
-                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2], prior_mean=0):
+                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2], prior_mean=0, improved_gp_opt=False):
         """
         Class for the Gaussian Process, single output based on maximum likelihood hyperparameters.
         Uses the dimension scaled lengthscale priors from the paper "Vanilla Bayesian Optimization Performs Great in High Dimensions" (2024),
@@ -260,7 +264,7 @@ class DSLP_GP(GP):
         lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
             Default is [np.log10(0.05),2]. These are the boundsfor the length scale of the GP.
         """
-        super().__init__(train_x,train_y,noise,kernel,optimizer,outputscale_bounds,lengthscale_bounds, prior_mean)
+        super().__init__(train_x,train_y,noise,kernel,optimizer,outputscale_bounds,lengthscale_bounds, prior_mean, improved_gp_opt)
 
     # --- Pytree methods ---
     def tree_flatten(self):
@@ -329,10 +333,10 @@ class DSLP_GP(GP):
         init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
         log.info(f" Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
         bounds = jnp.array(self.hyperparam_bounds)
-        mins = bounds[:,0]
-        maxs = bounds[:,1]
-        scales = maxs - mins
-        optimizer = adam(learning_rate=lr)
+        # mins = bounds[:,0]
+        # maxs = bounds[:,1]
+        # scales = maxs - mins
+        # optimizer = adam(learning_rate=lr)
 
         @jax.jit
         def mll_optim(params):
@@ -345,40 +349,20 @@ class DSLP_GP(GP):
             mll = gp_mll(k,self.train_y,self.train_y.shape[0])
             return -(mll+logprior)        
 
-        @jax.jit
-        def step(carry):
-            """
-            Step function for the optimizer
-            """
-            u_params, opt_state = carry
-            params = input_unstandardize(u_params,bounds.T)
-            loss, grads = jax.value_and_grad(mll_optim)(params)
-            grads = grads * scales
-            updates, opt_state = optimizer.update(grads, opt_state)
-            u_params = apply_updates(u_params, updates)
-            u_params = jnp.clip(u_params, 0.,1.)
-            carry = u_params, opt_state
-            return carry, loss
+        if self.improved_gp_opt:
+            params, self.mll_opt_val = optim_optax_vmap_early_term(mll_optim,
+                                                                init_params.shape[-1],
+                                                                x0=init_params,
+                                                                param_bounds=bounds, 
+                                                                n_restarts_optimiser=n_restarts,
+                                                                min_delta=self.mll_opt_val*1e-4)
+        else:
+            params, self.mll_opt_val = optim_optax(mll_optim,
+                                                   init_params.shape[-1],
+                                                   x0=init_params,
+                                                   param_bounds=bounds,
+                                                   n_restarts=n_restarts)
         
-        best_f = jnp.inf
-        best_params = None
-
-        u_params = input_standardize(init_params,bounds.T)
-
-        # display with progress bar
-        r = jnp.arange(maxiter)
-        for n in range(n_restarts):
-            opt_state = optimizer.init(u_params)
-            progress_bar = tqdm.tqdm(r,desc=f'Training GP')
-            with logging_redirect_tqdm():
-                for i in progress_bar:
-                    (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
-                    progress_bar.set_postfix({"fval": float(fval)})
-                    if fval < best_f:
-                        best_f = fval
-                        best_params = u_params
-            u_params = jnp.clip(u_params + 0.25*np.random.normal(size=init_params.shape),0,1)
-        params = input_unstandardize(best_params,bounds.T)
         hyperparams = 10 ** params
         self.lengthscales = hyperparams[0:-1]
         self.outputscale = hyperparams[-1]
@@ -447,7 +431,7 @@ class SAAS_GP(DSLP_GP):
     def __init__(self,
                  train_x, train_y, noise=1e-8, kernel="rbf", optimizer="adam",
                  outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],
-                 tausq_bounds = [-4,4], prior_mean=0):
+                 tausq_bounds = [-4,4], prior_mean=0, improved_gp_opt=False):
         """
         Class for the Gaussian Process with SAAS priors, using maximum likelihood hyperparameters. 
         The implementation is based on the paper "High-Dimensional Bayesian Optimization with Sparse Axis-Aligned Subspaces", 2021
@@ -473,7 +457,7 @@ class SAAS_GP(DSLP_GP):
         tausq_bounds: Bounds for the tausq parameter of the GP (in log10 space)
             Default is [-4,4]. These are the bounds for the tausq parameter of the GP.
         """
-        super().__init__(train_x, train_y, noise, kernel, optimizer,outputscale_bounds,lengthscale_bounds, prior_mean)
+        super().__init__(train_x, train_y, noise, kernel, optimizer,outputscale_bounds,lengthscale_bounds, prior_mean, improved_gp_opt)
         self.tausq = 1.
         self.hyperparam_bounds = [tausq_bounds] + self.hyperparam_bounds
 
@@ -542,37 +526,19 @@ class SAAS_GP(DSLP_GP):
             mll = gp_mll(k,self.train_y,self.train_y.shape[0])
             return -(mll+logprior)        
 
-        @jax.jit
-        def step(carry):
-            """
-            Step function for the optimizer
-            """
-            u_params, opt_state = carry
-            params = input_unstandardize(u_params,bounds.T)
-            loss, grads = jax.value_and_grad(mll_optim)(params)
-            grads = grads * scales
-            updates, opt_state = optimizer.update(grads, opt_state)
-            u_params = apply_updates(u_params, updates)
-            u_params = jnp.clip(u_params, 0.,1.)
-            carry = u_params, opt_state
-            return carry, loss
-        
-        best_f = jnp.inf
-        best_params = None
-        u_params = input_standardize(init_params,bounds.T)
-        # display with progress bar
-        r = jnp.arange(maxiter)
-        for n in range(n_restarts):
-            opt_state = optimizer.init(u_params)
-            progress_bar = tqdm.tqdm(r,desc=f'Training GP')
-            for i in progress_bar:
-                (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
-                progress_bar.set_postfix({"fval": float(fval)})
-            if fval < best_f:
-                best_f = fval
-                best_params = u_params
-            u_params = jnp.clip(u_params + 0.25*np.random.normal(size=init_params.shape),0,1)
-        params = input_unstandardize(best_params,bounds.T)
+        if self.improved_gp_opt:
+            params, self.mll_opt_val = optim_optax_vmap_early_term(mll_optim,
+                                                                init_params.shape[-1],
+                                                                x0=init_params,
+                                                                param_bounds=bounds, 
+                                                                n_restarts_optimiser=n_restarts,
+                                                                min_delta=self.mll_opt_val*1e-4)
+        else:
+            params, self.mll_opt_val = optim_optax(mll_optim,
+                                                   init_params.shape[-1],
+                                                   x0=init_params,
+                                                   param_bounds=bounds,
+                                                   n_restarts=n_restarts)
         hyperparams = 10 ** params
         self.tausq = hyperparams[0]
         self.lengthscales = hyperparams[1:-1]
@@ -636,7 +602,7 @@ jax.tree_util.register_pytree_node(
 class Uniform_GP(GP):
 
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam",
-                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2]):
+                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2], prior_mean=0, improved_gp_opt=False):
         """
         Class for the Gaussian Process, single output based on maximum likelihood hyperparameters.
         No Priors
@@ -658,7 +624,7 @@ class Uniform_GP(GP):
         lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
             Default is [np.log10(0.05),2]. These are the boundsfor the length scale of the GP.
         """
-        super().__init__(train_x,train_y,noise,kernel,optimizer,outputscale_bounds,lengthscale_bounds)
+        super().__init__(train_x,train_y,noise,kernel,optimizer,outputscale_bounds,lengthscale_bounds, prior_mean, improved_gp_opt)
 
     # --- Pytree methods ---
     def tree_flatten(self):
@@ -722,10 +688,7 @@ class Uniform_GP(GP):
         init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
         log.info(f" Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
         bounds = jnp.array(self.hyperparam_bounds)
-        mins = bounds[:,0]
-        maxs = bounds[:,1]
-        scales = maxs - mins
-        optimizer = adam(learning_rate=lr)
+        
 
         @jax.jit
         def mll_optim(params):
@@ -736,40 +699,19 @@ class Uniform_GP(GP):
             mll = gp_mll(k,self.train_y,self.train_y.shape[0])
             return -(mll)        
 
-        @jax.jit
-        def step(carry):
-            """
-            Step function for the optimizer
-            """
-            u_params, opt_state = carry
-            params = input_unstandardize(u_params,bounds.T)
-            loss, grads = jax.value_and_grad(mll_optim)(params)
-            grads = grads * scales
-            updates, opt_state = optimizer.update(grads, opt_state)
-            u_params = apply_updates(u_params, updates)
-            u_params = jnp.clip(u_params, 0.,1.)
-            carry = u_params, opt_state
-            return carry, loss
-        
-        best_f = jnp.inf
-        best_params = None
-
-        u_params = input_standardize(init_params,bounds.T)
-
-        # display with progress bar
-        r = jnp.arange(maxiter)
-        for n in range(n_restarts):
-            opt_state = optimizer.init(u_params)
-            progress_bar = tqdm.tqdm(r,desc=f'Training GP')
-            with logging_redirect_tqdm():
-                for i in progress_bar:
-                    (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
-                    progress_bar.set_postfix({"fval": float(fval)})
-                    if fval < best_f:
-                        best_f = fval
-                        best_params = u_params
-            u_params = jnp.clip(u_params + 0.25*np.random.normal(size=init_params.shape),0,1)
-        params = input_unstandardize(best_params,bounds.T)
+        if self.improved_gp_opt:
+            params, self.mll_opt_val = optim_optax_vmap_early_term(mll_optim,
+                                                                init_params.shape[-1],
+                                                                x0=init_params,
+                                                                param_bounds=bounds, 
+                                                                n_restarts_optimiser=n_restarts,
+                                                                min_delta=self.mll_opt_val*1e-4)
+        else:
+            params, self.mll_opt_val = optim_optax(mll_optim,
+                                                   init_params.shape[-1],
+                                                   x0=init_params,
+                                                   param_bounds=bounds,
+                                                   n_restarts=n_restarts)
         hyperparams = 10 ** params
         self.lengthscales = hyperparams[0:-1]
         self.outputscale = hyperparams[-1]

@@ -14,6 +14,7 @@ from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from .bo_utils import input_standardize, input_unstandardize
 from optax import adam, apply_updates
+from .optim import optim_optax, optim_optax_vmap_early_term
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from getdist import plots, MCSamples, loadMCSamples
 import tqdm
@@ -54,106 +55,6 @@ log.setLevel(logging.INFO)               # ensure INFO+ get processed
 log.addHandler(stdout_handler)
 log.addHandler(stderr_handler)
 
-# Acquisition optimizer
-    
-def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimizer=4):
-    
-    f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
-
-    @jax.jit
-    def acq_val_grad(x):
-        return jax.value_and_grad(f)(x)
-
-    params = jnp.array(np.random.uniform(0, 1, size=mc_points.shape[1])) if x0 is None else x0
-    optimizer = adam(learning_rate=lr)
-
-    @jax.jit
-    def step(carry):
-        params, opt_state = carry
-        (val, grad) = acq_val_grad(params)
-        updates, opt_state = optimizer.update(grad, opt_state)
-        params = apply_updates(params, updates)
-        return (jnp.clip(params, 0., 1.), opt_state), val
-
-    best_f, best_params = jnp.inf, None
-    r = jnp.arange(maxiter)
-    for n in range(n_restarts_optimizer):
-        opt_state = optimizer.init(params)
-        progress_bar = tqdm.tqdm(r,desc=f'ACQ Optimization restart {n+1}')
-        for i in progress_bar:
-            (params, opt_state), fval = step((params, opt_state))
-            progress_bar.set_postfix({"fval": float(fval)})
-            if fval < best_f:
-                best_f, best_params = fval, params
-        # Perturb for next restart
-        params = jnp.clip(best_params + 0.5 * jnp.array(np.random.normal(size=params.shape)), 0., 1.)
-
-    # print(f"Best params: {best_params}, fval: {best_f}")
-    return jnp.atleast_2d(best_params), best_f
-
-
-def optimise_acq_improved(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimiser=4):
-    min_delta=1e-9 #Minimum amount by which loss function must improve to be considered progressing
-    patience=5 #Number of steps without progress before restart is stopped
-    
-    f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
-
-    @jax.jit
-    def acq_val_grad(x):
-        return jax.value_and_grad(f)(x)
-        
-    key = jax.random.PRNGKey(0)
-    params = jax.random.uniform(key, (n_restarts_optimiser, mc_points.shape[1]), minval=0, maxval=1) if x0 is None else jnp.tile(x0, (n_restarts_optimiser, 1))
-    optimizer = adam(learning_rate=lr)
-    opt_state = jax.vmap(optimizer.init)(params)
-    
-    @jax.jit
-    def scan_step(carry):
-        params, opt_state, best_params, best_values, no_improve_steps, active_mask = carry
-
-        values, grads = acq_val_grad(params)
-        
-        # Zero out gradients for inactive restarts
-        grads = jnp.where(active_mask[:, None], grads, jnp.zeros_like(grads))
-        updates, opt_state = jax.vmap(optimizer.update)(grads, opt_state, params)
-        new_params = apply_updates(params, updates)
-
-        is_better = values < (best_values - min_delta)
-        best_params = jnp.where(is_better[:, None], new_params, best_params)
-        best_values = jnp.where(is_better, values, best_values)
-        no_improve_steps = jnp.where(is_better, 0, no_improve_steps + 1)
-
-        # Deactivate finished restarts
-        active_mask = jnp.where(no_improve_steps >= patience, False, active_mask)
-
-        # Keep params unchanged if inactive
-        new_params = jnp.where(active_mask[:, None], new_params, params)
-
-        return (new_params, opt_state, best_params, best_values, no_improve_steps, active_mask)
-        
-    best_values, _ = jax.vmap(acq_val_grad)(params)
-    active_mask = jnp.ones(n_restarts_optimiser, dtype=bool)
-    no_improve_steps = jnp.zeros(n_restarts_optimiser, dtype=jnp.int32)
-
-    carry = (params, opt_state, params, best_values, no_improve_steps, active_mask)
-
-    pbar = tqdm_(range(maxiter), desc="Acq Optimisation (parallel with per-restart early stop)")
-    for i in pbar:
-        carry = scan_step(carry)
-        _, _, best_params, best_values, no_improve_steps, active_mask = carry
-
-        pbar.set_postfix(
-            best_val=jnp.min(best_values).item(),
-            #active_restarts=active_mask.sum().item(),
-        )
-
-        if jnp.logical_not(jnp.any(active_mask)):
-            #print(f"\n All restarts stopped early after {i+1} steps.")
-            break
-    best_param = best_params[jnp.argmin(best_values)]
-    best_f = jnp.min(best_values)
-    
-    return jnp.atleast_2d(best_param), best_f
     
 # Utility functions
 
@@ -224,7 +125,8 @@ class BOBE:
                  minus_inf=-1e5,
                  do_final_ns=True,
                  return_gedsist_samples=False,
-                 improved_acq=False,
+                 improved_acq_opt=False,
+                 improved_gp_opt=False,
                  acq_threshold=1e-5,
                  prior_mean=0):
         """
@@ -297,7 +199,7 @@ class BOBE:
 
         self.timing = {'GP': [], 'MC': [], 'ACQ': [], 'NS': [], 'LH': [], 'Step': []}
         self.logz_data = []
-
+        self.hyperparameter_data = {'lengthscales': [], 'outputscale': []}
 
         if resume and resume_file is not None:
             # assert resume_file is not None, "resume_file must be provided if resume is True"
@@ -318,6 +220,8 @@ class BOBE:
         self.best = {name: f"{float(val):.4f}" for name, val in zip(self.param_list, self.best_pt)}
         log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
 
+        self.improved_gp_opt = improved_gp_opt
+        
         # GP setup
         if use_svm:
             gp = SVM_GP(
@@ -333,7 +237,7 @@ class BOBE:
                 'Uniform': Uniform_GP
             }[lengthscale_priors](
                 train_x=self.train_x, train_y=self.train_y,
-                noise=1e-8, kernel='rbf', prior_mean=self.prior_mean
+                noise=1e-8, kernel='rbf', prior_mean=self.prior_mean, improved_gp_opt=self.improved_gp_opt
             )
         self.gp = gp
 
@@ -355,7 +259,7 @@ class BOBE:
         self.do_final_ns = do_final_ns
 
         self.acq_threshold = acq_threshold
-        self.improved_acq = improved_acq
+        self.improved_acq_opt = improved_acq_opt
         
         # Convergence control
         self.logz_threshold = logz_threshold
@@ -431,12 +335,13 @@ class BOBE:
 
             ### Calculate and Optimise Acquisition Function ###
             start_acq = time.time()
-            if self.improved_acq:
-                new_pt_u, acq_val = optimise_acq_improved(
-                    self.gp, WIPV, self.mc_points, x0=x0_acq)
+            acq_fn = lambda x: WIPV(x=x, gp=self.gp, mc_points=self.mc_points)
+            if self.improved_acq_opt:
+                new_pt_u, acq_val = optim_optax_vmap_early_term(
+                    acq_fn, self.ndim, x0=x0_acq, n_restarts_optimiser=4, min_delta=acq_val*1e-4)
             else:
-                new_pt_u, acq_val = optimize_acq(
-                    self.gp, WIPV, self.mc_points, x0=x0_acq)
+                new_pt_u, acq_val = optim_optax(
+                    acq_fn, self.ndim, x0=x0_acq)
             end_acq = time.time()
             self.timing['ACQ'].append(end_acq-start_acq)
             #####################################
@@ -460,9 +365,12 @@ class BOBE:
 
             ### Re-fit GP ###
             start_gp = time.time()
-            pt_exists = self.gp.update(new_pt_u, new_val, refit=refit)
+            pt_exists = self.gp.update(jnp.atleast_2d(new_pt_u), new_val, refit=refit)
             end_gp = time.time()
             self.timing['GP'].append(end_gp - start_gp)
+
+            self.hyperparameter_data['lengthscales'].append(self.gp.lengthscales.tolist())
+            self.hyperparameter_data['outputscale'].append(self.gp.outputscale.tolist())
             #################
             ### Get MC Samples of the GP for Acquisition Function ###
             
