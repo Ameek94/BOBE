@@ -1,11 +1,11 @@
 from jaxbo.bo import BOBE
 from jaxbo.bo_utils import plot_final_samples
-from jaxbo.loglike import cobaya_loglike
+from jaxbo.loglike import cobaya_likelihood
 import time
 
 cobaya_input_file = './cosmo_input/LCDM_6D.yaml'
 
-likelihood = cobaya_loglike(cobaya_input_file, confidence_for_unbounded=0.9999995,
+likelihood = cobaya_likelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
         minus_inf=-1e5, noise_std=0.0,name='LCDM_6D_lite')
 
 start = time.time()

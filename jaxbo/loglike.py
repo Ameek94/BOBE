@@ -10,7 +10,7 @@ import logging
 log = logging.getLogger("[Loglike]")
 
 
-class external_loglike:
+class external_likelihood:
 
     def __init__(self
                  ,loglikelihood: Callable
@@ -77,8 +77,8 @@ class external_loglike:
             logpost.append(self.minus_inf if lp < self.minus_inf else lp)
             points.append(pt)
         return np.array(points), np.array(logpost).reshape(n_init_sobol, 1)
-    
-class cobaya_loglike(external_loglike):
+
+class cobaya_likelihood(external_likelihood):
     """
     Class for implementing external loglikelihoods using cobaya
     """

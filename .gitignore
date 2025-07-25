@@ -36,3 +36,4 @@ MANIFEST
 *chains
 *.DS_Store
 resume_plot*
+*test_methods/
