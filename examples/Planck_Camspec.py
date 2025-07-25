@@ -10,7 +10,7 @@ likelihood = cobaya_loglike(cobaya_input_file, confidence_for_unbounded=0.999999
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init = 128, 
-        miniters=500, maxiters=0,max_gp_size=1200,
+        miniters=500, maxiters=1,max_gp_size=1200,
         loglikelihood=likelihood,
         resume=True,
         resume_file=f'{likelihood.name}.npz',
