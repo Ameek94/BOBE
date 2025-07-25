@@ -181,9 +181,40 @@ class GP(ABC):
         mean, var = gp_predict(self.train_y,self.cholesky,k12,k22)
         return mean, var
 
-    @abstractmethod
-    def update(self,new_x,new_y):
-        pass
+    # @abstractmethod
+    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
+        """
+        Updates the GP with new training points and refits the GP if refit is True.
+
+        Arguments
+        ---------        
+        refit: bool
+            Whether to refit the GP hyperparameters. Default is True.
+        lr: float
+            The learning rate for the optax optimizer. Default is 1e-2.
+        maxiter: int
+            The maximum number of iterations for the optax optimizer. Default is 250.
+        n_restarts: int
+            The number of restarts for the optax optimizer. Default is 2.
+
+        Returns
+        -------
+        repeat: bool
+            Whether the point new_x, new_y already exists in the training set.
+
+        """
+        if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
+            log.info(f"Point {new_x} already exists in the training set, not updating")
+            return True
+        else:
+            super().add(new_x,new_y)
+            if refit:
+                self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+            else:
+            # consider doing rank 1 update of cholesky
+                k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+                self.cholesky = jnp.linalg.cholesky(k)
+            return False
 
     def add(self,new_x,new_y):
         """
@@ -275,7 +306,7 @@ class DSLP_GP(GP):
     @classmethod
     def tree_unflatten(cls, aux_data, leaves):
         # Unpack dynamic leaves
-        train_x, train_y, cholesky, y_mean, y_std, lengthscales, outputscale = leaves
+        train_x, train_y, K, cholesky, y_mean, y_std, lengthscales, outputscale = leaves
         # Create an instance with minimal initialization
         obj = cls(train_x, train_y, noise=aux_data["noise"], 
                   kernel="rbf" if aux_data["kernel"] == rbf_kernel else "matern", 
@@ -383,39 +414,39 @@ class DSLP_GP(GP):
     def predict(self,x):
         return super().predict(x)
 
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
-        """
-        Updates the GP with new training points and refits the GP if refit is True.
+    # def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
+        # """
+        # Updates the GP with new training points and refits the GP if refit is True.
 
-        Arguments
-        ---------        
-        refit: bool
-            Whether to refit the GP hyperparameters. Default is True.
-        lr: float
-            The learning rate for the optax optimizer. Default is 1e-2.
-        maxiter: int
-            The maximum number of iterations for the optax optimizer. Default is 250.
-        n_restarts: int
-            The number of restarts for the optax optimizer. Default is 2.
+        # Arguments
+        # ---------        
+        # refit: bool
+        #     Whether to refit the GP hyperparameters. Default is True.
+        # lr: float
+        #     The learning rate for the optax optimizer. Default is 1e-2.
+        # maxiter: int
+        #     The maximum number of iterations for the optax optimizer. Default is 250.
+        # n_restarts: int
+        #     The number of restarts for the optax optimizer. Default is 2.
 
-        Returns
-        -------
-        repeat: bool
-            Whether the point new_x, new_y already exists in the training set.
+        # Returns
+        # -------
+        # repeat: bool
+        #     Whether the point new_x, new_y already exists in the training set.
 
-        """
-        if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
-            log.info(f"Point {new_x} already exists in the training set, not updating")
-            return True
-        else:
-            super().add(new_x,new_y)
-            if refit:
-                self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
-            else:
-            # consider doing rank 1 update of cholesky
-                k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-                self.cholesky = jnp.linalg.cholesky(k)
-            return False
+        # """
+        # if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
+        #     log.info(f"Point {new_x} already exists in the training set, not updating")
+        #     return True
+        # else:
+        #     super().add(new_x,new_y)
+        #     if refit:
+        #         self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+        #     else:
+        #     # consider doing rank 1 update of cholesky
+        #         k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+        #         self.cholesky = jnp.linalg.cholesky(k)
+        #     return False
 
     def fantasy_var(self,x_new,mc_points):
         """
@@ -569,39 +600,39 @@ class SAAS_GP(DSLP_GP):
         self.cholesky = jnp.linalg.cholesky(k)
         self.fitted = True
 
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
-        """
-        Updates the GP with new training points and refits the GP if refit is True.
+    # def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
+    #     """
+    #     Updates the GP with new training points and refits the GP if refit is True.
 
-        Arguments
-        ---------        
-        refit: bool
-            Whether to refit the GP hyperparameters. Default is True.
-        lr: float
-            The learning rate for the optax optimizer. Default is 1e-2.
-        maxiter: int
-            The maximum number of iterations for the optax optimizer. Default is 250.
-        n_restarts: int
-            The number of restarts for the optax optimizer. Default is 2.
+    #     Arguments
+    #     ---------        
+    #     refit: bool
+    #         Whether to refit the GP hyperparameters. Default is True.
+    #     lr: float
+    #         The learning rate for the optax optimizer. Default is 1e-2.
+    #     maxiter: int
+    #         The maximum number of iterations for the optax optimizer. Default is 250.
+    #     n_restarts: int
+    #         The number of restarts for the optax optimizer. Default is 2.
 
-        Returns
-        -------
-        repeat: bool
-            Whether the point new_x, new_y already exists in the training set.
+    #     Returns
+    #     -------
+    #     repeat: bool
+    #         Whether the point new_x, new_y already exists in the training set.
 
-        """
-        if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
-            log.info(f"Point {new_x} already exists in the training set, not updating")
-            return True
-        else:
-            super().add(new_x,new_y)
-            if refit:
-                self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
-            else:
-                # consider doing rank 1 update of cholesky
-                k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-                self.cholesky = jnp.linalg.cholesky(k)
-            return False
+    #     """
+    #     if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
+    #         log.info(f"Point {new_x} already exists in the training set, not updating")
+    #         return True
+    #     else:
+    #         super().add(new_x,new_y)
+    #         if refit:
+    #             self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+    #         else:
+    #             # consider doing rank 1 update of cholesky
+    #             k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+    #             self.cholesky = jnp.linalg.cholesky(k)
+    #         return False
     
     def predict_mean(self, x):
         return super().predict_mean(x)
