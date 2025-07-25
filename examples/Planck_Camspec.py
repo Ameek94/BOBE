@@ -1,20 +1,20 @@
 from jaxbo.bo import BOBE
 from jaxbo.bo_utils import plot_final_samples
-from jaxbo.loglike import cobaya_loglike
+from jaxbo.loglike import cobaya_likelihood
 import time
 
 cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
 
-likelihood = cobaya_loglike(cobaya_input_file, confidence_for_unbounded=0.9999995,
+likelihood = cobaya_likelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
         minus_inf=-1e5, noise_std=0.0,name='Planck_Camspec')
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init = 128, 
-        miniters=500, maxiters=0,max_gp_size=1200,
+        miniters=500, maxiters=1,max_gp_size=1200,
         loglikelihood=likelihood,
         resume=True,
         resume_file=f'{likelihood.name}.npz',
-        save=True,
+        save=False,
         fit_step = 25, update_mc_step = 5, ns_step = 75,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
         lengthscale_priors='DSLP',logz_threshold=5.,
