@@ -54,7 +54,7 @@ log.addHandler(stdout_handler)
 log.addHandler(stderr_handler)
 
 # Acquisition optimizer
-def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=100, n_restarts_optimizer=4):
+def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimizer=4):
     
     f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
 

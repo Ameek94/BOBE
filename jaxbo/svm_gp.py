@@ -189,7 +189,7 @@ class SVM_GP:
 
         log.info(f" Use SVM {self.use_svm}")
 
-    def fit(self,lr=1e-2,maxiter=250,n_restarts=2):
+    def fit(self,lr=1e-2,maxiter=150,n_restarts=2):
         """
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer
         """
@@ -251,7 +251,7 @@ class SVM_GP:
         # res = jax.lax.cond(self.use_svm, w_classifier, no_classifer)
         # return res
     
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=250,n_restarts=2):
+    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=150,n_restarts=2):
         """
         Updates the SVM training set and the GP with new training points and refits the GP if refit is True
 

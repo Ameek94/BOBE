@@ -138,7 +138,7 @@ class GP(ABC):
     """
     @abstractmethod
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam"
-                 ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2]):
+                 ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],prior_mean=0.):
         """
         Arguments
         ---------
@@ -165,6 +165,7 @@ class GP(ABC):
 
         self.ndim = train_x.shape[1]
         self.npoints = train_x.shape[0]
+        train_y = train_y - prior_mean
         self.y_mean = jnp.mean(train_y,axis=0)
         self.y_std = jnp.std(train_y,axis=0)
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
@@ -175,7 +176,7 @@ class GP(ABC):
         self.K = None
         self.cholesky = None
         self.alphas = None
-        self.prior_mean = 0.
+        self.prior_mean = prior_mean
 
         self.train_y = (train_y - self.y_mean) / self.y_std
         self.lengthscales = jnp.ones(self.ndim)
@@ -196,8 +197,8 @@ class GP(ABC):
         """
         x = jnp.atleast_2d(x)
         k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
-        mean = get_mean_from_cho(k12,self.alphas) + self.prior_mean
-        return mean*self.y_std + self.y_mean
+        mean = get_mean_from_cho(k12,self.alphas) 
+        return mean*self.y_std + self.y_mean + self.prior_mean
 
     @abstractmethod
     def predict_var(self,x):
@@ -222,7 +223,7 @@ class GP(ABC):
         return mean, var
 
     # @abstractmethod
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
+    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=150,n_restarts=2):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 
@@ -252,8 +253,9 @@ class GP(ABC):
                 self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
             else:
             # consider doing rank 1 update of cholesky
-                k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-                self.cholesky = jnp.linalg.cholesky(k)
+                self.K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+                self.cholesky = jnp.linalg.cholesky(self.K)
+                self.alphas = cho_solve((self.cholesky, True), self.train_y)
             return False
 
     def add(self,new_x,new_y):
@@ -261,8 +263,9 @@ class GP(ABC):
         Updates the GP with new training points.
         """
         self.train_x = jnp.concatenate([self.train_x,new_x])
-        self.train_y = self.train_y*self.y_std + self.y_mean
+        self.train_y = self.train_y*self.y_std + self.y_mean + self.prior_mean
         self.train_y = jnp.concatenate([self.train_y,new_y])
+        self.train_y = self.train_y - self.prior_mean
         self.y_mean = jnp.mean(self.train_y,axis=0)
         self.y_std = jnp.std(self.train_y,axis=0)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
@@ -294,14 +297,14 @@ class GP(ABC):
         Returns the physical points
         """
         x = input_unstandardize(self.train_x,x_bounds)
-        y = self.train_y*self.y_std + self.y_mean
+        y = self.train_y*self.y_std + self.y_mean + self.prior_mean
         return x,y
     
     def save(self,outfile='gp'):
         """
         Saves the GP to a file
         """
-        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=self.train_y,noise=self.noise,
+        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=self.train_y,noise=self.noise,prior_mean=self.prior_mean,
          y_mean=self.y_mean,y_std=self.y_std,lengthscales=self.lengthscales,outputscale=self.outputscale)
 
 class DSLP_GP(GP):
@@ -375,7 +378,7 @@ class DSLP_GP(GP):
         obj.outputscale = outputscale
         return obj
 
-    def fit(self,lr=1e-2,maxiter=250,n_restarts=2):
+    def fit(self,lr=1e-2,maxiter=150,n_restarts=2):
         """
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
