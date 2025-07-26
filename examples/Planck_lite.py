@@ -25,3 +25,7 @@ plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sam
                    param_labels=sampler.param_labels,output_file=likelihood.name,
                    reference_file='./cosmo_input/chains/Planck_lite_LCDM',reference_ignore_rows=0.3,
                    reference_label='PolyChord',scatter_points=True,)
+
+# Total time taken = 292.6820 seconds with fast updates
+# Total time taken = 387.6565 seconds with older code
+
