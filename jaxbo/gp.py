@@ -32,7 +32,7 @@ def dist_sq(x, y):
     Compute squared Euclidean distance between two points x, y. 
     If x is n1 x d and y is n2 x d returns a n1 x n2 matrix of distancess.
     """
-    return jnp.sum(jnp.square(x[:,None,:] - y),axis=-1) 
+    return jnp.sum(jnp.square(x[:,None,:] - y[None,:,:]),axis=-1) 
 
 @partial(jax.jit,static_argnames='include_noise')
 def rbf_kernel(xa,
@@ -71,8 +71,8 @@ def get_var_from_cho(k11_cho,k12,k22):
     return var
     
 @jax.jit
-def get_mean_from_cho(k11_cho,k12,train_y):
-    mu = jnp.matmul(jnp.transpose(k12),cho_solve((k11_cho,True),train_y)) # can also store alphas
+def get_mean_from_cho(k12,alphas):
+    mu = jnp.matmul(jnp.transpose(k12),alphas)
     mean = mu.squeeze(-1)
     return mean
 
@@ -88,12 +88,49 @@ def gp_predict(train_y,k11_cho,k12,k22):
 @jax.jit
 def gp_mll(k,train_y,num_points):
     """
-    Computes the negative log marginal likelihood of the GP
+    Computes the negative marginal log likelihood of the GP
     """
     L = jnp.linalg.cholesky(k)
     alpha = cho_solve((L,True),train_y)
     mll = -0.5*jnp.einsum("ij,ji",train_y.T,alpha) - jnp.sum(jnp.log(jnp.diag(L))) - 0.5*num_points*jnp.log(2*pi)
     return mll
+
+@jax.jit
+def fast_update_kernel(K: jnp.ndarray, k: jnp.ndarray, k_self: float):
+    n = K.shape[0]
+    new_K = jnp.zeros((n+1,n+1),dtype=K.dtype)
+    new_K = new_K.at[:n,:n].set(K)
+    new_K = new_K.at[:n,n].set(k)
+    new_K = new_K.at[n,:n].set(k.T)
+    new_K = new_K.at[n,n].set(k_self)
+    return new_K
+
+@jax.jit
+def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
+    # solve L v = k  →  v has shape (n,)
+    v = solve_triangular(L, k, lower=True)
+
+    # new diagonal entry
+    diag = jnp.sqrt(k_self - jnp.dot(v, v))
+
+    # print(f"Shapes L: {L.shape}, k: {k.shape}, k_self: {k_self}, v: {v.shape}, diag: {diag.shape}")
+
+    # build a zero (n+1)x(n+1) and fill blocks
+    n = L.shape[0]
+    new_L = jnp.zeros((n+1, n+1), dtype=L.dtype)
+    new_L = new_L.at[:n, :n].set(L)      # top-left
+    new_L = new_L.at[n, :n].set(v)       # bottom-left
+    new_L = new_L.at[n, n].set(diag)     # bottom-right
+    return new_L
+
+@jax.jit
+def fast_update_kernel_cholesky(K: jnp.ndarray,L: jnp.ndarray,k: jnp.ndarray,k_self: float):
+    """
+    Fast update of the Kernel and its Cholesky factorization
+    """
+    K_new = fast_update_kernel(K, k, k_self)
+    L_new = fast_update_cholesky(L, k, k_self)
+    return K_new, L_new
 
 class GP(ABC):
     """
@@ -101,7 +138,7 @@ class GP(ABC):
     """
     @abstractmethod
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam"
-                 ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2]):
+                 ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],prior_mean=0.):
         """
         Arguments
         ---------
@@ -128,6 +165,7 @@ class GP(ABC):
 
         self.ndim = train_x.shape[1]
         self.npoints = train_x.shape[0]
+        train_y = train_y - prior_mean
         self.y_mean = jnp.mean(train_y,axis=0)
         self.y_std = jnp.std(train_y,axis=0)
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
@@ -135,7 +173,10 @@ class GP(ABC):
         self.fitted = False
         self.lengthscales = jnp.ones(self.ndim)
         self.outputscale = 1.
+        self.K = None
         self.cholesky = None
+        self.alphas = None
+        self.prior_mean = prior_mean
 
         self.train_y = (train_y - self.y_mean) / self.y_std
         self.lengthscales = jnp.ones(self.ndim)
@@ -156,8 +197,8 @@ class GP(ABC):
         """
         x = jnp.atleast_2d(x)
         k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
-        mean = get_mean_from_cho(self.cholesky,k12,self.train_y)
-        return mean*self.y_std + self.y_mean
+        mean = get_mean_from_cho(k12,self.alphas) 
+        return mean*self.y_std + self.y_mean + self.prior_mean
 
     @abstractmethod
     def predict_var(self,x):
@@ -181,33 +222,73 @@ class GP(ABC):
         mean, var = gp_predict(self.train_y,self.cholesky,k12,k22)
         return mean, var
 
-    @abstractmethod
-    def update(self,new_x,new_y):
-        pass
+    # @abstractmethod
+    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=150,n_restarts=2):
+        """
+        Updates the GP with new training points and refits the GP if refit is True.
+
+        Arguments
+        ---------        
+        refit: bool
+            Whether to refit the GP hyperparameters. Default is True.
+        lr: float
+            The learning rate for the optax optimizer. Default is 1e-2.
+        maxiter: int
+            The maximum number of iterations for the optax optimizer. Default is 250.
+        n_restarts: int
+            The number of restarts for the optax optimizer. Default is 2.
+
+        Returns
+        -------
+        repeat: bool
+            Whether the point new_x, new_y already exists in the training set.
+
+        """
+        if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
+            log.info(f"Point {new_x} already exists in the training set, not updating")
+            return True
+        else:
+            self.add(new_x,new_y)
+            if refit:
+                self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+            else:
+            # consider doing rank 1 update of cholesky
+                self.K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+                self.cholesky = jnp.linalg.cholesky(self.K)
+                self.alphas = cho_solve((self.cholesky, True), self.train_y)
+            return False
 
     def add(self,new_x,new_y):
         """
         Updates the GP with new training points.
         """
         self.train_x = jnp.concatenate([self.train_x,new_x])
-        self.train_y = self.train_y*self.y_std + self.y_mean
+        self.train_y = self.train_y*self.y_std + self.y_mean + self.prior_mean
         self.train_y = jnp.concatenate([self.train_y,new_y])
+        self.train_y = self.train_y - self.prior_mean
         self.y_mean = jnp.mean(self.train_y,axis=0)
         self.y_std = jnp.std(self.train_y,axis=0)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
         self.npoints = self.train_x.shape[0]
         log.info(f" GP training size = {self.npoints}")
 
-    def fantasy_var(self,x_new,mc_points):
+    def fantasy_var(self,new_x,mc_points):
         """
-        Computes the variance of the GP at the mc_points assuming x_new is added to the training set
+        Computes the variance of the GP at the mc_points assuming new_x is added to the training set
         """
-        x_new = jnp.atleast_2d(x_new)
-        new_train_x = jnp.concatenate([self.train_x,x_new])
-        k11 = self.kernel(new_train_x,new_train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True) 
-        k11_cho = jnp.linalg.cholesky(k11)
-        k12 = self.kernel(new_train_x,mc_points,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
-        k22 = self.kernel(mc_points,mc_points,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+        new_x = jnp.atleast_2d(new_x)
+        new_train_x = jnp.concatenate([self.train_x,new_x])
+        k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
+                        noise=self.noise,include_noise=False).flatten()           # shape (n,)
+        k_self = self.kernel(new_x,new_x,self.lengthscales,
+                          self.outputscale,noise=self.noise,include_noise=True)[0, 0]  # scalar
+        k11_cho = fast_update_cholesky(self.cholesky,k,k_self)
+        # k11 = self.kernel(new_train_x,new_train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True) 
+        # k11_cho = jnp.linalg.cholesky(k11)
+        k12 = self.kernel(new_train_x,mc_points,self.lengthscales,
+                          self.outputscale,noise=self.noise,include_noise=False)
+        k22 = self.kernel(mc_points,mc_points,self.lengthscales,
+                          self.outputscale,noise=self.noise,include_noise=True) # precompute k22 instead
         var = get_var_from_cho(k11_cho,k12,k22)
         return var
     
@@ -216,14 +297,14 @@ class GP(ABC):
         Returns the physical points
         """
         x = input_unstandardize(self.train_x,x_bounds)
-        y = self.train_y*self.y_std + self.y_mean
+        y = self.train_y*self.y_std + self.y_mean + self.prior_mean
         return x,y
     
     def save(self,outfile='gp'):
         """
         Saves the GP to a file
         """
-        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=self.train_y,noise=self.noise,
+        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=self.train_y,noise=self.noise,prior_mean=self.prior_mean,
          y_mean=self.y_mean,y_std=self.y_std,lengthscales=self.lengthscales,outputscale=self.outputscale)
 
 class DSLP_GP(GP):
@@ -257,7 +338,7 @@ class DSLP_GP(GP):
     # --- Pytree methods ---
     def tree_flatten(self):
         # Choose dynamic (leaf) attributes: these are jax arrays (or None)
-        leaves = (self.train_x, self.train_y, self.cholesky, self.y_mean, self.y_std, self.lengthscales, self.outputscale)
+        leaves = (self.train_x, self.train_y, self.K, self.cholesky, self.alphas, self.y_mean, self.y_std, self.lengthscales, self.outputscale)
         # The rest are considered static auxiliary data
         aux_data = {
             "ndim": self.ndim,
@@ -275,7 +356,7 @@ class DSLP_GP(GP):
     @classmethod
     def tree_unflatten(cls, aux_data, leaves):
         # Unpack dynamic leaves
-        train_x, train_y, cholesky, y_mean, y_std, lengthscales, outputscale = leaves
+        train_x, train_y, K, cholesky, alphas, y_mean, y_std, lengthscales, outputscale = leaves
         # Create an instance with minimal initialization
         obj = cls(train_x, train_y, noise=aux_data["noise"], 
                   kernel="rbf" if aux_data["kernel"] == rbf_kernel else "matern", 
@@ -297,7 +378,7 @@ class DSLP_GP(GP):
         obj.outputscale = outputscale
         return obj
 
-    def fit(self,lr=1e-2,maxiter=250,n_restarts=2):
+    def fit(self,lr=1e-2,maxiter=150,n_restarts=2):
         """
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
@@ -321,6 +402,7 @@ class DSLP_GP(GP):
         scales = maxs - mins
         optimizer = adam(learning_rate=lr)
 
+        # Optimization to be moved, use the method in optim.py
         @jax.jit
         def mll_optim(params):
             hyperparams = 10**params
@@ -370,8 +452,9 @@ class DSLP_GP(GP):
         self.lengthscales = hyperparams[0:-1]
         self.outputscale = hyperparams[-1]
         log.info(f" Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
-        k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-        self.cholesky = jnp.linalg.cholesky(k)
+        self.K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+        self.cholesky = jnp.linalg.cholesky(self.K)
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
         self.fitted = True
 
     def predict_mean(self,x):
@@ -383,45 +466,45 @@ class DSLP_GP(GP):
     def predict(self,x):
         return super().predict(x)
 
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
-        """
-        Updates the GP with new training points and refits the GP if refit is True.
+    # def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
+        # """
+        # Updates the GP with new training points and refits the GP if refit is True.
 
-        Arguments
-        ---------        
-        refit: bool
-            Whether to refit the GP hyperparameters. Default is True.
-        lr: float
-            The learning rate for the optax optimizer. Default is 1e-2.
-        maxiter: int
-            The maximum number of iterations for the optax optimizer. Default is 250.
-        n_restarts: int
-            The number of restarts for the optax optimizer. Default is 2.
+        # Arguments
+        # ---------        
+        # refit: bool
+        #     Whether to refit the GP hyperparameters. Default is True.
+        # lr: float
+        #     The learning rate for the optax optimizer. Default is 1e-2.
+        # maxiter: int
+        #     The maximum number of iterations for the optax optimizer. Default is 250.
+        # n_restarts: int
+        #     The number of restarts for the optax optimizer. Default is 2.
 
-        Returns
-        -------
-        repeat: bool
-            Whether the point new_x, new_y already exists in the training set.
+        # Returns
+        # -------
+        # repeat: bool
+        #     Whether the point new_x, new_y already exists in the training set.
 
-        """
-        if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
-            log.info(f"Point {new_x} already exists in the training set, not updating")
-            return True
-        else:
-            super().add(new_x,new_y)
-            if refit:
-                self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
-            else:
-            # consider doing rank 1 update of cholesky
-                k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-                self.cholesky = jnp.linalg.cholesky(k)
-            return False
+        # """
+        # if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
+        #     log.info(f"Point {new_x} already exists in the training set, not updating")
+        #     return True
+        # else:
+        #     super().add(new_x,new_y)
+        #     if refit:
+        #         self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+        #     else:
+        #     # consider doing rank 1 update of cholesky
+        #         k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+        #         self.cholesky = jnp.linalg.cholesky(k)
+        #     return False
 
-    def fantasy_var(self,x_new,mc_points):
+    def fantasy_var(self,new_x,mc_points):
         """
-        Computes the variance of the GP at the mc_points assuming x_new is added to the training set
+        Computes the variance of the GP at the mc_points assuming new_x is added to the training set
         """
-        return super().fantasy_var(x_new,mc_points)
+        return super().fantasy_var(new_x,mc_points)
         
 # Register DSLP_GP as a pytree node with JAX
 jax.tree_util.register_pytree_node(
@@ -569,39 +652,39 @@ class SAAS_GP(DSLP_GP):
         self.cholesky = jnp.linalg.cholesky(k)
         self.fitted = True
 
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
-        """
-        Updates the GP with new training points and refits the GP if refit is True.
+    # def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
+    #     """
+    #     Updates the GP with new training points and refits the GP if refit is True.
 
-        Arguments
-        ---------        
-        refit: bool
-            Whether to refit the GP hyperparameters. Default is True.
-        lr: float
-            The learning rate for the optax optimizer. Default is 1e-2.
-        maxiter: int
-            The maximum number of iterations for the optax optimizer. Default is 250.
-        n_restarts: int
-            The number of restarts for the optax optimizer. Default is 2.
+    #     Arguments
+    #     ---------        
+    #     refit: bool
+    #         Whether to refit the GP hyperparameters. Default is True.
+    #     lr: float
+    #         The learning rate for the optax optimizer. Default is 1e-2.
+    #     maxiter: int
+    #         The maximum number of iterations for the optax optimizer. Default is 250.
+    #     n_restarts: int
+    #         The number of restarts for the optax optimizer. Default is 2.
 
-        Returns
-        -------
-        repeat: bool
-            Whether the point new_x, new_y already exists in the training set.
+    #     Returns
+    #     -------
+    #     repeat: bool
+    #         Whether the point new_x, new_y already exists in the training set.
 
-        """
-        if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
-            log.info(f"Point {new_x} already exists in the training set, not updating")
-            return True
-        else:
-            super().add(new_x,new_y)
-            if refit:
-                self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
-            else:
-                # consider doing rank 1 update of cholesky
-                k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-                self.cholesky = jnp.linalg.cholesky(k)
-            return False
+    #     """
+    #     if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
+    #         log.info(f"Point {new_x} already exists in the training set, not updating")
+    #         return True
+    #     else:
+    #         super().add(new_x,new_y)
+    #         if refit:
+    #             self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+    #         else:
+    #             # consider doing rank 1 update of cholesky
+    #             k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+    #             self.cholesky = jnp.linalg.cholesky(k)
+    #         return False
     
     def predict_mean(self, x):
         return super().predict_mean(x)

@@ -9,7 +9,7 @@ enable_x64()
 from .acquisition import WIPV, EI #, logEI
 from .gp import DSLP_GP, SAAS_GP, sample_GP_NUTS
 from .svm_gp import SVM_GP
-from .loglike import external_loglike,cobaya_loglike
+from .loglike import external_likelihood,   cobaya_likelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from .bo_utils import input_standardize, input_unstandardize
@@ -214,8 +214,8 @@ class BOBE:
         minus_inf : float
             Value to use for minus infinity. This is used to set the lower bound of the loglikelihood.
         """
-        if not isinstance(loglikelihood, external_loglike):
-            raise ValueError("loglikelihood must be an instance of external_loglike")
+        if not isinstance(loglikelihood, external_likelihood):
+            raise ValueError("loglikelihood must be an instance of external_likelihood")
 
         self.loglikelihood = loglikelihood
 

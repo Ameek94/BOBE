@@ -107,7 +107,8 @@ class SVM_GP:
     def __init__(self,support_vectors=None, dual_coef=None, intercept=None, gamma_eff=None,
                  svm_use_size=400,svm_update_step=5,minus_inf=-1e5,svm_threshold = 250,gp_threshold = 10000,
                  train_x=None,train_y=None,noise=1e-8,kernel="rbf",optimizer="adam",
-                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],lengthscale_priors='DSLP'):
+                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],lengthscale_priors='DSLP',
+                 svm_acq_flag=True):
         """
         SVM-GP class that combines a GP with an SVM classifier. The GP is trained on the data points
         that are within the GP threshold of the maximum value of the GP. The SVM classification is trained on the data
@@ -188,7 +189,7 @@ class SVM_GP:
 
         log.info(f" Use SVM {self.use_svm}")
 
-    def fit(self,lr=1e-2,maxiter=250,n_restarts=2):
+    def fit(self,lr=1e-2,maxiter=150,n_restarts=2):
         """
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer
         """
@@ -236,9 +237,21 @@ class SVM_GP:
         """
         Computes the variance of the GP at the mc_points assuming x_new is added to the training set
         """
-        return self.gp.fantasy_var(x_new,mc_points)
+        var =  self.gp.fantasy_var(x_new,mc_points)
+        return var 
+        # def w_classifier():
+        #     decision = svm_predict(x_new,self.support_vectors, self.dual_coef, self.intercept, self.gamma_eff)
+        #     res = jnp.where(decision >= 0, var, 1e100)
+        #     return res
+        
+        # def no_classifer():
+        #     res = var
+        #     return res
+        
+        # res = jax.lax.cond(self.use_svm, w_classifier, no_classifer)
+        # return res
     
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=250,n_restarts=2):
+    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=150,n_restarts=2):
         """
         Updates the SVM training set and the GP with new training points and refits the GP if refit is True
 
