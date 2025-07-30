@@ -16,42 +16,13 @@ from .bo_utils import input_standardize, input_unstandardize
 from optax import adam, apply_updates
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from getdist import plots, MCSamples, loadMCSamples
+from .seed_utils import get_new_jax_key, get_global_seed
+from .logging_utils import get_logger
 import tqdm
 import time
-import logging
 
-# log = logging.getLogger("[BO]")
-
-# 1) Filter class: only allow exactly INFO
-class InfoFilter(logging.Filter):
-    """
-    """
-    def filter(self, record):
-        """
-        """
-        return record.levelno == logging.INFO
-
-# 2) Create and configure the stdout handler
-stdout_handler = logging.StreamHandler(sys.stdout)
-stdout_handler.setLevel(logging.INFO)       # accept INFO and above...
-stdout_handler.addFilter(InfoFilter())      # ...but filter down to only INFO
-stdout_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
-stdout_handler.setFormatter(stdout_fmt)
-
-# 3) Create and configure the stderr handler
-stderr_handler = logging.StreamHandler(sys.stderr)
-stderr_handler.setLevel(logging.WARNING)    # accept WARNING and above
-stderr_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
-stderr_handler.setFormatter(stderr_fmt)
-
-# 4) Get your logger, clear defaults, add both handlers
-log = logging.getLogger(name="[BO]")
-# stop this logger “bubbling” messages up to root
-log.propagate = False  
-log.handlers.clear()
-log.setLevel(logging.INFO)               # ensure INFO+ get processed
-log.addHandler(stdout_handler)
-log.addHandler(stderr_handler)
+# Set up logger using the new logging utilities
+log = get_logger("[BO]")
 
 # Acquisition optimizer
 def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimizer=4):
@@ -125,6 +96,7 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
 
 def get_mc_points(mc_samples, mc_points_size=64):
     mc_size = max(mc_samples['x'].shape[0], mc_points_size)
+    # Use numpy random choice - will respect global seed set by set_global_seed()
     idxs = np.random.choice(mc_size, size=mc_points_size, replace=False)
     return mc_samples['x'][idxs]
 
@@ -157,7 +129,8 @@ class BOBE:
                  logz_threshold=1.0,
                  minus_inf=-1e5,
                  do_final_ns=True,
-                 return_getdist_samples=False,):
+                 return_getdist_samples=False,
+                 random_seed=None,):
         """
         Initialize the BOBE sampler class.
 
@@ -213,9 +186,19 @@ class BOBE:
             If the difference between the upper and lower bounds of logz is less than this value, the sampling will end.
         minus_inf : float
             Value to use for minus infinity. This is used to set the lower bound of the loglikelihood.
+        random_seed : int, optional
+            Random seed for reproducible results. If provided, sets the global random seed for
+            all random number generators (NumPy, JAX, Python's random module). Default is None.
         """
         if not isinstance(loglikelihood, external_likelihood):
             raise ValueError("loglikelihood must be an instance of external_likelihood")
+
+        # Handle random seed
+        self.random_seed = random_seed
+        if random_seed is not None:
+            from .seed_utils import set_global_seed
+            set_global_seed(random_seed)
+            log.info(f"Global random seed set to {random_seed}")
 
         self.loglikelihood = loglikelihood
 
@@ -321,7 +304,11 @@ class BOBE:
         self.gp.fit()
 
         # Monte Carlo points for acquisition function
-        self.mc_samples = get_mc_samples(self.gp, rng_key=jax.random.PRNGKey(0),
+        if get_global_seed() is not None:
+            rng_key = get_new_jax_key()
+        else:
+            rng_key = jax.random.PRNGKey(0)
+        self.mc_samples = get_mc_samples(self.gp, rng_key=rng_key,
             warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, thinning=1,method=self.mc_points_method)
         self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
@@ -363,8 +350,12 @@ class BOBE:
                 update_mc = True
             if update_mc:
                 x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
+                if get_global_seed() is not None:
+                    rng_key = get_new_jax_key()
+                else:
+                    rng_key = jax.random.PRNGKey(ii*10)
                 self.mc_samples = get_mc_samples(
-                    self.gp, rng_key=jax.random.PRNGKey(ii*10),
+                    self.gp, rng_key=rng_key,
                     warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples,
                     thinning=1, method=self.mc_points_method,init_params=x0_hmc
                 )

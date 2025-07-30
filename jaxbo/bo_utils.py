@@ -26,14 +26,6 @@ def split_vmap(func,input_arrays,batch_size=10):
     results = tuple( jnp.concatenate([x[i] for x in res]) for i in range(nres))
     return results
 
-def fast_cholesky_update(k, L=None):
-    """
-    Compute the rank 1 update of the Cholesky decomposition of a matrix k. 
-    """
-
-    return L
-
-
 def input_standardize(x,param_bounds):
     """
     Project from original domain to unit hypercube, X is N x d shaped, param_bounds are 2 x d
