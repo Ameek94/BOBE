@@ -7,7 +7,7 @@ from jax.scipy.stats import norm
 from jax import config
 from jax.scipy.special import erfc, logsumexp
 import logging
-from .optim import FunctionOptimizer
+from .optim import optimize
 from .logging_utils import get_logger
 
 config.update("jax_enable_x64", True)
@@ -113,12 +113,12 @@ def _log_ei_helper(u):
 class AcquisitionFunction:
     """Base class for acquisition functions"""
     def __init__(self):
-        self.optimizer = FunctionOptimizer()
+        pass
     
     def __call__(self, x, gp, **kwargs):
         raise NotImplementedError
     
-    def optimize(self, gp, bounds=None, ndim=None, **kwargs):
+    def optimize(self, gp, bounds=None, ndim=None, optimizer_name="adam", **kwargs):
         """
         Optimize the acquisition function.
         
@@ -126,7 +126,8 @@ class AcquisitionFunction:
             gp: Gaussian process model
             bounds: Parameter bounds as [(low1, high1), (low2, high2), ...] or None
             ndim: Number of dimensions (inferred from bounds if not provided)
-            **kwargs: Additional arguments passed to optimizer.optimize()
+            optimizer_name: Name of optimizer to use
+            **kwargs: Additional arguments passed to optimize()
         
         Returns:
             Tuple of (best_x, best_value)
@@ -141,7 +142,7 @@ class AcquisitionFunction:
         def objective(x):
             return self(x, gp)
         
-        return self.optimizer.optimize(objective, ndim=ndim, bounds=bounds, **kwargs)
+        return optimize(objective, ndim=ndim, bounds=bounds, optimizer_name=optimizer_name, **kwargs)
 
 class EI(AcquisitionFunction):
     """Expected Improvement acquisition function"""

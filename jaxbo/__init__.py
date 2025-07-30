@@ -29,6 +29,7 @@ from .loglike import cobaya_likelihood, external_likelihood
 from .acquisition import WIPV, EI
 from .gp import DSLP_GP, SAAS_GP
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
+from .optim import optimize
 
 __version__ = "0.1.0"
 
@@ -58,4 +59,5 @@ __all__ = [
     "SAAS_GP", 
     "nested_sampling_Dy",
     "nested_sampling_jaxns",
+    "optimize",
 ]

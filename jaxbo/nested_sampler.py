@@ -8,6 +8,9 @@ import jax.random as random
 import numpy as np
 import jax
 from jax import config, vmap, jit
+from .logging_utils import get_logger
+
+log = get_logger("[NS]")
 config.update("jax_enable_x64", True)
 from .gp import GP
 from scipy.special import logsumexp
@@ -16,7 +19,7 @@ from .seed_utils import get_new_jax_key, get_global_seed
 try:
     from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
 except ModuleNotFoundError:
-    print("Proceeding without dynesty since not installed")
+    log.warning("Proceeding without dynesty since not installed")
 import math
 
 import tensorflow_probability.substrates.jax as tfp

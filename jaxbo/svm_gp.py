@@ -2,6 +2,7 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+from jax.scipy.linalg import cho_solve
 from .gp import GP, DSLP_GP, SAAS_GP
 from classifiers import train_svm, svm_predict_batch
 import logging
@@ -233,3 +234,92 @@ class SVM_GP:
                 lengthscales=self.gp.lengthscales,outputscale=self.gp.outputscale
                 ,support_vectors=self.support_vectors,dual_coef=self.dual_coef,intercept=self.intercept,gamma_eff=self.gamma_eff,
                 )
+
+    @classmethod
+    def load(cls, filename, kernel="rbf", optimizer="adam", noise=1e-8,
+             outputscale_bounds=[-4,4], lengthscale_bounds=[np.log10(0.05),2],
+             lengthscale_priors='DSLP', svm_use_size=400, svm_update_step=5,
+             minus_inf=-1e5, svm_acq_flag=True):
+        """
+        Loads an SVM_GP from a file
+        
+        Arguments
+        ---------
+        filename: str
+            The name of the file to load the SVM_GP from (with or without .npz extension)
+        kernel: str
+            Kernel type for the GP. Default is 'rbf'. Can be 'rbf' or 'matern'.
+        optimizer: str
+            Optimizer type for the GP. Default is 'adam'.
+        noise: float
+            Noise level for the GP. Default is 1e-8.
+        outputscale_bounds: list
+            Bounds for the output scale of the GP (in log10 space). Default is [-4,4].
+        lengthscale_bounds: list
+            Bounds for the length scale of the GP (in log10 space). Default is [np.log10(0.05),2].
+        lengthscale_priors: str
+            Lengthscale priors for the GP. Default is 'DSLP'. Can be 'DSLP' or 'SAAS'.
+        svm_use_size: int
+            Minimum number of points to use the SVM. Default is 400.
+        svm_update_step: int
+            Number of points to update the SVM. Default is 5.
+        minus_inf: float
+            Value to replace minus infinity. Default is -1e5.
+        svm_acq_flag: bool
+            SVM acquisition flag. Default is True.
+            
+        Returns
+        -------
+        svm_gp: SVM_GP
+            The loaded SVM_GP object
+        """
+        if not filename.endswith('.npz'):
+            filename += '.npz'
+            
+        data = np.load(filename)
+        
+        # Extract training data
+        train_x = jnp.array(data['train_x'])
+        train_y = jnp.array(data['train_y'])
+        
+        # Extract thresholds
+        svm_threshold = float(data['svm_threshold'])
+        gp_threshold = float(data['gp_threshold'])
+        
+        # Extract SVM parameters
+        support_vectors = jnp.array(data['support_vectors'])
+        dual_coef = jnp.array(data['dual_coef'])
+        intercept = float(data['intercept'])
+        gamma_eff = float(data['gamma_eff'])
+        
+        # Create SVM_GP instance
+        svm_gp = cls(support_vectors=support_vectors, dual_coef=dual_coef, 
+                     intercept=intercept, gamma_eff=gamma_eff,
+                     svm_use_size=svm_use_size, svm_update_step=svm_update_step,
+                     minus_inf=minus_inf, svm_threshold=svm_threshold, 
+                     gp_threshold=gp_threshold, train_x=train_x, train_y=train_y,
+                     noise=noise, kernel=kernel, optimizer=optimizer,
+                     outputscale_bounds=outputscale_bounds, 
+                     lengthscale_bounds=lengthscale_bounds,
+                     lengthscale_priors=lengthscale_priors, svm_acq_flag=svm_acq_flag)
+        
+        # Restore GP hyperparameters
+        svm_gp.gp.lengthscales = jnp.array(data['lengthscales'])
+        svm_gp.gp.outputscale = float(data['outputscale'])
+        
+        # Recompute kernel matrix and Cholesky decomposition for the GP
+        svm_gp.gp.K = svm_gp.gp.kernel(svm_gp.gp.train_x, svm_gp.gp.train_x, 
+                                       svm_gp.gp.lengthscales, svm_gp.gp.outputscale, 
+                                       noise=svm_gp.gp.noise, include_noise=True)
+        svm_gp.gp.cholesky = jnp.linalg.cholesky(svm_gp.gp.K)
+        svm_gp.gp.alphas = cho_solve((svm_gp.gp.cholesky, True), svm_gp.gp.train_y)
+        svm_gp.gp.fitted = True
+        
+        # Update SVM data size
+        svm_gp.svm_data_size = train_x.shape[0]
+        svm_gp.use_svm = svm_gp.svm_data_size > svm_gp.svm_use_size
+        
+        log.info(f"Loaded SVM_GP from {filename} with {train_x.shape[0]} training points")
+        log.info(f"SVM enabled: {svm_gp.use_svm}")
+        
+        return svm_gp
