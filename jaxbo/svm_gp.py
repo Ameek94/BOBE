@@ -3,104 +3,9 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from .gp import GP, DSLP_GP, SAAS_GP
-from sklearn.svm import SVC
+from classifiers import train_svm, svm_predict_batch
 import logging
 log = logging.getLogger("[SVM-GP]")
-
-
-@jax.jit
-def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
-    """
-    Compute the decision function for SVM with RBF kernel.
-    
-    Arguments:
-      x: Input data point, shape (n_features,)
-      support_vectors: JAX array of support vectors, shape (n_sv, n_features)
-      dual_coef: JAX array of dual coefficients, shape (n_sv,)
-      intercept: Scalar bias term.
-      gamma: RBF kernel gamma parameter.
-      
-    Returns:
-      Decision function value (scalar). Sign of this value gives the predicted class.
-    """
-    # Compute squared Euclidean distances between x and each support vector.
-    diff = support_vectors - x  # shape (n_sv, n_features)
-    norm_sq = jnp.sum(diff ** 2, axis=1)  # shape (n_sv,)
-    # Compute RBF kernel values.
-    kernel_vals = jnp.exp(-gamma * norm_sq)  # shape (n_sv,)
-    # Compute the decision function.
-    decision = jnp.sum(dual_coef * kernel_vals) + intercept
-    return decision
-
-def svm_predict_batch(x, support_vectors, dual_coef, intercept, gamma,batch_size=200):
-    """
-    Compute the decision function for SVM with RBF kernel for a batch of inputs.    
-    """
-    batched_predict = lambda x: svm_predict(x, support_vectors, dual_coef, intercept, gamma)
-    return jax.lax.map(batched_predict, x, batch_size=batch_size)
-
-def train_svm(x,y,gamma="scale",C=1e7):
-    """
-    Train the SVM on the data.
-    """
-    clf = SVC(kernel='rbf', gamma=gamma, C=C)
-    clf.fit(x, y) 
-    support_vectors = clf.support_vectors_
-    dual_coef = clf.dual_coef_[0]  # convert to 1D array
-    intercept = float(clf.intercept_[0])
-    gamma_eff = float(clf._gamma) # note: this is the effective gamma value used by scikit-learn
-    # convert to jax arrays
-    support_vectors = jnp.array(support_vectors)
-    dual_coef = jnp.array(dual_coef)
-    return support_vectors, dual_coef, intercept, gamma_eff
-
-def svm_volume_estimate(train_x,labels,seed=0,n_samples=10000):
-    """
-    Returns an estimate of the volume of the SVM decision boundary using Monte Carlo sampling.
-    
-    Arguments
-    ---------
-    seed: int
-        The random seed for the Monte Carlo sampling. Default is 0.
-    n_samples: int
-        The number of samples to use for the Monte Carlo sampling. Default is 10000.
-
-    Returns
-    -------
-    vol: float
-        The estimated volume of the SVM decision boundary.
-    err: float
-        The estimated error of the volume estimate.
-    """
-    ndim = train_x.shape[1]
-    support_vectors, dual_coef, intercept, gamma_eff = train_svm(train_x,labels)
-
-    rng = np.random.RandomState(seed)
-    # Uniformly sample in [0,1]^d
-    samples = rng.rand(n_samples, ndim)
-    x = jnp.array(samples)
-    preds = svm_predict_batch(x, support_vectors,dual_coef,intercept, gamma_eff)
-    n_inside = np.sum(preds >= 0)
-    # Estimate volume and standard error
-    vol = n_inside / n_samples
-    err = np.sqrt(vol * (1 - vol) / n_samples)
-    return vol, err
-
-def set_svm_threshold(train_x,train_y,max_val,dlogz=0.01,method='volume'):
-    if method == 'volume':
-        # when using the SVM, the logZ is effectively bounded between 
-        # logZ_min =  \log_svm_volume + (max_val - threshold) and logZ_max = log_svm_volume + max_val
-        # since the points outside the SVM boundary are treated as minus_inf
-        # we want that their contribution relative to logZ_min is tiny
-        log10_th_min = 0.
-        log10_th_max = 5.
-
-        threshold = 0.
-    elif method == 'chi2':
-        threshold = 250
-    else:
-        raise ValueError("Method must be either 'volume' or 'chi2'")
-    return threshold
 
 class SVM_GP:
 
@@ -202,7 +107,7 @@ class SVM_GP:
         gp_mean = self.gp.predict_mean(x)
 
         def w_classifier():
-            decision = svm_predict(x,self.support_vectors, self.dual_coef, self.intercept, self.gamma_eff)
+            decision = svm_predict_batch(x,self.support_vectors, self.dual_coef, self.intercept, self.gamma_eff)
             res = jnp.where(decision >= 0, gp_mean, self.minus_inf)
             return res
         
@@ -221,7 +126,7 @@ class SVM_GP:
         var =  self.gp.predict_var(x)
         
         def w_classifier():
-            decision = svm_predict(x,self.support_vectors, self.dual_coef, self.intercept, self.gamma_eff)
+            decision = svm_predict_batch(x,self.support_vectors, self.dual_coef, self.intercept, self.gamma_eff)
             res = jnp.where(decision >= 0, var, 0.)
             return res
         
@@ -312,21 +217,6 @@ class SVM_GP:
         self.support_vectors, self.dual_coef, self.intercept, self.gamma_eff = train_svm(self.train_x_svm,labels)
         self.use_svm = True
         log.info(f" Trained SVM with {self.svm_data_size} points")
-
-    
-    def prune(self):
-        """
-        Every time a new maximum is found, we discard points from the GP which do now lie outside the threshold. 
-        TO BE IMPLEMENTED
-        """
-        pass
-
-    def get_initial_point(self):
-        """
-        Get a random point from the training set within the svm boundary 
-        TO BE IMPLEMENTED
-        """
-        pass
 
     def save(self,outfile='gp'):
         """
