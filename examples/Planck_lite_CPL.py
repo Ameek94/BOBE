@@ -2,7 +2,7 @@ from jaxbo.bo import BOBE
 import numpy as np
 # from jaxbo.bo_utils import plot_final_samples
 from jaxbo.loglike import cobaya_loglike
-from jaxbo.bo_utils import input_standardize, input_unstandardize
+from jaxbo.utils import input_standardize, input_unstandardize
 from getdist import plots, MCSamples, loadMCSamples
 import time
 

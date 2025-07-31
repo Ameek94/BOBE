@@ -29,14 +29,14 @@ def split_vmap(func,input_arrays,batch_size=10):
     results = tuple( jnp.concatenate([x[i] for x in res]) for i in range(nres))
     return results
 
-def input_standardize(x,param_bounds):
+def scale_to_unit(x,param_bounds):
     """
     Project from original domain to unit hypercube, X is N x d shaped, param_bounds are 2 x d
     """
     x =  (x - param_bounds[0])/(param_bounds[1] - param_bounds[0])
     return x
 
-def input_unstandardize(x,param_bounds):
+def scale_from_unit(x,param_bounds):
     """
     Project from unit hypercube to original domain, X is N x d shaped, param_bounds are 2 x d
     """

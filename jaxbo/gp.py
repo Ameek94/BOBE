@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import jax
 from jax.scipy.linalg import cho_solve, solve_triangular
-from .bo_utils import input_standardize, input_unstandardize
+from .utils import input_standardize, input_unstandardize
 jax.config.update("jax_enable_x64", True)
 import numpyro
 from numpyro.infer import MCMC, NUTS

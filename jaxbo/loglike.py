@@ -1,5 +1,5 @@
 # Class for implementing external loglikelihoods
-from jaxbo.bo_utils import input_standardize, input_unstandardize
+from jaxbo.utils import input_standardize, input_unstandardize
 from typing import Any, Callable, List,Optional, Tuple, Union, Dict
 import numpy as np
 import tqdm

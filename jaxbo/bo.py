@@ -12,12 +12,12 @@ from .svm_gp import SVM_GP
 from .loglike import external_likelihood,   cobaya_likelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
-from .bo_utils import input_standardize, input_unstandardize
+from .utils import scale_to_unit, scale_from_unit
 from optax import adam, apply_updates
 from .optim import optimize
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from getdist import plots, MCSamples, loadMCSamples
-from .seed_utils import get_new_jax_key, get_global_seed
+from .seed_utils import get_new_jax_key, get_global_seed, set_global_seed # Updated import
 from .logging_utils import get_logger
 import tqdm
 import time
@@ -26,7 +26,7 @@ import time
 log = get_logger("[BO]")
 
 # Acquisition optimizer
-def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimizer=4, optimizer_name="adam"):
+def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimizer=4, optimizer_name="adam",rng_key=None):
     """
     Optimize acquisition function using the optimize function.
     
@@ -60,7 +60,8 @@ def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_o
         n_restarts=n_restarts_optimizer,
         minimize=True,
         verbose=False,  # Set to False to avoid duplicate logging
-        optimizer_name=optimizer_name
+        optimizer_name=optimizer_name,
+        rng_key=rng_key,  # Pass the JAX random key
     )
     
     return jnp.atleast_2d(best_params), best_fval
@@ -99,10 +100,10 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
     return mc_samples
 
 
-def get_mc_points(mc_samples, mc_points_size=64):
+def get_mc_points(mc_samples, rng_key, mc_points_size=64):
     mc_size = max(mc_samples['x'].shape[0], mc_points_size)
-    # Use numpy random choice - will respect global seed set by set_global_seed()
-    idxs = np.random.choice(mc_size, size=mc_points_size, replace=False)
+    # Use JAX random choice - will respect global seed set by set_global_seed()
+    idxs = jax.random.choice(rng_key, mc_size, shape=(mc_points_size,), replace=False)
     return mc_samples['x'][idxs]
 
 
@@ -201,9 +202,10 @@ class BOBE:
         # Handle random seed
         self.random_seed = random_seed
         if random_seed is not None:
-            from .seed_utils import set_global_seed
-            set_global_seed(random_seed)
+            # This sets the seed for Python, NumPy, JAX, and environment
+            set_global_seed(random_seed) 
             log.info(f"Global random seed set to {random_seed}")
+
 
         self.loglikelihood = loglikelihood
 
@@ -222,12 +224,12 @@ class BOBE:
         else:
             init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
                                     n_init_sobol=n_sobol_init)
-            self.train_x = jnp.array(input_standardize(init_points, self.param_bounds))
+            self.train_x = jnp.array(scale_to_unit(init_points, self.param_bounds))
             self.train_y = jnp.array(init_vals)
 
         # Best point so far
         idx_best = jnp.argmax(self.train_y)
-        self.best_pt = input_unstandardize(self.train_x[idx_best],self.param_bounds).flatten()
+        self.best_pt = scale_from_unit(self.train_x[idx_best],self.param_bounds).flatten()
         self.best_f = float(self.train_y.max())
         self.best = {name: f"{float(val):.4f}" for name, val in zip(self.param_list, self.best_pt)}
         log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
@@ -325,8 +327,9 @@ class BOBE:
 
             ii = i + 1
             refit = (ii % self.fit_step == 0)
-            update_mc = (ii % self.update_mc_step == 0)
-            ns_flag = (ii % self.ns_step == 0)
+            ns_flag = (ii % self.ns_step == 0) 
+            update_mc = (ii % self.update_mc_step == 0) and not ns_flag
+
 
             log.info(f" Iteration {ii}/{self.maxiters}, refit={refit}, update_mc={update_mc}, ns={ns_flag}")
             
@@ -336,10 +339,18 @@ class BOBE:
 
             x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
 
+            # --- Get a fresh key for acquisition optimization ---
+            try:
+                rng_key_opt = get_new_jax_key() # Get a new key from the managed sequence
+            except RuntimeError:
+            # Handle case where global seed wasn't set in BOBE
+                log.warning("No global seed set in BOBE. Using fallback key for acquisition optimization.")
+                rng_key_opt = jax.random.PRNGKey(i * 1000 + 5678) # Example fallback using iteration number
             new_pt_u, acq_val = optimize_acq(
-                self.gp, WIPV, self.mc_points, x0=x0_acq)
-            
-            new_pt = input_unstandardize(new_pt_u, self.param_bounds) #.flatten()
+                self.gp, WIPV, self.mc_points, x0=x0_acq, rng_key=rng_key_opt
+            )
+
+            new_pt = scale_from_unit(new_pt_u, self.param_bounds) #.flatten()
 
             log.info(f" Acquisition value {acq_val:.4e} at new point")
             new_val = self.loglikelihood(
@@ -352,18 +363,23 @@ class BOBE:
             pt_exists = self.gp.update(new_pt_u, new_val, refit=refit)
             if pt_exists and self.mc_points_method == 'NUTS':
                 update_mc = True
-            if update_mc:
-                x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
-                if get_global_seed() is not None:
+            if update_mc and not ns_flag:
+                # Get a fresh JAX key for the next stochastic operation (HMC sampling)
+                try:
                     rng_key = get_new_jax_key()
-                else:
-                    rng_key = jax.random.PRNGKey(ii*10)
+                except RuntimeError:
+                    # Handle case where global seed wasn't set
+                    log.warning("No global seed set. Using default JAX key for MC update.")
+                    rng_key = jax.random.PRNGKey(i * 1000 + 1234) # Use iteration number as fallback
+
+                x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
                 self.mc_samples = get_mc_samples(
                     self.gp, rng_key=rng_key,
                     warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples,
                     thinning=1, method=self.mc_points_method,init_params=x0_hmc
                 )
-            self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
+            rng_key = get_new_jax_key()  # Reset the key for the next iteration
+            self.mc_points = get_mc_points(self.mc_samples, rng_key=rng_key, mc_points_size=self.mc_points_size)
 
             if float(new_val) > self.best_f:
                 self.best_f = float(new_val)
@@ -390,8 +406,8 @@ class BOBE:
                     self.termination_reason = "LogZ converged"
                     break
 
-            if self.gp.train_x.shape[0] > self.max_gp_size:
-                self.termination_reason = "Max GP size exceeded"
+            if self.gp.train_x.shape[0] >= self.max_gp_size:
+                self.termination_reason = "Max GP size reached"
                 log.info(f" {self.termination_reason}")
                 break
 
@@ -413,11 +429,11 @@ class BOBE:
             )
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
             if self.save:
-                np.savez(f'{self.output_file}_samples.npz',ns_samples = input_unstandardize(ns_samples['x'],self.param_bounds),param_bounds = self.param_bounds)
+                np.savez(f'{self.output_file}_samples.npz',ns_samples = scale_from_unit(ns_samples['x'],self.param_bounds),param_bounds = self.param_bounds)
 
         if self.return_getdist_samples:
             ranges = dict(zip(self.param_list,self.param_bounds.T))
-            samples = input_unstandardize(ns_samples['x'],self.param_bounds)
+            samples = scale_from_unit(ns_samples['x'],self.param_bounds)
             weights = ns_samples['weights']
             loglikes = ns_samples['logl']
             gd_samples = MCSamples(samples=samples, names=self.param_list, labels=self.param_labels, 
