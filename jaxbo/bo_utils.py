@@ -5,9 +5,6 @@ from getdist import plots,MCSamples,loadMCSamples
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
 from jax import vmap
-from .logging_utils import get_logger
-
-log = get_logger("[BO_Utils]")
 
 # use this to suppress unecessary output, https://stackoverflow.com/questions/2125702/how-to-suppress-console-output-in-python
 @contextmanager
@@ -105,9 +102,9 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
     labels = ['GP',reference_label]
 
     for label,s in zip(labels,plot_samples):
-        log.info(f"Parameter limits from {label}")
+        print(f"\nParameter limits from {label}")
         for key in plot_params:
-            log.info(s.getInlineLatex(key,limit=1))
+            print(s.getInlineLatex(key,limit=1))
     
     ndim = len(plot_params)
 

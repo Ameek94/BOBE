@@ -14,7 +14,6 @@ from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from .bo_utils import input_standardize, input_unstandardize
 from optax import adam, apply_updates
-from .optim import optimize
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from getdist import plots, MCSamples, loadMCSamples
 from .seed_utils import get_new_jax_key, get_global_seed
@@ -26,44 +25,40 @@ import time
 log = get_logger("[BO]")
 
 # Acquisition optimizer
-def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimizer=4, optimizer_name="adam"):
-    """
-    Optimize acquisition function using the optimize function.
+def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimizer=4):
     
-    Args:
-        gp: Gaussian Process model
-        acq: Acquisition function
-        mc_points: Monte Carlo points for acquisition evaluation
-        x0: Initial guess (optional)
-        lr: Learning rate
-        maxiter: Maximum iterations
-        n_restarts_optimizer: Number of restarts
-        optimizer_name: Name of optimizer to use
-        
-    Returns:
-        Tuple of (best_params, best_value)
-    """
-    ndim = mc_points.shape[1]
-    
-    # Define acquisition function with proper signature for the optimize function
-    def acq_func(x):
-        return acq(x=x, gp=gp, mc_points=mc_points)
-    
-    # Use the optimize function directly to minimize acquisition function (note: most acq functions are minimized)
-    best_params, best_fval = optimize(
-        func=acq_func,
-        ndim=ndim,
-        bounds=None,  # Will default to [0,1] bounds
-        x0=x0,
-        lr=lr,
-        maxiter=maxiter,
-        n_restarts=n_restarts_optimizer,
-        minimize=True,
-        verbose=False,  # Set to False to avoid duplicate logging
-        optimizer_name=optimizer_name
-    )
-    
-    return jnp.atleast_2d(best_params), best_fval
+    f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
+
+    @jax.jit
+    def acq_val_grad(x):
+        return jax.value_and_grad(f)(x)
+
+    params = jnp.array(np.random.uniform(0, 1, size=mc_points.shape[1])) if x0 is None else x0
+    optimizer = adam(learning_rate=lr)
+
+    @jax.jit
+    def step(carry):
+        params, opt_state = carry
+        (val, grad) = acq_val_grad(params)
+        updates, opt_state = optimizer.update(grad, opt_state)
+        params = apply_updates(params, updates)
+        return (jnp.clip(params, 0., 1.), opt_state), val
+
+    best_f, best_params = jnp.inf, None
+    r = jnp.arange(maxiter)
+    for n in range(n_restarts_optimizer):
+        opt_state = optimizer.init(params)
+        progress_bar = tqdm.tqdm(r,desc=f'ACQ Optimization restart {n+1}')
+        for i in progress_bar:
+            (params, opt_state), fval = step((params, opt_state))
+            progress_bar.set_postfix({"fval": float(fval)})
+            if fval < best_f:
+                best_f, best_params = fval, params
+        # Perturb for next restart
+        params = jnp.clip(best_params + 0.5 * jnp.array(np.random.normal(size=params.shape)), 0., 1.)
+
+    # print(f"Best params: {best_params}, fval: {best_f}")
+    return jnp.atleast_2d(best_params), best_f
 
 # Utility functions
 
@@ -328,6 +323,7 @@ class BOBE:
             update_mc = (ii % self.update_mc_step == 0)
             ns_flag = (ii % self.ns_step == 0)
 
+            print("\n")
             log.info(f" Iteration {ii}/{self.maxiters}, refit={refit}, update_mc={update_mc}, ns={ns_flag}")
             
             # start acq from mc_point with max var or max value 
