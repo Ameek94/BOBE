@@ -6,15 +6,15 @@ import time
 cobaya_input_file = './cosmo_input/LCDM_6D.yaml'
 
 likelihood = cobaya_likelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name='LCDM_6D_lite')
+        minus_inf=-1e5, noise_std=0.0,name='Planck_lite')
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=4, n_sobol_init = 16, 
+sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8, 
         miniters=75, maxiters=150,max_gp_size=200,
         loglikelihood=likelihood,
         fit_step = 5, update_mc_step = 5, ns_step = 10,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
-        lengthscale_priors='DSLP', use_svm=False,minus_inf=-1e5,logz_threshold=0.5)
+        lengthscale_priors='DSLP', use_svm=False,minus_inf=-1e5,logz_threshold=1.)
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()

@@ -79,15 +79,15 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
         try:
             mc_samples = sample_GP_NUTS(
             gp=gp, rng_key=rng_key, warmup_steps=warmup_steps,
-            num_samples=num_samples, thinning=thinning
+            num_samples=num_samples, thinning=thinning, init_params=init_params
             )
         except:
             log.error("Error in sampling GP NUTS")
-            mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
+            mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(5e6)
                                             , dynamic=False, dlogz=0.1,equal_weights=True,
             )
     elif method=='NS':
-        mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
+        mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(5e6)
                                             , dynamic=False, dlogz=0.1,equal_weights=True,
         )
     elif method=='uniform':
@@ -313,8 +313,11 @@ class BOBE:
             rng_key = get_new_jax_key()
         else:
             rng_key = jax.random.PRNGKey(0)
-        self.mc_samples = get_mc_samples(self.gp, rng_key=rng_key,
-            warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, thinning=1,method=self.mc_points_method)
+        x0_hmc = self.gp.get_random_point(npoints=1).squeeze(0)  #self.gp.train_x[jnp.argmax(self.gp.train_y)]
+        # print(f"x0_hmc shape = {x0_hmc.shape}")
+        self.mc_samples = get_mc_samples(self.gp, rng_key=rng_key,init_params=x0_hmc,
+            warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, 
+            thinning=1,method=self.mc_points_method)
         self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
         best_pt_iteration = 0
@@ -325,8 +328,8 @@ class BOBE:
 
             ii = i + 1
             refit = (ii % self.fit_step == 0)
-            update_mc = (ii % self.update_mc_step == 0)
-            ns_flag = (ii % self.ns_step == 0)
+            ns_flag = (ii % self.ns_step == 0) and (ii > self.miniters)
+            update_mc = (ii % self.update_mc_step == 0) and not ns_flag
 
             log.info(f" Iteration {ii}/{self.maxiters}, refit={refit}, update_mc={update_mc}, ns={ns_flag}")
             
@@ -334,10 +337,16 @@ class BOBE:
             # mc_points_var = jax.lax.map(self.gp.predict_var,self.mc_points)
             # x0_acq = self.mc_points[jnp.argmax(mc_points_var)]
 
-            x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
+            # idxs = np.random.choice(self.gp.train_x.shape[0], size=4, replace=False)
+            # idxs = np.random.choice(self.mc_points.shape[0], size=4, replace=False)
+            # x0_acq = self.mc_points[idxs] #self.gp.get_random_point(npoints=4) #self.gp.train_x[idxs] #[jnp.argmax(self.gp.train_y[idxs])]
+            # x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
+            x0_acq = self.gp.get_random_point(npoints=4)
+
+            # log.info(f"Acq starting points shape = {x0_acq.shape}")
 
             new_pt_u, acq_val = optimize_acq(
-                self.gp, WIPV, self.mc_points, x0=x0_acq)
+                self.gp, WIPV, self.mc_points,n_restarts_optimizer=4, x0=x0_acq)
             
             new_pt = input_unstandardize(new_pt_u, self.param_bounds) #.flatten()
 
@@ -347,13 +356,14 @@ class BOBE:
             )
 
             new = {name: f"{float(val):.4f}" for name, val in zip(self.param_list, new_pt.flatten())}
-            log.info(f" New point {new} with value = {new_val.item():.4f}")
+            log.info(f" New point {new} with value = {new_val.item():.4f}, gp prediction = {self.gp.predict_mean(new_pt_u).item():.4f}")
 
-            pt_exists = self.gp.update(new_pt_u, new_val, refit=refit)
-            if pt_exists and self.mc_points_method == 'NUTS':
-                update_mc = True
+            pt_exists_or_below_threshold = self.gp.update(new_pt_u, new_val, refit=refit)
+            # if pt_exists and self.mc_points_method == 'NUTS':
+            #     update_mc = True
             if update_mc:
-                x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
+                x0_hmc = self.gp.get_random_point(npoints=1).squeeze(0) #self.gp.train_x[jnp.argmax(self.gp.train_y)]
+                print(f"x0_hmc shape = {x0_hmc.shape}")
                 if get_global_seed() is not None:
                     rng_key = get_new_jax_key()
                 else:
@@ -375,14 +385,14 @@ class BOBE:
             if i % 4 == 0 and i > 0:
                 jax.clear_caches()
 
-            if (ii % 50 == 0) and self.save:
+            if (ii % 10 == 0) and self.save:
                 log.info(" Saving GP to file")
                 self.gp.save(outfile=self.output_file)
 
             if ns_flag:
                 log.info(" Running Nested Sampling")
                 ns_samples, logz_dict = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(2e6), dynamic=False, dlogz=0.1
+                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1
                 )
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
                 if self.check_convergence(i, logz_dict,threshold=self.logz_threshold):
@@ -406,14 +416,14 @@ class BOBE:
         log.info(f" Final GP training set size: {self.gp.train_x.shape[0]}, max size: {self.max_gp_size}")
         log.info(f" Number of iterations: {ii}, max iterations: {self.maxiters}")
 
-        if self.do_final_ns:
+        if self.do_final_ns and not self.converged:
             log.info(" Final Nested Sampling")
             ns_samples, logz_dict = nested_sampling_Dy(
                 self.gp, self.ndim, maxcall=int(1e7), dynamic=True, dlogz=0.01
             )
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-            if self.save:
-                np.savez(f'{self.output_file}_samples.npz',ns_samples = input_unstandardize(ns_samples['x'],self.param_bounds),param_bounds = self.param_bounds)
+        if self.save:
+            np.savez(f'{self.output_file}_samples.npz',ns_samples = input_unstandardize(ns_samples['x'],self.param_bounds),param_bounds = self.param_bounds)
 
         if self.return_getdist_samples:
             ranges = dict(zip(self.param_list,self.param_bounds.T))

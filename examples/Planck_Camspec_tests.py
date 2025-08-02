@@ -6,19 +6,20 @@ import time
 cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
 
 likelihood = cobaya_likelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name='Planck_Camspec_fast')
+        minus_inf=-1e5, noise_std=0.0,name='Planck_Camspec_test')
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init = 128, 
-        miniters=500, maxiters=2500,max_gp_size=1500,
+sampler = BOBE(n_cobaya_init=2, n_sobol_init = 16, 
+        miniters=50, maxiters=2500,max_gp_size=1500,
         loglikelihood=likelihood,
-        resume=False,
+        resume=True,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step = 25, update_mc_step = 5, ns_step = 75,
+        fit_step = 25, update_mc_step = 15, ns_step = 75,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
         lengthscale_priors='DSLP',logz_threshold=5.,
-        use_svm=True,svm_use_size=350,svm_update_step=5,minus_inf=-1e5,svm_gp_threshold=5000.) #prev 5000
+        use_svm=True,svm_use_size=350,svm_update_step=15,minus_inf=-1e5,
+        svm_threshold=300, svm_gp_threshold=5000.) #prev 5000
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()

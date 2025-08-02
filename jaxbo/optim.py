@@ -56,12 +56,12 @@ def _setup_bounds(bounds: Optional[Union[List, Tuple, jnp.ndarray]], ndim: int) 
         jnp.ndarray: Bounds array of shape (ndim, 2)
     """
     if bounds is None:
-        return jnp.array([[0., 1.]] * ndim)
+        return jnp.array([[0., 1.]] * ndim).T
 
     bounds = jnp.array(bounds)
     if bounds.shape == (2,):  # Same bounds for all dimensions
         bounds = jnp.tile(bounds.reshape(1, 2), (ndim, 1))
-    elif bounds.shape != (ndim, 2):
+    elif bounds.shape != (2, ndim):
         raise ValueError(f"Bounds shape {bounds.shape} incompatible with {ndim} dimensions")
 
     return bounds
@@ -86,7 +86,7 @@ def optimize(
     maxiter: int = 200,
     n_restarts: int = 4,
     minimize: bool = True,
-    verbose: bool = True,
+    verbose: bool = False,
     random_seed: Optional[int] = None,
     optimizer_name: str = "adam",
     **func_kwargs
@@ -153,7 +153,9 @@ def optimize(
             lambda k: jax.random.uniform(k, shape=(ndim,), minval=0., maxval=1.)
         )(keys)
     else:
-        init_params = jnp.tile(_scale_to_unit(jnp.array(x0), bounds)[None, :], (n_restarts, 1))
+        # print(f"Using provided initial parameters: {x0}")
+        init_params = _scale_to_unit(jnp.array(x0), bounds)
+        # init_params = jnp.tile(_scale_to_unit(jnp.array(x0), bounds)[None, :], (n_restarts, 1))
 
     # Initialize optimizer states for all restarts
     opt_states = jax.vmap(optimizer.init)(init_params)
@@ -185,10 +187,10 @@ def optimize(
             best_params_unit = init_params[current_best_idx]
 
         # Optional: Add noise to parameters for next iteration (except last)
-        if iteration < maxiter - 1:
-            noise_keys = jax.random.split(jax.random.fold_in(key, iteration), n_restarts)
-            noise = 0.1 * jax.vmap(jax.random.normal)(noise_keys, shape=(n_restarts, ndim))
-            init_params = jnp.clip(init_params + noise, 0., 1.)
+        # if iteration < maxiter - 1:
+        #     noise_keys = jax.random.split(jax.random.fold_in(key, iteration), n_restarts)
+        #     noise = 0.1 * jax.vmap(jax.random.normal)(noise_keys, shape=(n_restarts, ndim))
+        #     init_params = jnp.clip(init_params + noise, 0., 1.)
 
         if verbose:
             mode_str = "min" if minimize else "max"

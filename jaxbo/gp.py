@@ -140,7 +140,7 @@ class GP(ABC):
     """
     @abstractmethod
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam"
-                 ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],prior_mean=0.):
+                 ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],prior_mean=0., lengthscales=None,outputscale=None):
         """
         Arguments
         ---------
@@ -172,17 +172,14 @@ class GP(ABC):
         self.y_std = jnp.std(train_y,axis=0)
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
         self.noise = noise
-        self.fitted = False
-        self.lengthscales = jnp.ones(self.ndim)
-        self.outputscale = 1.
-        self.K = None
         self.cholesky = None
         self.alphas = None
         self.prior_mean = prior_mean
 
         self.train_y = (train_y - self.y_mean) / self.y_std
-        self.lengthscales = jnp.ones(self.ndim)
-        self.outputscale = 1.
+        self.fitted = False
+        self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
+        self.outputscale = outputscale if outputscale is not None else 1.
         self.lengthscale_bounds = lengthscale_bounds
         self.outputscale_bounds = outputscale_bounds
         self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.outputscale_bounds]
@@ -197,7 +194,7 @@ class GP(ABC):
         Predicts the mean of the GP at x and unstandardizes it
         """
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
+        k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False) # jax.vmap(self.kernel, in_axes=(0, None, None, None, None, None))(self.train_x, x, self.lengthscales, self.outputscale, self.noise, False) #  
         mean = get_mean_from_cho(k12,self.alphas) 
         return mean*self.y_std + self.y_mean + self.prior_mean
 
@@ -206,9 +203,9 @@ class GP(ABC):
         Predicts the variance of the GP at x and unstandardizes it
         """
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
-        k22 = self.kernel(x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-        var = get_var_from_cho(self.cholesky,k12,k22)
+        k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False) # jax.vmap(self.kernel, in_axes=(0, None, None, None, None, None))(self.train_x, x, self.lengthscales, self.outputscale, self.noise, False) #
+        k22 = self.kernel(x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True) # self.outputscale #
+        var = get_var_from_cho(self.cholesky,k12,k22) + self.noise
         return var*self.y_std**2
 
     def predict(self,x):
@@ -221,7 +218,7 @@ class GP(ABC):
         mean, var = gp_predict(self.train_y,self.cholesky,k12,k22)
         return mean, var
 
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=150,n_restarts=2):
+    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=150,n_restarts=2,step=0):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 
@@ -246,13 +243,17 @@ class GP(ABC):
             log.info(f"Point {new_x} already exists in the training set, not updating")
             return True
         else:
+            k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
+                        noise=self.noise,include_noise=False).flatten()           # shape (n,)
+            k_self = self.kernel(new_x,new_x,self.lengthscales,
+                          self.outputscale,noise=self.noise,include_noise=True)[0, 0]  # scalar
             self.add(new_x,new_y)
             if refit:
                 self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
             else:
             # consider doing rank 1 update of cholesky
-                self.K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-                self.cholesky = jnp.linalg.cholesky(self.K)
+                # K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+                self.cholesky = fast_update_cholesky(self.cholesky,k,k_self) #jnp.linalg.cholesky(K)
                 self.alphas = cho_solve((self.cholesky, True), self.train_y)
             return False
 
@@ -285,8 +286,8 @@ class GP(ABC):
         # k11_cho = jnp.linalg.cholesky(k11)
         k12 = self.kernel(new_train_x,mc_points,self.lengthscales,
                           self.outputscale,noise=self.noise,include_noise=False)
-        k22 = self.kernel(mc_points,mc_points,self.lengthscales,
-                          self.outputscale,noise=self.noise,include_noise=True) # precompute k22 instead
+        k22 = self.outputscale * jnp.eye(mc_points.shape[0]) + self.noise #self.kernel(mc_points,mc_points,self.lengthscales,
+               #           self.outputscale,noise=self.noise,include_noise=True) # precompute k22 instead
         var = get_var_from_cho(k11_cho,k12,k22)
         return var
     
@@ -297,6 +298,16 @@ class GP(ABC):
         x = input_unstandardize(self.train_x,x_bounds)
         y = self.train_y*self.y_std + self.y_mean + self.prior_mean
         return x,y
+
+    def get_random_points(self,npoints=1):
+        """
+        Returns random points from the GP training set
+        """
+        if self.train_x.shape[0] < npoints:
+            raise ValueError(f"Not enough points in the GP training set to return {npoints} random points")
+        idxs = np.random.choice(self.train_x.shape[0], size=npoints, replace=False)
+        x = self.train_x[idxs]
+        return x
     
     def save(self,outfile='gp'):
         """
@@ -433,21 +444,20 @@ class DSLP_GP(GP):
         obj.lengthscales = lengthscales
         obj.outputscale = outputscale
         return obj
+    
 
-    def fit(self,lr=1e-2,maxiter=150,n_restarts=2,optimizer_name="adam"):
+    def fit(self,lr=1e-2,maxiter=150,n_restarts=2):
         """
-        Fits the GP using maximum likelihood hyperparameters with the optimize function. Starts from current hyperparameters.
+        Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
         Arguments
         ---------
         lr: float
-            The learning rate for the optimizer. Default is 1e-2.
+            The learning rate for the optax optimizer. Default is 1e-2.
         maxiter: int
-            The maximum number of iterations for the optimizer. Default is 150.
+            The maximum number of iterations for the optax optimizer. Default is 250.
         n_restarts: int
-            The number of restarts for the optimizer. Default is 2.
-        optimizer_name: str
-            The name of the optimizer to use. Default is "adam".
+            The number of restarts for the optax optimizer. Default is 2.
 
         """
         ndim = self.ndim
@@ -455,8 +465,13 @@ class DSLP_GP(GP):
         init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
         log.info(f" Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
         bounds = jnp.array(self.hyperparam_bounds)
+        mins = bounds[:,0]
+        maxs = bounds[:,1]
+        scales = maxs - mins
+        optimizer = adam(learning_rate=lr)
 
-        # Define MLL objective function
+        # Optimization to be moved, use the method in optim.py
+        @jax.jit
         def mll_optim(params):
             hyperparams = 10**params
             lengthscales = hyperparams[0:-1]
@@ -467,29 +482,106 @@ class DSLP_GP(GP):
             mll = gp_mll(k,self.train_y,self.train_y.shape[0])
             return -(mll+logprior)        
 
-        # Use the optimize function directly to minimize negative MLL
-        best_params, best_f = optimize(
-            func=mll_optim,
-            ndim=ndim + 1,  # lengthscales + outputscale
-            bounds=bounds,
-            x0=init_params,
-            lr=lr,
-            maxiter=maxiter,
-            n_restarts=n_restarts,
-            minimize=True,
-            verbose=True,
-            optimizer_name=optimizer_name
-        )
+        @jax.jit
+        def step(carry):
+            """
+            Step function for the optimizer
+            """
+            u_params, opt_state = carry
+            params = input_unstandardize(u_params,bounds.T)
+            loss, grads = jax.value_and_grad(mll_optim)(params)
+            grads = grads * scales
+            updates, opt_state = optimizer.update(grads, opt_state)
+            u_params = apply_updates(u_params, updates)
+            u_params = jnp.clip(u_params, 0.,1.)
+            carry = u_params, opt_state
+            return carry, loss
         
-        # Update GP parameters with optimized values
-        hyperparams = 10 ** best_params
+        best_f = jnp.inf
+        best_params = None
+
+        u_params = input_standardize(init_params,bounds.T)
+
+        # display with progress bar
+        r = jnp.arange(maxiter)
+        for n in range(n_restarts):
+            opt_state = optimizer.init(u_params)
+            progress_bar = tqdm.tqdm(r,desc=f'Training GP')
+            with logging_redirect_tqdm():
+                for i in progress_bar:
+                    (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
+                    progress_bar.set_postfix({"fval": float(fval)})
+                    if fval < best_f:
+                        best_f = fval
+                        best_params = u_params
+            u_params = jnp.clip(u_params + 0.25*np.random.normal(size=init_params.shape),0,1)
+        params = input_unstandardize(best_params,bounds.T)
+        hyperparams = 10 ** params
         self.lengthscales = hyperparams[0:-1]
         self.outputscale = hyperparams[-1]
         log.info(f" Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
-        self.K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-        self.cholesky = jnp.linalg.cholesky(self.K)
+        K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+        self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
         self.fitted = True
+
+    # def fit(self,lr=1e-2,maxiter=150,n_restarts=2,optimizer_name="adam"):
+    #     """
+    #     Fits the GP using maximum likelihood hyperparameters with the optimize function. Starts from current hyperparameters.
+
+    #     Arguments
+    #     ---------
+    #     lr: float
+    #         The learning rate for the optimizer. Default is 1e-2.
+    #     maxiter: int
+    #         The maximum number of iterations for the optimizer. Default is 150.
+    #     n_restarts: int
+    #         The number of restarts for the optimizer. Default is 2.
+    #     optimizer_name: str
+    #         The name of the optimizer to use. Default is "adam".
+
+    #     """
+    #     ndim = self.ndim
+    #     outputscale = jnp.array([self.outputscale])
+    #     init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
+    #     log.info(f" Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+    #     bounds = jnp.array(self.hyperparam_bounds)
+
+    #     # Define MLL objective function
+    #     @jax.jit
+    #     def mll_optim(params):
+    #         hyperparams = 10**params
+    #         lengthscales = hyperparams[0:-1]
+    #         outputscale = hyperparams[-1]
+    #         logprior = dist.Gamma(2.0,0.15).log_prob(outputscale)
+    #         logprior+= dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(ndim) ,scale=sqrt3).expand([ndim]).log_prob(lengthscales).sum()
+    #         k = self.kernel(self.train_x,self.train_x,lengthscales,outputscale,noise=self.noise,include_noise=True)
+    #         mll = gp_mll(k,self.train_y,self.train_y.shape[0])
+    #         return -(mll+logprior)        
+
+    #     # Use the optimize function directly to minimize negative MLL
+    #     best_params, best_f = optimize(
+    #         func=mll_optim,
+    #         ndim=ndim + 1,  # lengthscales + outputscale
+    #         bounds=bounds.T,
+    #         x0=init_params,
+    #         lr=lr,
+    #         maxiter=maxiter,
+    #         n_restarts=n_restarts,
+    #         minimize=True,
+    #         verbose=False,
+    #         optimizer_name=optimizer_name
+    #     )
+        
+    #     # Update GP parameters with optimized values
+    #     hyperparams = 10 ** best_params
+    #     self.lengthscales = hyperparams[0:-1]
+    #     self.outputscale = hyperparams[-1]
+    #     log.info(f" Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+    #     K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+    #     self.cholesky = jnp.linalg.cholesky(K)
+    #     self.alphas = cho_solve((self.cholesky, True), self.train_y)
+    #     self.fitted = True
 
     def predict_mean(self,x):
         return super().predict_mean(x)
@@ -872,7 +964,7 @@ jax.tree_util.register_pytree_node(
     SAAS_GP.tree_unflatten,
 )
 
-def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True,thinning=8,verbose=False
+def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True,thinning=8,verbose=True
                    ,init_params=None,temp=1.):
     """
     Obtain samples from the posterior represented by the GP mean as the logprob.
@@ -898,24 +990,11 @@ def sample_GP_NUTS(gp,rng_key,warmup_steps=512,num_samples=512,progress_bar=True
     temp: float
         Temperature parameter for the logprob, default 1.0
     """
-    class gp_dist(dist.Distribution):
-        support = dist.constraints.real
-
-        def __init__(self,gp):
-            super().__init__(batch_shape = (), event_shape=())
-            self.gp = gp
-
-        def sample(self, key, sample_shape=()):
-            raise NotImplementedError
-    
-        def log_prob(self,x):
-            val = gp.predict_mean(x)
-            return val / temp
 
     def model(train_x):
         x = numpyro.sample('x',dist.Uniform
                            (low=jnp.zeros(train_x.shape[1]),high=jnp.ones(train_x.shape[1]))) # type: ignore
-        numpyro.sample('y',gp_dist(gp),obs=x)
+        numpyro.factor('y',gp.predict_mean(x))
 
     if init_params is not None: 
         params = {'x': init_params} 
