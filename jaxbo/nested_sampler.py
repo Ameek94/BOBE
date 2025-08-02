@@ -11,7 +11,6 @@ from jax import config, vmap, jit
 config.update("jax_enable_x64", True)
 from .gp import GP
 from scipy.special import logsumexp
-from .seed_utils import get_new_jax_key, get_global_seed
 
 try:
     from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
@@ -25,9 +24,7 @@ from jaxns.framework.model import Model
 from jaxns.framework.prior import Prior
 from jaxns import NestedSampler, TerminationCondition, resample
 import logging
-from .logging_utils import get_logger
-
-log = get_logger("[NS]")
+log = logging.getLogger("[NS]")
 
 def renormalise_log_weights(log_weights):
     log_total = logsumexp(log_weights)
@@ -232,12 +229,7 @@ def nested_sampling_jaxns(gp
                         difficult_model=difficult_model,)
                         #num_parallel_workers=10)
      # Run the sampler
-    from .seed_utils import get_new_jax_key, get_global_seed
-    if get_global_seed() is not None:
-        rng_key = get_new_jax_key()
-    else:
-        rng_key = jax.random.PRNGKey(42)
-    termination_reason, state = ns_mean(rng_key, term_cond=term_cond)
+    termination_reason, state = ns_mean(jax.random.PRNGKey(42),term_cond=term_cond)
     # Get the results
     results = ns_mean.to_results(termination_reason=termination_reason, state=state)
 
@@ -280,12 +272,7 @@ def nested_sampling_jaxns(gp
 
     ns_samples = {}
     if equal_weights:
-        from .seed_utils import get_new_jax_key, get_global_seed
-        if get_global_seed() is not None:
-            rng_key = get_new_jax_key()
-        else:
-            rng_key = jax.random.PRNGKey(0)
-        samples = resample(key=rng_key,
+        samples = resample(key=jax.random.PRNGKey(0),
                     samples=results.samples,
                     log_weights=results.log_dp_mean, # type: ignore
                     replace=True,) 

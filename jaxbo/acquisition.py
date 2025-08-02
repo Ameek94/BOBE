@@ -8,10 +8,9 @@ from jax import config
 from jax.scipy.special import erfc, logsumexp
 import logging
 from .optim import FunctionOptimizer
-from .logging_utils import get_logger
 
 config.update("jax_enable_x64", True)
-log = get_logger("[ACQ]")
+log = logging.getLogger("[ACQ]")
 
 #------------------Helper functions-------------------------
 # These are jax versions of the BoTorch functions.

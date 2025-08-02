@@ -16,8 +16,7 @@ from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
 import logging
-from .logging_utils import get_logger
-log = get_logger("[GP]")
+log = logging.getLogger("[GP]")
 from optax import adam, apply_updates
 import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm

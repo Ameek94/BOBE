@@ -7,9 +7,8 @@ import logging
 import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 import optax
-from .logging_utils import get_logger
 
-log = get_logger("[Opt]")
+log = logging.getLogger("[Opt]")
 
 
 class FunctionOptimizer:
@@ -92,8 +91,8 @@ class FunctionOptimizer:
         ndim: int,
         bounds: Optional[Union[List, Tuple, jnp.ndarray]] = None,
         x0: Optional[jnp.ndarray] = None,
-        lr: float = 1e-3,
-        maxiter: int = 200,
+        lr: float = 5e-3,
+        maxiter: int = 100,
         n_restarts: int = 4,
         minimize: bool = True,
         verbose: bool = True,
@@ -107,11 +106,7 @@ class FunctionOptimizer:
             np.random.seed(random_seed)
             key = jax.random.PRNGKey(random_seed)
         else:
-            from .seed_utils import get_new_jax_key, get_global_seed
-            if get_global_seed() is not None:
-                key = get_new_jax_key()
-            else:
-                key = jax.random.PRNGKey(0)
+            key = jax.random.PRNGKey(0)
 
         # Setup bounds
         bounds = self._setup_bounds(bounds, ndim)

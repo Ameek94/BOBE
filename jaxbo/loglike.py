@@ -7,9 +7,7 @@ from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from scipy.stats import qmc
 import logging
-from .logging_utils import get_logger
-
-log = get_logger("[Loglike]")
+log = logging.getLogger("[Loglike]")
 
 
 class external_likelihood:
@@ -62,7 +60,7 @@ class external_likelihood:
         vals = np.where(vals<self.minus_inf,self.minus_inf,vals)
         vals = np.reshape(vals,(x.shape[0],1))
 
-        # add noise if specified - uses global numpy seed set by set_global_seed()
+        # add noise if specified
         noise = self.noise_std * np.random.randn(x.shape[0],1)
 
         return vals + noise
