@@ -85,103 +85,103 @@ class FunctionOptimizer:
     def _scale_from_unit(self, x: jnp.ndarray, bounds: jnp.ndarray) -> jnp.ndarray:
         return input_unstandardize(x, bounds)
 
-    def optimize(
-        self,
-        func: Callable,
-        ndim: int,
-        bounds: Optional[Union[List, Tuple, jnp.ndarray]] = None,
-        x0: Optional[jnp.ndarray] = None,
-        lr: float = 5e-3,
-        maxiter: int = 100,
-        n_restarts: int = 4,
-        minimize: bool = True,
-        verbose: bool = True,
-        random_seed: Optional[int] = None,
-        **func_kwargs
-    ) -> Tuple[jnp.ndarray, float]:
-        """
-        Run optimization with fixed number of steps, evaluating n_restarts in parallel at each step.
-        """
-        if random_seed is not None:
-            np.random.seed(random_seed)
-            key = jax.random.PRNGKey(random_seed)
+def optimize(
+    self,
+    func: Callable,
+    ndim: int,
+    bounds: Optional[Union[List, Tuple, jnp.ndarray]] = None,
+    x0: Optional[jnp.ndarray] = None,
+    lr: float = 5e-3,
+    maxiter: int = 100,
+    n_restarts: int = 4,
+    minimize: bool = True,
+    verbose: bool = True,
+    random_seed: Optional[int] = None,
+    **func_kwargs
+) -> Tuple[jnp.ndarray, float]:
+    """
+    Run optimization with fixed number of steps, evaluating n_restarts in parallel at each step.
+    """
+    if random_seed is not None:
+        np.random.seed(random_seed)
+        key = jax.random.PRNGKey(random_seed)
+    else:
+        key = jax.random.PRNGKey(0)
+
+    # Setup bounds
+    bounds = self._setup_bounds(bounds, ndim)
+
+    # Create scaled objective function
+    scaled_func = lambda x: func(self._scale_from_unit(x, bounds), **func_kwargs)
+
+    # JIT compile value and gradient
+    @jax.jit
+    def val_grad(x):
+        return jax.value_and_grad(scaled_func)(x)
+
+    # JIT step function
+    optimizer = self._get_optimizer(lr)
+
+    @jax.jit
+    def step(params, opt_state):
+        (val, grad) = val_grad(params)
+        updates, opt_state = optimizer.update(grad, opt_state)
+        params = optax.apply_updates(params, updates)
+        params = jnp.clip(params, 0., 1.)
+        return params, opt_state, val
+
+    # Generate initial parameters for all restarts
+    if x0 is None:
+        keys = jax.random.split(key, n_restarts)
+        init_params = jax.vmap(
+            lambda k: jax.random.uniform(k, shape=(ndim,), minval=0., maxval=1.)
+        )(keys)
+    else:
+        init_params = jnp.tile(self._scale_to_unit(jnp.array(x0), bounds)[None, :], (n_restarts, 1))
+
+    # Initialize optimizer states for all restarts
+    opt_states = jax.vmap(optimizer.init)(init_params)
+
+    best_f = jnp.inf if minimize else -jnp.inf
+    best_params_unit = None
+
+    # Outer loop for fixed number of optimization steps
+    for iteration in range(maxiter):
+        # Run one step of optimization for all restarts in parallel
+        params_next, opt_states_next, values = jax.vmap(step)(init_params, opt_states)
+        
+        # Update parameters and states for next iteration
+        init_params = params_next
+        opt_states = opt_states_next
+
+        # Find best among all parallel restarts at this step
+        if minimize:
+            current_best_idx = jnp.argmin(values)
+            current_best_val = values[current_best_idx]
+            is_better = current_best_val < best_f
         else:
-            key = jax.random.PRNGKey(0)
+            current_best_idx = jnp.argmax(values)
+            current_best_val = values[current_best_idx]
+            is_better = current_best_val > best_f
 
-        # Setup bounds
-        bounds = self._setup_bounds(bounds, ndim)
+        if is_better:
+            best_f = current_best_val
+            best_params_unit = init_params[current_best_idx]
 
-        # Create scaled objective function
-        scaled_func = lambda x: func(self._scale_from_unit(x, bounds), **func_kwargs)
+        # Optional: Add noise to parameters for next iteration (except last)
+        if iteration < maxiter - 1:
+            noise_keys = jax.random.split(jax.random.fold_in(key, iteration), n_restarts)
+            noise = 0.1 * jax.vmap(jax.random.normal)(noise_keys, shape=(n_restarts, ndim))
+            init_params = jnp.clip(init_params + noise, 0., 1.)
 
-        # JIT compile value and gradient
-        @jax.jit
-        def val_grad(x):
-            return jax.value_and_grad(scaled_func)(x)
+        if verbose:
+            mode_str = "min" if minimize else "max"
+            desc = f'Step {iteration+1}/{maxiter} ({self.optimizer_name}, {mode_str})'
+            display_val = float(best_f) if minimize else float(-best_f)
+            print(f"{desc}: best_f = {display_val}")
 
-        # JIT step function
-        optimizer = self._get_optimizer(lr)
+    # Convert best parameters back to original space
+    best_params_original = self._scale_from_unit(best_params_unit, bounds)
+    best_f_original = best_f if minimize else -best_f
 
-        @jax.jit
-        def step(params, opt_state):
-            (val, grad) = val_grad(params)
-            updates, opt_state = optimizer.update(grad, opt_state)
-            params = optax.apply_updates(params, updates)
-            params = jnp.clip(params, 0., 1.)
-            return params, opt_state, val
-
-        # Generate initial parameters for all restarts
-        if x0 is None:
-            keys = jax.random.split(key, n_restarts)
-            init_params = jax.vmap(
-                lambda k: jax.random.uniform(k, shape=(ndim,), minval=0., maxval=1.)
-            )(keys)
-        else:
-            init_params = jnp.tile(self._scale_to_unit(jnp.array(x0), bounds)[None, :], (n_restarts, 1))
-
-        # Initialize optimizer states for all restarts
-        opt_states = jax.vmap(optimizer.init)(init_params)
-
-        best_f = jnp.inf if minimize else -jnp.inf
-        best_params_unit = None
-
-        # Outer loop for fixed number of optimization steps
-        for iteration in range(maxiter):
-            # Run one step of optimization for all restarts in parallel
-            params_next, opt_states_next, values = jax.vmap(step)(init_params, opt_states)
-            
-            # Update parameters and states for next iteration
-            init_params = params_next
-            opt_states = opt_states_next
-
-            # Find best among all parallel restarts at this step
-            if minimize:
-                current_best_idx = jnp.argmin(values)
-                current_best_val = values[current_best_idx]
-                is_better = current_best_val < best_f
-            else:
-                current_best_idx = jnp.argmax(values)
-                current_best_val = values[current_best_idx]
-                is_better = current_best_val > best_f
-
-            if is_better:
-                best_f = current_best_val
-                best_params_unit = init_params[current_best_idx]
-
-            # Optional: Add noise to parameters for next iteration (except last)
-            if iteration < maxiter - 1:
-                noise_keys = jax.random.split(jax.random.fold_in(key, iteration), n_restarts)
-                noise = 0.1 * jax.vmap(jax.random.normal)(noise_keys, shape=(n_restarts, ndim))
-                init_params = jnp.clip(init_params + noise, 0., 1.)
-
-            if verbose:
-                mode_str = "min" if minimize else "max"
-                desc = f'Step {iteration+1}/{maxiter} ({self.optimizer_name}, {mode_str})'
-                display_val = float(best_f) if minimize else float(-best_f)
-                print(f"{desc}: best_f = {display_val}")
-
-        # Convert best parameters back to original space
-        best_params_original = self._scale_from_unit(best_params_unit, bounds)
-        best_f_original = best_f if minimize else -best_f
-
-        return best_params_original, best_f_original
+    return best_params_original, best_f_original

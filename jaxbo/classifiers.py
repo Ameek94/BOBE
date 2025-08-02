@@ -57,3 +57,19 @@ def train_svm(x,y,gamma="scale",C=1e7):
     support_vectors = jnp.array(support_vectors)
     dual_coef = jnp.array(dual_coef)
     return support_vectors, dual_coef, intercept, gamma_eff
+
+class SVMClassifier:
+    """
+    SVM Classifier using JAX for prediction.
+    """
+    def __init__(self, support_vectors, dual_coef, intercept, gamma):
+        self.support_vectors = support_vectors
+        self.dual_coef = dual_coef
+        self.intercept = intercept
+        self.gamma = gamma
+
+    def predict(self, x):
+        return svm_predict_batch(x, self.support_vectors, self.dual_coef, self.intercept, self.gamma)
+    
+    def __call__(self, x):
+        return self.predict(x)
