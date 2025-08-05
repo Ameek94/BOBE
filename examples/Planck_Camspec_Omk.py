@@ -27,9 +27,9 @@ print(f"Total time taken = {end-start:.4f} seconds")
 
 
 param_list_LCDM = ['omk','omch2','logA','ns','H0','ombh2','tau','omk']
-plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
+plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
                    plot_params=param_list_LCDM,
-                   param_labels=sampler.param_labels,output_file=f'{likelihood.name}',
+                   param_labels=likelihood.param_labels,output_file=f'{likelihood.name}',
                    reference_file='./cosmo_input/chains/PPlus_curved_LCDM',reference_ignore_rows=0.3,
                    reference_label='MCMC',scatter_points=False,)
 

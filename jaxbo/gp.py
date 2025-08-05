@@ -218,7 +218,7 @@ class GP(ABC):
         mean, var = gp_predict(self.train_y,self.cholesky,k12,k22)
         return mean, var
 
-    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=150,n_restarts=2):
+    def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=150,n_restarts=2,step=0):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 
@@ -633,15 +633,6 @@ class DSLP_GP(GP):
     #     self.alphas = cho_solve((self.cholesky, True), self.train_y)
     #     self.fitted = True
 
-    def predict_mean(self,x):
-        return super().predict_mean(x)
-
-    def predict_var(self,x):
-        return super().predict_var(x)
-
-    def predict(self,x):
-        return super().predict(x)
-
     # def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=200,n_restarts=2):
         # """
         # Updates the GP with new training points and refits the GP if refit is True.
@@ -917,16 +908,7 @@ class SAAS_GP(DSLP_GP):
     #             k = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
     #             self.cholesky = jnp.linalg.cholesky(k)
     #         return False
-    
-    def predict_mean(self, x):
-        return super().predict_mean(x)
-    
-    def predict_var(self, x):
-        return super().predict_var(x)
-    
-    def predict(self, x):
-        mean, var = super().predict(x)
-        return mean, var
+
     
     def save(self, outfile='gp'):
         """

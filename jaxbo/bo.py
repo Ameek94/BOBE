@@ -9,6 +9,7 @@ enable_x64()
 from .acquisition import WIPV, EI #, logEI
 from .gp import DSLP_GP, SAAS_GP #, sample_GP_NUTS
 from .svm_gp import SVM_GP
+from .clf_gp import ClassifierGP
 from .loglike import ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
@@ -54,7 +55,7 @@ log.addHandler(stdout_handler)
 log.addHandler(stderr_handler)
 
 # Acquisition optimizer
-def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=150, n_restarts_optimizer=4):
+def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_optimizer=4):
     
     f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
 
@@ -149,11 +150,12 @@ class BOBE:
                  mc_points_method='NUTS',
                  lengthscale_priors='DSLP',
                  acq = 'WIPV',
-                 use_svm=True,
-                 svm_use_size = 300,
-                 svm_update_step=5,
-                 svm_threshold=250,
-                 svm_gp_threshold=5000,
+                 use_clf=True,
+                 clf_type = "svm",
+                 clf_use_size = 300,
+                 clf_update_step=5,
+                 clf_threshold=250,
+                 clf_gp_threshold=5000,
                  logz_threshold=1.0,
                  minus_inf=-1e5,
                  do_final_ns=True,
@@ -200,14 +202,14 @@ class BOBE:
             Recommend to use 'NUTS' for most cases, 'NS' can be a good choice if the underlying likelihood has a highly complex structure.
         lengthscale_priors : str
             Lengthscale priors to use. Options are 'DSLP' or 'SAAS'. See the GP class for more details.
-        use_svm : bool
+        use_clf : bool
             If True, use SVM to filter the GP predictions. 
             This is only required for high dimensional problems and when the scale of variation of the likelihood is extremely large. 
             For cosmological likelihoods with nuisance parameters, this is highly recommended.
-        svm_use_size : int
-            Minimum size of the SVM training set before the SVM filter is used in the GP.
-        svm_update_step : int
-            Number of iterations between SVM updates.
+        clf_use_size : int
+            Minimum size of the classifier training set before the classifier filter is used in the GP.
+        clf_update_step : int
+            Number of iterations between classifier updates.
         logz_threshold : float
             Threshold for convergence of the nested sampling logz. 
             If the difference between the upper and lower bounds of logz is less than this value, the sampling will end.
@@ -218,12 +220,7 @@ class BOBE:
             raise ValueError("loglikelihood must be an instance of ExternalLikelihood")
 
         self.loglikelihood = loglikelihood
-
-        # self.param_list = self.loglikelihood.param_list
-        # self.param_bounds = self.loglikelihood.param_bounds
-        # self.param_labels = self.loglikelihood.param_labels
         self.ndim = len(self.loglikelihood.param_list)
-
 
         if resume and resume_file is not None:
             # assert resume_file is not None, "resume_file must be provided if resume is True"
@@ -249,30 +246,36 @@ class BOBE:
         log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
 
         # GP setup
-        if use_svm:
-            gp = SVM_GP(
+        if use_clf:
+            self.gp = ClassifierGP(
                 train_x=self.train_x, train_y=self.train_y,
                 minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
-                kernel='rbf',svm_use_size=svm_use_size,svm_update_step=svm_update_step,
-                svm_threshold=svm_threshold,gp_threshold=svm_gp_threshold,lengthscales=lengthscales,
-                outputscale=outputscale
+                clf_type=clf_type, clf_use_size=clf_use_size, clf_update_step=clf_update_step,
+                clf_threshold=clf_threshold, clf_gp_threshold=clf_gp_threshold,
+                lengthscales=lengthscales, outputscale=outputscale
             )
+            # gp = SVM_GP(
+            #     train_x=self.train_x, train_y=self.train_y,
+            #     minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
+            #     kernel='rbf',svm_use_size=svm_use_size,svm_update_step=svm_update_step,
+            #     svm_threshold=svm_threshold,gp_threshold=svm_gp_threshold,lengthscales=lengthscales,
+            #     outputscale=outputscale
+            # )
         else:
-            gp = {
+            self.gp = {
                 'DSLP': DSLP_GP,
                 'SAAS': SAAS_GP
             }[lengthscale_priors](
                 train_x=self.train_x, train_y=self.train_y,
                 noise=1e-8, kernel='rbf',lengthscales=lengthscales,outputscale=outputscale
             )
-        self.gp = gp
+
 
         if resume:
-          # Start by fitting the GP to the initial points
-            self.gp.fit() # need to fix
+            self.gp.fit(maxiter=100,n_restarts=2) # if resuming need not spend too much time on fitting
         else:
             # Fit the GP to the initial points
-            self.gp.fit()
+            self.gp.fit(maxiter=150,n_restarts=4)
 
 
         # Store settings
@@ -296,8 +299,6 @@ class BOBE:
         self.logz_threshold = logz_threshold
         self.converged = False
         self.termination_reason = "Max iterations reached"
-
-
 
     def check_convergence(self, step, logz_dict, threshold=2.0,ndim=1):
         """
@@ -347,7 +348,6 @@ class BOBE:
         ii = 0
         x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
 
-
         for i in range(self.maxiters):
 
             ii = i + 1
@@ -373,12 +373,12 @@ class BOBE:
                 new_pt, logp_args=(), logp_kwargs={}
             )
 
-            new = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pt.flatten())}
-            log.info(f" New point {new}")
+            new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pt.flatten())}
+            log.info(f" New point {new_pt_vals}")
             log.info(f" Objective function value = {new_val.item():.4f}, GP predicted value = {self.gp.predict_mean(new_pt_u).item():.4f}")
 
             pt_exists_or_below_threshold = self.gp.update(new_pt_u, new_val, refit=refit,step=ii,n_restarts=4)
-            x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
+            # x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
 
             if (pt_exists_or_below_threshold and self.mc_points_method == 'NUTS') and (self.mc_samples['method'] == 'MCMC'):
                 update_mc = True
@@ -407,22 +407,22 @@ class BOBE:
 
             if ns_flag:
                 log.info(" Running Nested Sampling")
-                ns_samples, logz_dict = nested_sampling_Dy(
+                ns_samples, logz_dict, ns_success = nested_sampling_Dy(
                     self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1
                 )
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-                if self.check_convergence(i, logz_dict,threshold=self.logz_threshold,ndim=self.ndim):
-                    self.converged = True
+                
+                if ns_success:
+                    # if :
+                    self.converged = self.check_convergence(i, logz_dict,threshold=self.logz_threshold,ndim=self.ndim)
                     self.termination_reason = "LogZ converged"
                     break
                 self.mc_samples = ns_samples
                 self.mc_samples['method'] = 'NS'
             self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
-
-
-            if self.gp.train_x.shape[0] > self.max_gp_size:
-                self.termination_reason = "Max GP size exceeded"
+            if self.gp.train_x.shape[0] >= self.max_gp_size:
+                self.termination_reason = "Max GP size reached"
                 log.info(f" {self.termination_reason}")
                 break
             if self.gp.train_x.shape[0] > 1600:

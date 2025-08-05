@@ -123,6 +123,8 @@ def nested_sampling_Dy(gp: GP
     #                                    sample=sample_method,pool=p)
     #     sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)
 
+    success = True
+
     if dynamic:
         sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
                                        sample=sample_method)
@@ -137,6 +139,7 @@ def nested_sampling_Dy(gp: GP
     logl = res['logl']
     # add check for all same logl values
     if np.all(logl == logl[0]):
+        success = False
         log.warning("All logl values are the same, this may indicate a problem with the model or the data.")
         # how to deal with this case?
 
@@ -166,7 +169,7 @@ def nested_sampling_Dy(gp: GP
         weights = renormalise_log_weights(res['logwt'])
         samples['weights'] = weights    
         samples['logl'] = res['logl']
-    return samples, logz_dict
+    return samples, logz_dict, success
 
 #-------------JAXNS functions---------------------
 

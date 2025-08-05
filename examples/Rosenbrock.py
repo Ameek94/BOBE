@@ -1,6 +1,6 @@
 from jaxbo.bo import BOBE
 from jaxbo.utils import plot_final_samples
-from jaxbo.loglike import external_loglike,cobaya_loglike
+from jaxbo.loglike import ExternalLikelihood,CobayaLikelihood
 from jaxbo.nested_sampler import renormalise_log_weights
 from getdist import MCSamples
 from dynesty import DynamicNestedSampler
@@ -39,7 +39,7 @@ reference_samples = MCSamples(samples=samples, names=param_list, labels=param_la
                             ranges= dict(zip(param_list,param_bounds.T)))
 
 
-likelihood = external_loglike(loglikelihood=loglike,ndim=ndim,param_list=param_list,
+likelihood = ExternalLikelihood(loglikelihood=loglike,ndim=ndim,param_list=param_list,
         param_bounds=param_bounds,param_labels=param_labels,
         name='Rosenbrock',noise_std=0.0,minus_inf=-1e5)
 start = time.time()
