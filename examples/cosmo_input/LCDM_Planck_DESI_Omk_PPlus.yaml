@@ -14,6 +14,7 @@ likelihood:
   planck_NPIPE_highl_CamSpec.TTTEEE: null
   planck_2018_lensing.native: null
   bao.desi_2024_bao_all: null
+  sn.pantheonplus: null
 params:
  # Baseline cosmological parameters
   w: -1.
@@ -204,4 +205,4 @@ sampler:
   #  covmat: auto
   #  Rminus1_stop: 0.01
   #  Rminus1_cl_stop: 0.2   
-output: chains/Planck_DESI_LCDM_pchord_Omk
+output: chains/Planck_DESI_PPlus_LCDM_pchord_Omk

@@ -112,8 +112,8 @@ def _log_ei_helper(u):
 
 class AcquisitionFunction:
     """Base class for acquisition functions"""
-    def __init__(self):
-        pass
+    def __init__(self,gp):
+        self.gp = gp
     
     def __call__(self, x, gp, **kwargs):
         raise NotImplementedError
@@ -158,7 +158,7 @@ class EI(AcquisitionFunction):
         ei = std * (z * norm.cdf(z) + norm.pdf(z))
         return jnp.reshape(-ei, ())
 
-class LogEI(AcquisitionFunction):
+class LogEI(EI):
     """Log Expected Improvement acquisition function"""
     def __init__(self, zeta: float = 0.0, maximize: bool = True):
         super().__init__()
@@ -178,8 +178,18 @@ class LogEI(AcquisitionFunction):
         
         return jnp.reshape(-log_ei, ())
 
-# class WIPV(AcquisitionFunction):
-#     """Weighted Integrated Predictive Variance acquisition function"""
+class MCAcquisition(AcquisitionFunction):
+    """Monte Carlo acquisition function base class"""
+    def __init__(self, mc_points: Optional[Any] = None):
+        super().__init__()
+        self.mc_points = mc_points
+    
+    def __call__(self, x, gp, **kwargs):
+        raise NotImplementedError("Subclasses must implement __call__ method")
+
+
+# class WIPV(MCAcquisition):
+#     """Weighted Integrated Posterior Variance acquisition function"""
 #     def __init__(self, mc_points: Optional[Any] = None):
 #         super().__init__()
 #         self.mc_points = mc_points
@@ -189,3 +199,15 @@ class LogEI(AcquisitionFunction):
 #         var = gp.fantasy_var(x, mc_points=mc_points)
 
 #         return jnp.mean(var)
+    
+class MaxVar(MCAcquisition):
+    """Maximum Variance acquisition function"""
+    def __init__(self, mc_points: Optional[Any] = None):
+        super().__init__()
+        self.mc_points = mc_points
+    
+    def __call__(self, x, gp, **kwargs):
+        mc_points = kwargs.get('mc_points', self.mc_points)
+        var = gp.fantasy_var(x, mc_points=mc_points)
+
+        return jnp.max(var)

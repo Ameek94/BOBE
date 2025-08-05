@@ -1,203 +1,107 @@
-"""
-Logging utilities for the JaxBo package.
-
-This module provides centralized logging configuration with custom handlers
-for different log levels and output streams.
-"""
-
+# logging_config.py
 import sys
 import logging
-from typing import Optional, Dict, Any
+from logging.handlers import RotatingFileHandler
+import os
 
-
-class InfoFilter(logging.Filter):
-    """Filter that only allows INFO level messages through."""
+class LevelFilter(logging.Filter):
+    """Filter to allow specific log levels"""
+    def __init__(self, levels):
+        super().__init__()
+        self.levels = levels if isinstance(levels, list) else [levels]
     
-    def filter(self, record: logging.LogRecord) -> bool:
-        """
-        Filter log records to only allow INFO level.
-        
-        Args:
-            record: The log record to filter
-            
-        Returns:
-            bool: True if the record should be processed (INFO level only)
-        """
-        return record.levelno == logging.INFO
+    def filter(self, record):
+        return record.levelno in self.levels
 
+class VerbosityFilter(logging.Filter):
+    """Filter based on verbosity level"""
+    def __init__(self, max_level):
+        super().__init__()
+        self.max_level = max_level
+    
+    def filter(self, record):
+        return record.levelno <= self.max_level
 
-def setup_logger(
-    name: str,
-    level: int = logging.INFO,
-    info_to_stdout: bool = True,
-    warnings_to_stderr: bool = True,
-    format_string: Optional[str] = None
-) -> logging.Logger:
+def setup_logging(verbosity='INFO', log_file=None):
     """
-    Set up a logger with custom handlers for different log levels.
-    
-    This creates a logger that:
-    - Sends INFO messages to stdout (if info_to_stdout=True)
-    - Sends WARNING and above to stderr (if warnings_to_stderr=True)
-    - Prevents message bubbling to the root logger
+    Configure logging with different verbosity levels
     
     Args:
-        name: Name of the logger (typically the module name)
-        level: Minimum logging level (default: INFO)
-        info_to_stdout: Whether to send INFO messages to stdout
-        warnings_to_stderr: Whether to send WARNING+ messages to stderr
-        format_string: Custom format string for log messages
-        
-    Returns:
-        logging.Logger: Configured logger instance
+        verbosity: String level - 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'QUIET'
+        log_file: Optional file to log to
     """
-    if format_string is None:
-        format_string = '%(asctime)s %(levelname)s:%(name)s: %(message)s'
     
-    # Create formatter
-    formatter = logging.Formatter(format_string)
+    # Map verbosity strings to logging levels
+    verbosity_levels = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL,
+        'QUIET': logging.CRITICAL  # Only critical messages
+    }
     
-    # Get logger and clear any existing handlers
-    logger = logging.getLogger(name)
-    logger.handlers.clear()
-    logger.setLevel(level)
-    logger.propagate = False  # Prevent bubbling to root logger
+    # Set the base logging level
+    base_level = verbosity_levels.get(verbosity.upper(), logging.INFO)
     
-    # Add stdout handler for INFO messages
-    if info_to_stdout:
+    # Clear any existing handlers
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    
+    # Configure handlers based on verbosity
+    handlers = []
+    
+    if verbosity.upper() != 'QUIET':
+        # Stdout handler - INFO and DEBUG (filtered by verbosity)
         stdout_handler = logging.StreamHandler(sys.stdout)
-        stdout_handler.setLevel(logging.INFO)
-        stdout_handler.addFilter(InfoFilter())
-        stdout_handler.setFormatter(formatter)
-        logger.addHandler(stdout_handler)
+        stdout_handler.setLevel(logging.DEBUG)  # Accept all levels, filter later
+        
+        if verbosity.upper() == 'DEBUG':
+            # In debug mode, show DEBUG and INFO on stdout
+            stdout_handler.addFilter(LevelFilter([logging.DEBUG, logging.INFO]))
+            stdout_fmt = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+        else:
+            # Normal mode - only INFO on stdout
+            stdout_handler.addFilter(LevelFilter(logging.INFO))
+            stdout_fmt = logging.Formatter('%(asctime)s [%(name)s] %(message)s')
+            
+        stdout_handler.setFormatter(stdout_fmt)
+        handlers.append(stdout_handler)
     
-    # Add stderr handler for WARNING and above
-    if warnings_to_stderr:
+    # Stderr handler for WARNING and above (always shown unless quiet)
+    if verbosity.upper() != 'QUIET':
         stderr_handler = logging.StreamHandler(sys.stderr)
         stderr_handler.setLevel(logging.WARNING)
-        stderr_handler.setFormatter(formatter)
-        logger.addHandler(stderr_handler)
+        stderr_fmt = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+        stderr_handler.setFormatter(stderr_fmt)
+        handlers.append(stderr_handler)
     
-    return logger
+    # Optional file handler (logs everything regardless of verbosity)
+    if log_file:
+        file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
+        file_handler.setLevel(logging.DEBUG)
+        file_fmt = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+        file_handler.setFormatter(file_fmt)
+        handlers.append(file_handler)
+    
+    # Configure root logger
+    logging.basicConfig(
+        level=base_level,
+        handlers=handlers,
+        force=True
+    )
 
-
-def get_logger(name: str, **kwargs) -> logging.Logger:
+def get_logger(name):
     """
-    Get or create a logger with JaxBo's standard configuration.
+    Get a logger with the specified name
     
     Args:
-        name: Logger name (typically module name like "[BO]", "[GP]", etc.)
-        **kwargs: Additional arguments passed to setup_logger()
-        
-    Returns:
-        logging.Logger: Configured logger instance
+        name: Logger name (typically __name__ from the calling module)
     """
-    return setup_logger(name, **kwargs)
-
-
-def configure_package_logging(
-    level: int = logging.INFO,
-    format_string: Optional[str] = None
-) -> Dict[str, logging.Logger]:
-    """
-    Configure logging for all JaxBo modules with consistent settings.
-    
-    Args:
-        level: Global logging level for all modules
-        format_string: Custom format string for all loggers
-        
-    Returns:
-        Dict[str, logging.Logger]: Dictionary of configured loggers by module name
-    """
-    modules = [
-        "[BO]",      # Bayesian Optimization
-        "[GP]",      # Gaussian Process
-        "[FBGP]",    # Fully Bayesian GP
-        "[ACQ]",     # Acquisition functions
-        "[NS]",      # Nested Sampling
-        "[Opt]",     # Optimization
-        "[SEED]",    # Seed utilities
-        "[SVM]",     # Support Vector Machine
-        "[LOGLIKE]", # Loglikelihood
-    ]
-    
-    loggers = {}
-    for module in modules:
-        loggers[module] = setup_logger(
-            name=module,
-            level=level,
-            format_string=format_string
-        )
-    
-    return loggers
-
-
-def set_global_log_level(level: int) -> None:
-    """
-    Set the logging level for all JaxBo loggers.
-    
-    Args:
-        level: New logging level (e.g., logging.DEBUG, logging.INFO, etc.)
-    """
-    jaxbo_loggers = [
-        "[BO]", "[GP]", "[FBGP]", "[ACQ]", "[NS]", 
-        "[Opt]", "[SEED]", "[SVM]", "[LOGLIKE]"
-    ]
-    
-    for logger_name in jaxbo_loggers:
-        logger = logging.getLogger(logger_name)
-        if logger.handlers:  # Only update if logger exists
-            logger.setLevel(level)
-
-
-def enable_debug_logging() -> None:
-    """Enable DEBUG level logging for all JaxBo modules."""
-    set_global_log_level(logging.DEBUG)
-
-
-def disable_logging() -> None:
-    """Disable all logging for JaxBo modules."""
-    set_global_log_level(logging.CRITICAL + 1)
-
-
-def create_file_logger(
-    name: str,
-    filename: str,
-    level: int = logging.INFO,
-    format_string: Optional[str] = None
-) -> logging.Logger:
-    """
-    Create a logger that writes to a file.
-    
-    Args:
-        name: Logger name
-        filename: Path to log file
-        level: Logging level
-        format_string: Custom format string
-        
-    Returns:
-        logging.Logger: File logger instance
-    """
-    if format_string is None:
-        format_string = '%(asctime)s %(levelname)s:%(name)s: %(message)s'
-    
     logger = logging.getLogger(name)
-    handler = logging.FileHandler(filename)
-    handler.setLevel(level)
-    handler.setFormatter(logging.Formatter(format_string))
-    
-    logger.addHandler(handler)
-    logger.setLevel(level)
-    
+    logger.propagate = True
     return logger
 
-
-# Convenience function for backward compatibility
-def setup_bo_logger() -> logging.Logger:
-    """
-    Set up the Bayesian Optimization logger with the original configuration.
-    
-    Returns:
-        logging.Logger: Configured BO logger
-    """
-    return setup_logger("[BO]")
+def update_verbosity(verbosity):
+    """Update the logging verbosity at runtime"""
+    setup_logging(verbosity)

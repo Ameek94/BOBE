@@ -6,8 +6,7 @@ import matplotlib.pyplot as plt
 import jax.numpy as jnp
 from jax import vmap
 from .logging_utils import get_logger
-
-log = get_logger("[BO_Utils]")
+log = get_logger(__name__)
 
 # use this to suppress unecessary output, https://stackoverflow.com/questions/2125702/how-to-suppress-console-output-in-python
 @contextmanager
@@ -88,7 +87,7 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
 
     if param_bounds is None:
         param_bounds = np.array([[0,1]]*len(param_list)).T
-    samples = input_unstandardize(samples,param_bounds)
+    # samples = scale_from_unit(samples,param_bounds)
     weights = samples_dict['weights']
     gd_samples = MCSamples(samples=samples, names=param_list, labels=param_labels, 
                            ranges=ranges, weights=weights)
@@ -121,7 +120,7 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
                     legend_labels=['GP',f'{reference_label}']
                     ,markers=markers,marker_args={'lw': 1, 'ls': ':'}) 
     if scatter_points:
-        points = input_unstandardize(gp.train_x,param_bounds)
+        points = scale_from_unit(gp.train_x,param_bounds)
         for i in range(ndim):
             # ax = g.subplots[i,i]
             for j in range(i+1,ndim):

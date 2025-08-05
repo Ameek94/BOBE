@@ -9,7 +9,7 @@ import jax
 import jax.random as jax_random
 import logging
 
-log = logging.getLogger("[SEED]")
+log = logging.getLogger(__name__)
 
 # Global variables
 _global_seed = None

@@ -8,18 +8,14 @@ import jax.random as random
 import numpy as np
 import jax
 from jax import config, vmap, jit
-from .logging_utils import get_logger
-
-log = get_logger("[NS]")
 config.update("jax_enable_x64", True)
 from .gp import GP
 from scipy.special import logsumexp
-from .seed_utils import get_new_jax_key, get_global_seed
 
 try:
     from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
 except ModuleNotFoundError:
-    log.warning("Proceeding without dynesty since not installed")
+    print("Proceeding without dynesty since not installed")
 import math
 
 import tensorflow_probability.substrates.jax as tfp
@@ -28,9 +24,7 @@ from jaxns.framework.model import Model
 from jaxns.framework.prior import Prior
 from jaxns import NestedSampler, TerminationCondition, resample
 import logging
-from .logging_utils import get_logger
-
-log = get_logger("[NS]")
+log = logging.getLogger("[NS]")
 
 def renormalise_log_weights(log_weights):
     log_total = logsumexp(log_weights)
@@ -141,8 +135,13 @@ def nested_sampling_Dy(gp: GP
     log.info(f" Nested Sampling took {time.time() - start:.2f}s")
     res = sampler.results  # type: ignore # grab our results
     logl = res['logl']
+    # add check for all same logl values
+    if np.all(logl == logl[0]):
+        log.warning("All logl values are the same, this may indicate a problem with the model or the data.")
+        # how to deal with this case?
+
     log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
-    log.info(f" Dynesty made {np.sum(res['ncall'])} function calls")
+    log.info(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
     mean = res['logz'][-1]
     logz_err = res['logzerr'][-1]
     logz_dict = {'mean': mean}
@@ -156,6 +155,8 @@ def nested_sampling_Dy(gp: GP
         logz_dict['upper'] = upper[-1]
         logz_dict['lower'] = lower[-1]
     samples = {}
+    best_pt = res['samples'][np.argmax(res['logl'])]
+    samples['best'] = best_pt
     if equal_weights:
         samples['x'] = res.samples_equal()
         weights = np.ones(samples['x'].shape[0])
@@ -235,12 +236,7 @@ def nested_sampling_jaxns(gp
                         difficult_model=difficult_model,)
                         #num_parallel_workers=10)
      # Run the sampler
-    from .seed_utils import get_new_jax_key, get_global_seed
-    if get_global_seed() is not None:
-        rng_key = get_new_jax_key()
-    else:
-        rng_key = jax.random.PRNGKey(42)
-    termination_reason, state = ns_mean(rng_key, term_cond=term_cond)
+    termination_reason, state = ns_mean(jax.random.PRNGKey(42),term_cond=term_cond)
     # Get the results
     results = ns_mean.to_results(termination_reason=termination_reason, state=state)
 
@@ -283,12 +279,7 @@ def nested_sampling_jaxns(gp
 
     ns_samples = {}
     if equal_weights:
-        from .seed_utils import get_new_jax_key, get_global_seed
-        if get_global_seed() is not None:
-            rng_key = get_new_jax_key()
-        else:
-            rng_key = jax.random.PRNGKey(0)
-        samples = resample(key=rng_key,
+        samples = resample(key=jax.random.PRNGKey(0),
                     samples=results.samples,
                     log_weights=results.log_dp_mean, # type: ignore
                     replace=True,) 

@@ -6,27 +6,27 @@ import time
 cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_omk.yaml'
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name='Planck_Camspec_fast_Omk')
+        minus_inf=-1e5, noise_std=0.0,name='Planck_DESI_Omk')
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=32, n_sobol_init = 128, 
-        miniters=0, maxiters=2000,max_gp_size=1800,
+        miniters=750, maxiters=2000,max_gp_size=1800,
         loglikelihood=likelihood,
         resume=True,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step = 25, update_mc_step = 5, ns_step = 25,
+        fit_step = 50, update_mc_step = 5, ns_step = 50,
         num_hmc_warmup = 512,num_hmc_samples = 1024, mc_points_size = 64,
         lengthscale_priors='DSLP',logz_threshold=1.,
         use_svm=True,svm_use_size=200,svm_update_step=1,minus_inf=-1e5,
-        svm_threshold=500,svm_gp_threshold=5000.) #prev 5000
+        svm_threshold=600,svm_gp_threshold=5000.) #prev 5000
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()
 print(f"Total time taken = {end-start:.4f} seconds")
 
 
-param_list_LCDM = ['omk','omch2','logA','ns','H0','ombh2','tau','omk']
+param_list_LCDM = ['omk','omch2','logA','ns','H0','ombh2','tau']
 plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
                    plot_params=param_list_LCDM,
                    param_labels=sampler.param_labels,output_file=f'{likelihood.name}',
