@@ -43,8 +43,8 @@ def train_nn(x: jnp.ndarray,
              weight_decay=1e-4,
              n_epochs=500,
              batch_size=128,
-             val_frac=0.1,
-             early_stop_patience=50,
+             val_frac=0.2,
+             early_stop_patience=100,
              init_params = None,
              seed=0):
     """
@@ -131,8 +131,8 @@ def train_nn(x: jnp.ndarray,
     apply_fn = lambda xx: model.apply(best_params, xx, train=False)
     # log.info(f"[NN] training complete; best val_loss = {best_val_loss:.4f}")
     metrics = {
-        'train_loss': f"{float(loss_fn(best_params, x_train, y_train, key)):.4f}",
-        'val_loss': f"{float(best_val_loss):.4f}",
+        'train_loss': f"{float(loss_fn(best_params, x_train, y_train, key)):.2e}",
+        'val_loss': f"{float(best_val_loss):.2e}",
         # 'params': best_params,
     }
 
@@ -224,22 +224,24 @@ def train_ellipsoid(
     n_epochs: int = 200,
     batch_size: int = 32,
     seed: int = 0,
-    mu: Optional[jnp.ndarray] = None,
-    initial_params: Optional[Dict] = None,
-    val_frac: float = 0.1,
-    patience: int = 250,
-    verbose: bool = False
+    init_params: Optional[Dict] = None,
+    val_frac: float = 0.2,
+    patience: int = 100,
+    verbose: bool = False,
+    **kwargs: Any
 ):
     """
     Train the EllipsoidClassifier with a fixed center mu, optionally warm-starting from initial_params.
     """
+
+    mu = kwargs.get('best_pt', 0.5 * jnp.ones(x.shape[1]))  # Default to zero vector if not provided
     
     N, d = x.shape
     model = EllipsoidClassifier(d=d, mu=mu)
-    
-    if initial_params is not None:
+
+    if init_params is not None:
         # Use provided initial parameters if available
-        params = initial_params
+        params = init_params
     else:
         key = jax.random.PRNGKey(seed)
         params = model.init(key, x)
@@ -247,6 +249,7 @@ def train_ellipsoid(
     optimizer = optax.adamw(lr, weight_decay=weight_decay)
     opt_state = optimizer.init(params)
 
+    # Split train/validation
     rng = np.random.RandomState(seed)
     perm = rng.permutation(N)
     split = int(N * (1 - val_frac))
@@ -266,39 +269,69 @@ def train_ellipsoid(
         return optax.apply_updates(params, updates), opt_state
 
     # Early stopping setup
-    best_val_loss = float('inf')
+    best_params = params
+    best_val_loss = jnp.inf
+    x_np, y_np = np.array(x_train), np.array(y_train)
+    steps = max(1, x_train.shape[0] // batch_size)
     patience_counter = 0
     metrics = {'train_loss': [], 'val_loss': []}
     
     key = jax.random.PRNGKey(seed)
-    idxs = jnp.arange(N)
+    # idxs = jnp.arange(N)
+
+    # for epoch in range(n_epochs):
+    #     # training
+    #     perm_train = rng.permutation(x_train.shape[0])
+    #     for i in range(steps):
+    #         idx = perm_train[i*batch_size:(i+1)*batch_size]
+    #         bx = jnp.array(x_np[idx])
+    #         by = jnp.array(y_np[idx])
+    #         key, subkey = jax.random.split(key)
+    #         params, opt_state = train_step(params, opt_state, bx, by, subkey)
+    #     # validation
+    #     val_loss = compute_val_loss(params)
+    #     if val_loss < best_val_loss:
+    #         best_val_loss = val_loss
+    #         best_params = params
+    #         patience = early_stop_patience
+    #     else:
+    #         patience -= 1
+    #         if patience <= 0:
+    #             log.info(f"[NN] early stopping at epoch {epoch}, val_loss {val_loss:.4f}")
+    #             break
     
     for epoch in range(n_epochs):
-        key, subkey = jax.random.split(key)
-        perm = jax.random.permutation(subkey, idxs)
+        perm_train = rng.permutation(x_train.shape[0])
+        for i in range(steps):
+            idx = perm_train[i*batch_size:(i+1)*batch_size]
+            bx = jnp.array(x_np[idx])
+            by = jnp.array(y_np[idx])
+            # key, subkey = jax.random.split(key)
+            params, opt_state = train_step(params, opt_state, bx, by)
+
+        # key, subkey = jax.random.split(key)
+        # perm = jax.random.permutation(subkey, idxs)
         
         # Training loop
-        epoch_losses = []
-        for i in range(0, N, batch_size):
-            batch_idx = perm[i: i + batch_size]
-            bx = x_train[batch_idx]
-            by = y_train[batch_idx]
-            params, opt_state = train_step(params, opt_state, bx, by)
+        # epoch_losses = []
+        # for i in range(0, N, batch_size):
+        #     batch_idx = perm[i: i + batch_size]
+        #     bx = x_train[batch_idx]
+        #     by = y_train[batch_idx]
+        #     params, opt_state = train_step(params, opt_state, bx, by)
             
-            # Compute batch loss for monitoring
-            batch_loss = loss_fn(params, bx, by)
-            epoch_losses.append(batch_loss)
+        #     # Compute batch loss for monitoring
+        #     batch_loss = loss_fn(params, bx, by)
+        #     epoch_losses.append(batch_loss)
         
-        avg_train_loss = jnp.mean(jnp.array(epoch_losses))
-        metrics['train_loss'].append(float(avg_train_loss))
-        
+        # avg_train_loss = jnp.mean(jnp.array(epoch_losses))
+        # metrics['train_loss'].append(float(avg_train_loss))
         
         # Validation
         if val_frac > 0.0 and y is not None:
             val_loss = loss_fn(params, x_val, y_val)
-            metrics['val_loss'].append(float(val_loss))
+            # metrics['val_loss'].append(float(val_loss))
 
-            
             # Early stopping
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -311,8 +344,10 @@ def train_ellipsoid(
                         print(f"Early stopping at epoch {epoch}")
                     break
 
-    metrics['train_loss'] = f"{np.min(np.array(metrics['train_loss'])):.4e}" if metrics['train_loss'] else 'N/A'
-    metrics['val_loss'] = f"{np.min(np.array(metrics['val_loss'])):.4e}" if metrics['val_loss'] else 'N/A'
+    train_loss = loss_fn(best_params, x_train, y_train)
+
+    metrics['train_loss'] = f"{train_loss:.2e}" #f"{np.min(np.array(metrics['train_loss'])):.4e}" if metrics['train_loss'] else 'N/A'
+    metrics['val_loss'] = f"{val_loss:.2e}" #f"{np.min(np.array(metrics['val_loss'])):.4e}" if metrics['val_loss'] else 'N/A'
 
     apply_fn = lambda p, xx: model.apply(p, xx, train=False)
 
@@ -368,7 +403,7 @@ def svm_predict_batch(x, support_vectors, dual_coef, intercept, gamma,batch_size
     batched_predict = lambda x: svm_predict(x, support_vectors, dual_coef, intercept, gamma)
     return jax.lax.map(batched_predict, x, batch_size=batch_size)
 
-def train_svm(x,y,svm_settings = {} ,gamma="scale",C=1e7):
+def train_svm(x,y, svm_settings = {} ,gamma="scale",C=1e7, init_params=None, **kwargs):
     """
     Train the SVM on the data.
     """

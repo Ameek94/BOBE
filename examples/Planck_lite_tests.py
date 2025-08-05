@@ -14,17 +14,18 @@ sampler = BOBE(n_cobaya_init=4, n_sobol_init = 16,
         loglikelihood=likelihood,
         fit_step = 5, update_mc_step = 5, ns_step = 10,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
-        lengthscale_priors='DSLP', use_clf=True, clf_type="ellipsoid", clf_use_size=20, clf_update_step=1, clf_threshold=250, clf_gp_threshold=5000,
-        minus_inf=-1e5, logz_threshold=0.5)
+        lengthscale_priors='DSLP', use_clf=True, clf_type="ellipsoid", clf_use_size=10, clf_update_step=1
+        , clf_threshold=250, gp_threshold=5000,
+        minus_inf=-1e5, logz_threshold=1.)
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()
 print(f"Total time taken = {end-start:.4f} seconds")
 
 
-plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
-                   param_labels=sampler.param_labels,output_file=likelihood.name,
-                   reference_file='./cosmo_input/chains/Planck_lite_LCDM_test',reference_ignore_rows=0.3,
+plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
+                   param_labels=likelihood.param_labels,output_file=likelihood.name,
+                   reference_file='./cosmo_input/chains/Planck_lite_LCDM',reference_ignore_rows=0.3,
                    reference_label='PolyChord',scatter_points=True,)
 
 # Total time taken = 292.6820 seconds with fast updates

@@ -18,6 +18,9 @@ _jax_key = None
 def set_global_seed(seed: int) -> None:
     """Set global random seed for reproducible results."""
     global _global_seed, _jax_key
+
+    if seed is None:
+        seed = random.randint(0, 2**31 - 1)  # Generate a random seed if none is provided
     
     if not isinstance(seed, int) or seed < 0:
         raise ValueError("Seed must be a non-negative integer")

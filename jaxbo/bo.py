@@ -6,6 +6,7 @@ import jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
+from typing import Optional, Union, Tuple, Dict, Any
 from .acquisition import WIPV, EI #, logEI
 from .gp import DSLP_GP, SAAS_GP #, sample_GP_NUTS
 from .svm_gp import SVM_GP
@@ -14,6 +15,7 @@ from .loglike import ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from .utils import scale_from_unit, scale_to_unit
+from .seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from optax import adam, apply_updates
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from getdist import plots, MCSamples, loadMCSamples
@@ -107,11 +109,11 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
             )
         except Exception as e:
             log.error(f"Error in sampling GP NUTS: {e}")
-            mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
+            mc_samples, logz, sucess = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
                                             , dynamic=False, dlogz=0.5,equal_weights=True,
             )
     elif method=='NS':
-        mc_samples, _ = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
+        mc_samples, logz, sucess = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
                                             , dynamic=False, dlogz=0.5,equal_weights=True,
         )
     elif method=='uniform':
@@ -155,11 +157,12 @@ class BOBE:
                  clf_use_size = 300,
                  clf_update_step=5,
                  clf_threshold=250,
-                 clf_gp_threshold=5000,
+                 gp_threshold=5000,
                  logz_threshold=1.0,
                  minus_inf=-1e5,
                  do_final_ns=True,
-                 return_getdist_samples=False,):
+                 return_getdist_samples=False,
+                 seed: Optional[int] = None):
         """
         Initialize the BOBE sampler class.
 
@@ -216,6 +219,10 @@ class BOBE:
         minus_inf : float
             Value to use for minus infinity. This is used to set the lower bound of the loglikelihood.
         """
+
+
+        set_global_seed(seed)
+
         if not isinstance(loglikelihood, ExternalLikelihood):
             raise ValueError("loglikelihood must be an instance of ExternalLikelihood")
 
@@ -251,7 +258,7 @@ class BOBE:
                 train_x=self.train_x, train_y=self.train_y,
                 minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
                 clf_type=clf_type, clf_use_size=clf_use_size, clf_update_step=clf_update_step,
-                clf_threshold=clf_threshold, clf_gp_threshold=clf_gp_threshold,
+                clf_threshold=clf_threshold, gp_threshold=gp_threshold,
                 lengthscales=lengthscales, outputscale=outputscale
             )
             # gp = SVM_GP(
@@ -411,14 +418,15 @@ class BOBE:
                     self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1
                 )
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-                
-                if ns_success:
-                    # if :
-                    self.converged = self.check_convergence(i, logz_dict,threshold=self.logz_threshold,ndim=self.ndim)
+
+                if ns_success and self.check_convergence(i, logz_dict,threshold=self.logz_threshold,ndim=self.ndim):
+                    self.converged = True
                     self.termination_reason = "LogZ converged"
                     break
+
                 self.mc_samples = ns_samples
                 self.mc_samples['method'] = 'NS'
+
             self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
             if self.gp.train_x.shape[0] >= self.max_gp_size:
