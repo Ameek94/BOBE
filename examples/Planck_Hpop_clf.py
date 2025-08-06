@@ -1,6 +1,6 @@
 from jaxbo.bo import BOBE
 from jaxbo.utils import plot_final_samples
-from jaxbo.loglike import cobaya_likelihood
+from jaxbo.loglike import CobayaLikelihood
 import time
 import sys
 
@@ -9,7 +9,7 @@ clf = sys.argv[1] if len(sys.argv) > 1 else 'ellipsoid'
 
 cobaya_input_file = './cosmo_input/LCDM_new_CMB.yaml'
 
-likelihood = cobaya_likelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
+likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
         minus_inf=-1e6, noise_std=0.0,name='Planck_Hpop')
 
 if clf == 'svm':
@@ -18,7 +18,7 @@ else:
     clf_update_step = 5
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=64, n_sobol_init = 32, 
+sampler = BOBE(n_cobaya_init=64, n_sobol_init = 256, 
         miniters=1000, maxiters=5000,max_gp_size=2000,
         loglikelihood=likelihood,
         resume=False,
@@ -26,7 +26,7 @@ sampler = BOBE(n_cobaya_init=64, n_sobol_init = 32,
         save=True,
         fit_step = 50, update_mc_step = 5, ns_step = 100,
         num_hmc_warmup = 512,num_hmc_samples = 4096, mc_points_size = 96,
-        lengthscale_priors='DSLP',logz_threshold=10.,clf_threshold=350,gp_threshold=5000,
+        lengthscale_priors='DSLP',logz_threshold=5.,clf_threshold=400,gp_threshold=5000,
         use_clf=True,clf_type=clf,clf_use_size=100,clf_update_step=clf_update_step,minus_inf=-1e6)
 
 gp, ns_samples, logz_dict = sampler.run()

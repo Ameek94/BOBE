@@ -84,10 +84,13 @@ def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_o
         x0 = np.random.uniform(size=(n_restarts_optimizer, mc_points.shape[1]))
     else:
         x0 = jnp.atleast_2d(x0)  # Ensure x0 is at least 2D
+        # print(f"x0 shape: {x0.shape}, expected shape: {(n_restarts_optimizer, mc_points.shape[1])}")
         n_x0 = x0.shape[0]
         if n_x0 < n_restarts_optimizer:
-            added_x0 = np.random.uniform(size=(n_restarts_optimizer - n_x0, mc_points.shape[1]))
+            needed_x0 = n_restarts_optimizer - n_x0
+            added_x0 = np.random.uniform(size=(needed_x0, mc_points.shape[1]))
             x0 = jnp.concatenate([x0, added_x0], axis=0)
+    # print(f"x0 shape after processing: {x0.shape}, expected shape: {(n_restarts_optimizer, mc_points.shape[1])}")
 
     # params = jnp.array(np.random.uniform(0, 1, size=mc_points.shape[1])) if x0 is None else x0
     optimizer = adam(learning_rate=lr)
@@ -103,6 +106,7 @@ def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_o
     best_f, best_params = jnp.inf, None
     r = jnp.arange(maxiter)
     for n in range(n_restarts_optimizer):
+        params = x0[n]
         opt_state = optimizer.init(x0[n])
         progress_bar = tqdm.tqdm(r,desc=f'ACQ Optimization restart {n+1}')
         for i in progress_bar:
@@ -399,7 +403,8 @@ class BOBE:
 
             x0_acq1 = self.mc_samples['best']
             x0_acq2 = self.gp.train_x[jnp.argmax(self.gp.train_y)]
-            x0_acq = jnp.concatenate([x0_acq1, x0_acq2], axis=0)
+            x0_acq = jnp.vstack([x0_acq1, x0_acq2])
+            print(f"x0_acq shape: {x0_acq.shape}, expected shape: (2, ndim)")
             new_pt_u, acq_val = optimize_acq(
                 self.gp, WIPV, self.mc_points, x0=x0_acq)
             
