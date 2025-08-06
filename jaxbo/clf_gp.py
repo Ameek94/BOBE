@@ -95,6 +95,7 @@ class ClassifierGP:
         train_x_gp = self.train_x_clf[mask_gp]
         train_y_gp = self.train_y_clf[mask_gp] 
 
+
         # Initialize GP 
         self.ndim = train_x_gp.shape[1] 
         if lengthscale_priors not in ['DSLP', 'SAAS']:
@@ -133,6 +134,8 @@ class ClassifierGP:
             self.train_y_clf.flatten() < self.train_y_clf.max() - self.clf_threshold,
             0, 1
         )
+
+        log.info(f" Number of labels 0: {np.sum(labels == 0)}, 1: {np.sum(labels == 1)}")
 
         # Add method to handle if only class is present
 

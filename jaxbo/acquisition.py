@@ -135,7 +135,7 @@ class AcquisitionFunction:
             Tuple of (best_x, best_value)
         """
 
-        return optimize(func = self.fun, ndim=self.gp.ndim, bounds=None, 
+        return optimize(func = self.fun, fun_args = (), fun_kwargs = {}, ndim=self.gp.ndim, bounds=None, 
                         **self.optimizer_kwargs)
 
 class EI(AcquisitionFunction):
@@ -217,9 +217,13 @@ class MonteCarloAcquisition(AcquisitionFunction):
         mc_size = max(self.mc_samples['x'].shape[0], self.mc_points_size)
         idxs = self.rng.choice(mc_size, size=self.mc_points_size, replace=False)
         return self.mc_samples['x'][idxs]
-
-    def __call__(self, x, gp, **kwargs):
-        raise NotImplementedError("Subclasses must implement __call__ method")
+    
+    
+    def get_next(self, **kwargs):
+        # Here add logic to regenerate and retrieve mc_points based on step
+        update_mc = kwargs.get('update_mc', False)
+        mc_points = self.get_mc_points()
+        return super().get_next(fun_kwargs={'mc_points': mc_points}, **kwargs)
 
 
 class WIPV(MonteCarloAcquisition):

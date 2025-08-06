@@ -35,7 +35,7 @@ plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=
                    plot_params=param_list_LCDM,
                    param_labels=likelihood.param_labels,output_file=f'{likelihood.name}',
                    reference_file='./cosmo_input/chains/Planck_DESI_LCDM_omk',reference_ignore_rows=0.3,
-                   reference_label='MCMC',scatter_points=True,)
+                   reference_label='MCMC',scatter_points=False,)
 
 # 2025-04-21 18:27:42,039 INFO:[BO]:  Final LogZ: upper=-5527.4084, mean=-5529.4980, lower=-5530.0967, dlogz sampler=0.1720
 # PolyChord result: # log-evidence

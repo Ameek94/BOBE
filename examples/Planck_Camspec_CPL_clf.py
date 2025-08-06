@@ -18,16 +18,16 @@ else:
     clf_update_step = 5
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=32, n_sobol_init = 256, 
-        miniters=0, maxiters=4000,max_gp_size=2000,
+sampler = BOBE(n_cobaya_init=64, n_sobol_init = 32, 
+        miniters=0, maxiters=10,max_gp_size=2000,
         loglikelihood=likelihood,
-        resume=True,
+        resume=False,
         resume_file=f'Planck_Camspec_CPL_svm.npz',
         save=True,
-        fit_step = 50, update_mc_step = 5, ns_step = 50,
+        fit_step = 50, update_mc_step = 5, ns_step = 5,
         num_hmc_warmup = 512,num_hmc_samples = 4096, mc_points_size = 96,
-        lengthscale_priors='DSLP',logz_threshold=10.,clf_threshold=250,gp_threshold=5000,
-        use_clf=True,clf_type=clf,clf_use_size=300,clf_update_step=clf_update_step,minus_inf=-1e5,)
+        lengthscale_priors='DSLP',logz_threshold=10.,clf_threshold=350,gp_threshold=5000,
+        use_clf=True,clf_type=clf,clf_use_size=100,clf_update_step=clf_update_step,minus_inf=-1e5,)
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()
@@ -38,7 +38,7 @@ plot_params = ['w','wa','omch2','logA','ns','H0','ombh2','tau'] #'omk'
 plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
                    plot_params=plot_params,
                    param_labels=likelihood.param_labels,output_file=likelihood.name,
-                   reference_file='./cosmo_input/chains/PPlus_curved_CPL',reference_ignore_rows=0.3,
+                   reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',reference_ignore_rows=0.3,
                    reference_label='MCMC',scatter_points=False,)
 
 # 2025-04-21 18:27:42,039 INFO:[BO]:  Final LogZ: upper=-5527.4084, mean=-5529.4980, lower=-5530.0967, dlogz sampler=0.1720

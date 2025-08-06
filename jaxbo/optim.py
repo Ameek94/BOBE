@@ -41,7 +41,9 @@ def _setup_bounds(bounds: Optional[Union[List, Tuple, jnp.ndarray]], ndim: int) 
 
 def optimize(
     func: Callable,
-    ndim: int,
+    func_args: Optional[Tuple] = (),
+    func_kwargs: Optional[dict] = {},
+    ndim: int = 1,
     bounds: Optional[Union[List, Tuple, jnp.ndarray]] = None,
     x0: Optional[jnp.ndarray] = None,
     optimizer_name: str = "adam",
@@ -51,7 +53,6 @@ def optimize(
     n_restarts: int = 4,
     verbose: bool = True,
     split_vmap_batch_size: int = 4,
-    func_kwargs: dict = {},
 ) -> Tuple[jnp.ndarray, float]:
     """
     Standalone method to minimize a function using JAX and optax.
@@ -63,16 +64,13 @@ def optimize(
 
 
     bounds_arr = _setup_bounds(bounds, ndim)
-    scaled_func = lambda x: func(scale_from_unit(x, bounds_arr), **func_kwargs)
-
-    def func_val_grad(x):
-        return jax.value_and_grad(scaled_func)(x)
+    scaled_func = lambda x: func(scale_from_unit(x, bounds_arr), *func_args, **func_kwargs)
 
     optimizer = _get_optimizer(optimizer_name, lr, optimizer_kwargs)
 
     @jax.jit
     def step(u_params, opt_state):
-        val, grad = func_val_grad(u_params)
+        val, grad = jax.value_and_grad(scaled_func)(u_params)
         updates, opt_state = optimizer.update(grad, opt_state)
         u_params = optax.apply_updates(u_params, updates)
         u_params = jnp.clip(u_params, 0., 1.) 
