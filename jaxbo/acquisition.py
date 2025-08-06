@@ -7,11 +7,10 @@ from jax.scipy.stats import norm
 from jax import config
 from jax.scipy.special import erfc, logsumexp
 import logging
-from .optim import optimize
-from .logging_utils import get_logger
+from .optim import FunctionOptimizer
 
 config.update("jax_enable_x64", True)
-log = get_logger("[ACQ]")
+log = logging.getLogger("[ACQ]")
 
 #------------------Helper functions-------------------------
 # These are jax versions of the BoTorch functions.
@@ -118,7 +117,7 @@ class AcquisitionFunction:
     def __call__(self, x, gp, **kwargs):
         raise NotImplementedError
     
-    def optimize(self, gp, bounds=None, ndim=None, optimizer_name="adam", **kwargs):
+    def optimize(self, gp, bounds=None, ndim=None, **kwargs):
         """
         Optimize the acquisition function.
         
@@ -126,8 +125,7 @@ class AcquisitionFunction:
             gp: Gaussian process model
             bounds: Parameter bounds as [(low1, high1), (low2, high2), ...] or None
             ndim: Number of dimensions (inferred from bounds if not provided)
-            optimizer_name: Name of optimizer to use
-            **kwargs: Additional arguments passed to optimize()
+            **kwargs: Additional arguments passed to optimizer.optimize()
         
         Returns:
             Tuple of (best_x, best_value)
@@ -142,7 +140,7 @@ class AcquisitionFunction:
         def objective(x):
             return self(x, gp)
         
-        return optimize(objective, ndim=ndim, bounds=bounds, optimizer_name=optimizer_name, **kwargs)
+        return self.optimizer.optimize(objective, ndim=ndim, bounds=bounds, **kwargs)
 
 class EI(AcquisitionFunction):
     """Expected Improvement acquisition function"""

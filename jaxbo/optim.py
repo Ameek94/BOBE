@@ -40,6 +40,7 @@ def _setup_bounds(bounds: Optional[Union[List, Tuple, jnp.ndarray]], ndim: int) 
     return bounds
 
 def optimize(
+    self,
     func: Callable,
     ndim: int,
     bounds: Optional[Union[List, Tuple, jnp.ndarray]] = None,

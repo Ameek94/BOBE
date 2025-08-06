@@ -16,10 +16,8 @@ from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
 import logging
-from .logging_utils import get_logger
-log = get_logger("[GP]")
+log = logging.getLogger("[GP]")
 from optax import adam, apply_updates
-from .optim import optimize
 import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -189,6 +187,7 @@ class GP(ABC):
     def fit(self):
         pass
 
+    @abstractmethod
     def predict_mean(self,x):
         """
         Predicts the mean of the GP at x and unstandardizes it
@@ -198,6 +197,7 @@ class GP(ABC):
         mean = get_mean_from_cho(k12,self.alphas) 
         return mean*self.y_std + self.y_mean 
 
+    @abstractmethod
     def predict_var(self,x):
         """
         Predicts the variance of the GP at x and unstandardizes it
@@ -208,6 +208,7 @@ class GP(ABC):
         var = get_var_from_cho(self.cholesky,k12,k22)
         return var*self.y_std**2
 
+    @abstractmethod
     def predict(self,x):
         """
         Predicts the mean and variance of the GP at x but does not unstandardize it
@@ -990,9 +991,6 @@ jax.tree_util.register_pytree_node(
     SAAS_GP.tree_flatten,
     SAAS_GP.tree_unflatten,
 )
-
-
-
 
 def load_gp(filename, gp_type="auto", **kwargs):
     """
