@@ -3,33 +3,35 @@ from typing import Any, List, Optional
 import jax.numpy as jnp
 from jax import lax
 import numpy as np
+from scipy.stats import qmc
 from jax.scipy.stats import norm
 from jax import config
 from jax.scipy.special import erfc, logsumexp
 import logging
 from .optim import optimize
 from .logging_utils import get_logger
-
+from .seed_utils import get_numpy_rng
+from .nested_sampler import nested_sampling_Dy
 config.update("jax_enable_x64", True)
 log = get_logger("[ACQ]")
 
 #------------------Helper functions-------------------------
 # These are jax versions of the BoTorch functions.
 
-def WIPV(x, gp, mc_points=None):
-    """
-    Computes the Weighted Integrated Posterior Variance acquisition function.
+# def WIPV(x, gp, mc_points=None):
+#     """
+#     Computes the Weighted Integrated Posterior Variance acquisition function.
     
-    Args:
-        x: Input points (shape: [n, ndim])
-        gp: Gaussian process model
-        mc_points: Optional Monte Carlo points for fantasy variance computation
+#     Args:
+#         x: Input points (shape: [n, ndim])
+#         gp: Gaussian process model
+#         mc_points: Optional Monte Carlo points for fantasy variance computation
     
-    Returns:
-        Mean of the posterior variance at the input points.
-    """
-    var = gp.fantasy_var(x, mc_points=mc_points)
-    return jnp.mean(var)
+#     Returns:
+#         Mean of the posterior variance at the input points.
+#     """
+#     var = gp.fantasy_var(x, mc_points=mc_points)
+#     return jnp.mean(var)
 
 
 def _scaled_improvement(mean, sigma, best_f, maximize=True):
@@ -178,33 +180,69 @@ class LogEI(EI):
         
         return jnp.reshape(-log_ei, ())
 
-class MCAcquisition(AcquisitionFunction):
+class MonteCarloAcquisition(AcquisitionFunction):
     """Monte Carlo acquisition function base class"""
-    def __init__(self, mc_points: Optional[Any] = None):
-        super().__init__()
-        self.mc_points = mc_points
-    
+    def __init__(self, gp, **kwargs):
+        super().__init__(gp)
+        self.mc_points_method = kwargs.get('mc_points_method', "NUTS")
+        self.mc_points_size = kwargs.get('mc_points_size', 64)
+        self.warmup_steps = kwargs.get('warmup_steps', 512)
+        self.num_samples = kwargs.get('num_samples', 1024)
+        self.mc_update_step = kwargs.get('mc_update_step', 5)
+        self.num_chains = kwargs.get('num_chains', 1)
+        self.ns_maxcall = kwargs.get('ns_maxcall', int(1e6))
+        self.ns_dynamic = kwargs.get('ns_dynamic', False)
+        self.ns_dlogz = kwargs.get('ns_dlogz', 0.25)
+        self.mc_samples = {}
+        self.mc_points = None
+
+    def generate_mc_samples(self):
+        if self.mc_points_method=='NUTS':
+            try:
+                self.mc_samples = self.gp.sample_GP_NUTS(warmup_steps=self.warmup_steps,
+                num_samples=self.num_samples, thinning=self.mc_update_step
+                )
+            except Exception as e:
+                log.error(f"Error in sampling GP NUTS: {e}")
+                self.mc_samples, logz, success = nested_sampling_Dy(self.gp, self.gp.ndim, maxcall=self.ns_maxcall
+                                                , dynamic=True, dlogz=self.ns_dlogz,equal_weights=True,
+                        )
+        elif self.mc_points_method=='NS':
+            self.mc_samples, logz, success = nested_sampling_Dy(self.gp, self.gp.ndim, maxcall=self.ns_maxcall
+                                            , dynamic=self.ns_dynamic, dlogz=self.ns_dlogz,equal_weights=True,
+            )
+        elif self.mc_points_method=='uniform':
+            self.mc_samples = {}
+            points = qmc.Sobol(self.gp.ndim, scramble=True).random(self.mc_points_size)
+            self.mc_samples['x'] = points
+            self.mc_samples['weights'] = jnp.ones(self.mc_points_size)
+        else:
+            raise ValueError(f"Unknown method {self.mc_points_method} for sampling GP")
+     
+    def get_mc_points(self):
+        mc_size = max(self.mc_samples['x'].shape[0], self.mc_points_size)
+        idxs = get_numpy_rng.choice(mc_size, size=self.mc_points_size, replace=False)
+        return self.mc_samples['x'][idxs]
+
     def __call__(self, x, gp, **kwargs):
         raise NotImplementedError("Subclasses must implement __call__ method")
 
 
-# class WIPV(MCAcquisition):
-#     """Weighted Integrated Posterior Variance acquisition function"""
-#     def __init__(self, mc_points: Optional[Any] = None):
-#         super().__init__()
-#         self.mc_points = mc_points
-    
-#     def __call__(self, x, gp, **kwargs):
-#         mc_points = kwargs.get('mc_points', self.mc_points)
-#         var = gp.fantasy_var(x, mc_points=mc_points)
+class WIPV(MonteCarloAcquisition):
+    """Weighted Integrated Posterior Variance acquisition function"""
+    def __init__(self, gp, settings: Optional[dict] = None):
+        super().__init__(gp, **(settings or {}))
 
-#         return jnp.mean(var)
-    
-class MaxVar(MCAcquisition):
+    def __call__(self, x, gp, **kwargs):
+        mc_points = kwargs.get('mc_points', self.mc_points)
+        var = gp.fantasy_var(x, mc_points=mc_points)
+
+        return jnp.mean(var)
+
+class MaxVar(MonteCarloAcquisition):
     """Maximum Variance acquisition function"""
-    def __init__(self, mc_points: Optional[Any] = None):
-        super().__init__()
-        self.mc_points = mc_points
+    def __init__(self, gp, settings: Optional[dict] = None):
+        super().__init__(gp, **(settings or {}))
     
     def __call__(self, x, gp, **kwargs):
         mc_points = kwargs.get('mc_points', self.mc_points)

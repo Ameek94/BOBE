@@ -5,6 +5,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from .gp import GP, DSLP_GP, SAAS_GP
 from .clf import train_svm, svm_predict_proba, train_nn, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
+from .seed_utils import get_new_jax_key
 import numpyro
 # numpyro.set_host_device_count(4) ?
 from numpyro.infer import MCMC, NUTS, SA, AIES
@@ -272,7 +273,7 @@ class ClassifierGP:
                 lengthscales=self.gp.lengthscales,outputscale=self.gp.outputscale
                 )
         
-    def gp_numpyro_model(self):
+    def gp_numpyro_model(self,temp=4.):
         """
         Returns a numpyro model for the GP.
         This is used for sampling using GP surrogate using the mean as the target for NUTS or SA.
@@ -283,11 +284,11 @@ class ClassifierGP:
             ))
             
         mean = self.predict_mean(x)
-        numpyro.factor('y', mean)
+        numpyro.factor('y', mean/temp)
         numpyro.deterministic('logp', mean)
 
-    def sample_GP_NUTS(self, rng_key, warmup_steps=512, num_samples=512, progress_bar=True, thinning=8, verbose=True,
-                       init_params=None, temp=1., restart_on_flat_logp=True):
+    def sample_GP_NUTS(self, warmup_steps=512, num_samples=512, progress_bar=True, thinning=8, verbose=True,
+                       init_params=None, temp=4., restart_on_flat_logp=True):
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
         Optionally restarts MCMC if all logp values are the same or if HMC fails.
@@ -319,13 +320,15 @@ class ClassifierGP:
         #     if verbose:
         #         log.error(f"SA kernel also failed with error: {e}")
         #     raise e
+
+        rng_key = get_new_jax_key()
         
         # First attempt with NUTS
         try:
             kernel = NUTS(self.gp_numpyro_model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
             mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
                         num_chains=1, progress_bar=progress_bar, thinning=thinning)
-            mcmc.run(rng_key)
+            mcmc.run(rng_key,temp)
             
             # Check if HMC ran successfully
             mc_samples = mcmc.get_samples()
@@ -354,6 +357,7 @@ class ClassifierGP:
         # Restart with SA if needed
         if should_restart:
             try:
+                rng_key = get_new_jax_key()
                 num_chains = 1
                 best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
                 init_strategy = init_to_value(values={'x': best_pt})
@@ -361,7 +365,7 @@ class ClassifierGP:
                 kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
                 mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=2 * num_samples,
                             num_chains=num_chains, progress_bar=False, thinning=thinning)
-                mcmc.run(rng_key)
+                mcmc.run(rng_key,temp)
             except Exception as e:
                 if verbose:
                     log.error(f"SA kernel also failed with error: {e}")

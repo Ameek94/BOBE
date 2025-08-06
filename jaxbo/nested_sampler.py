@@ -125,13 +125,15 @@ def nested_sampling_Dy(gp: GP
 
     success = True
 
+    nlive = 750
+
     if dynamic:
         sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
-                                       sample=sample_method)
+                                       sample=sample_method,nlive=nlive)
         sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)
     else:
         sampler = StaticNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
-                                      sample=sample_method) 
+                                      sample=sample_method,nlive=nlive) 
         sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
 
     log.info(f" Nested Sampling took {time.time() - start:.2f}s")

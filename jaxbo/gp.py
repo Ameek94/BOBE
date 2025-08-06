@@ -22,6 +22,7 @@ from optax import adam, apply_updates
 from .optim import optimize
 import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+from .seed_utils import get_new_jax_key
 
 # todo
 # 
@@ -361,7 +362,7 @@ class GP(ABC):
         log.info(f"Loaded GP from {filename} with {train_x.shape[0]} training points")
         return gp
     
-    def sample_GP_NUTS(self, rng_key, warmup_steps=512, num_samples=512, progress_bar=True, thinning=8, verbose=True,
+    def sample_GP_NUTS(self, warmup_steps=512, num_samples=512, progress_bar=True, thinning=8, verbose=True,
                        init_params=None, temp=1.):
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
@@ -389,6 +390,8 @@ class GP(ABC):
             Temperature parameter for the logprob, default 1.0
         """
 
+        rng_key = get_new_jax_key()
+
         def model():
             x = numpyro.sample('x', dist.Uniform(
                 low=jnp.zeros(self.train_x.shape[1]),
@@ -412,7 +415,6 @@ class GP(ABC):
         mcmc.run(rng_key)
         
         mc_samples = mcmc.get_samples()
-        logp_vals = mc_samples['logp']
 
         if verbose:
             mcmc.print_summary(exclude_deterministic=False)
