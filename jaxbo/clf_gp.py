@@ -200,6 +200,8 @@ class ClassifierGP:
         new_x = jnp.atleast_2d(new_x)
         new_y = jnp.atleast_2d(new_y)
 
+        # can we not add point to GP if it is below threshold and correctly classified, only add to classifier data in that case?
+
         if not self.clf_flag:
             gp_not_updated = self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
         else:

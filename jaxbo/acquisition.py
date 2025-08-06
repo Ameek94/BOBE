@@ -1,5 +1,5 @@
 import time
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict, Tuple
 import jax.numpy as jnp
 from jax import lax
 import numpy as np
@@ -114,19 +114,19 @@ def _log_ei_helper(u):
 
 class AcquisitionFunction:
     """Base class for acquisition functions"""
-    def __init__(self,gp):
+    def __init__(self,gp,optimizer_kwargs: Optional[Dict[str, Any]] = {}):
         self.gp = gp
-    
-    def __call__(self, x, gp, **kwargs):
+        self.optimizer_kwargs = optimizer_kwargs
+
+    def fun(self, x, **kwargs):
         raise NotImplementedError
     
-    def optimize(self, gp, bounds=None, ndim=None, optimizer_name="adam", **kwargs):
+    def get_next(self, **kwargs):
         """
-        Optimize the acquisition function.
+        Optimize the acquisition function to obtain the next point to sample.
         
         Args:
             gp: Gaussian process model
-            bounds: Parameter bounds as [(low1, high1), (low2, high2), ...] or None
             ndim: Number of dimensions (inferred from bounds if not provided)
             optimizer_name: Name of optimizer to use
             **kwargs: Additional arguments passed to optimize()
@@ -134,44 +134,35 @@ class AcquisitionFunction:
         Returns:
             Tuple of (best_x, best_value)
         """
-        if bounds is None:
-            raise ValueError("Bounds must be provided for optimization")
-        
-        if ndim is None:
-            ndim = len(bounds)
-        
-        # Create objective function that closes over the GP
-        def objective(x):
-            return self(x, gp)
-        
-        return optimize(objective, ndim=ndim, bounds=bounds, optimizer_name=optimizer_name, **kwargs)
+
+        return optimize(func = self.fun, ndim=self.gp.ndim, bounds=None, 
+                        **self.optimizer_kwargs)
 
 class EI(AcquisitionFunction):
     """Expected Improvement acquisition function"""
-    def __init__(self, zeta: float = 0.0):
-        super().__init__()
+    def __init__(self, gp, zeta: float = 0.0):
+        super().__init__(gp)
         self.zeta = zeta
-    
-    def __call__(self, x, gp, **kwargs):
-        mu, var = gp.predict(x)
+
+    def fun(self, x, **kwargs):
+        mu, var = self.gp.predict(x)
         std = jnp.sqrt(var)
-        best_f = gp.train_y.max() - self.zeta
+        best_f = self.gp.train_y.max() - self.zeta
         z = (mu - best_f) / std
         ei = std * (z * norm.cdf(z) + norm.pdf(z))
-        return jnp.reshape(-ei, ())
+        return jnp.reshape(-ei, ()) # EI is maximized, so we return -EI
 
 class LogEI(EI):
     """Log Expected Improvement acquisition function"""
-    def __init__(self, zeta: float = 0.0, maximize: bool = True):
-        super().__init__()
+    def __init__(self, gp, zeta: float = 0.0):
+        super().__init__(gp)
         self.zeta = zeta
-        self.maximize = maximize
-    
-    def __call__(self, x, gp, **kwargs):
-        mu, var = gp.predict(x)
+
+    def fun(self, x, **kwargs):
+        mu, var = self.gp.predict(x)
         sigma = jnp.sqrt(var)
-        best_f = gp.train_y.max() - self.zeta
-        
+        best_f = self.gp.train_y.max() - self.zeta
+
         # Compute scaled improvement
         u = _scaled_improvement(mu, sigma, best_f, self.maximize)
         
@@ -182,19 +173,22 @@ class LogEI(EI):
 
 class MonteCarloAcquisition(AcquisitionFunction):
     """Monte Carlo acquisition function base class"""
-    def __init__(self, gp, **kwargs):
-        super().__init__(gp)
-        self.mc_points_method = kwargs.get('mc_points_method', "NUTS")
-        self.mc_points_size = kwargs.get('mc_points_size', 64)
-        self.warmup_steps = kwargs.get('warmup_steps', 512)
-        self.num_samples = kwargs.get('num_samples', 1024)
-        self.mc_update_step = kwargs.get('mc_update_step', 5)
-        self.num_chains = kwargs.get('num_chains', 1)
-        self.ns_maxcall = kwargs.get('ns_maxcall', int(1e6))
-        self.ns_dynamic = kwargs.get('ns_dynamic', False)
-        self.ns_dlogz = kwargs.get('ns_dlogz', 0.25)
+
+    def __init__(self, gp, acq_kwargs: Optional[Dict[str, Any]] = {}, optimizer_kwargs: Optional[Dict[str, Any]] = {}):
+
+        super().__init__(gp, optimizer_kwargs)
+        self.mc_points_method = acq_kwargs.get('mc_points_method', "NUTS")
+        self.mc_points_size = acq_kwargs.get('mc_points_size', 64)
+        self.warmup_steps = acq_kwargs.get('warmup_steps', 512)
+        self.num_samples = acq_kwargs.get('num_samples', 1024)
+        self.mc_update_step = acq_kwargs.get('mc_update_step', 5)
+        self.num_chains = acq_kwargs.get('num_chains', 1)
+        self.ns_maxcall = acq_kwargs.get('ns_maxcall', int(1e6))
+        self.ns_dynamic = acq_kwargs.get('ns_dynamic', False)
+        self.ns_dlogz = acq_kwargs.get('ns_dlogz', 0.25)
         self.mc_samples = {}
         self.mc_points = None
+        self.rng = get_numpy_rng()
 
     def generate_mc_samples(self):
         if self.mc_points_method=='NUTS':
@@ -221,7 +215,7 @@ class MonteCarloAcquisition(AcquisitionFunction):
      
     def get_mc_points(self):
         mc_size = max(self.mc_samples['x'].shape[0], self.mc_points_size)
-        idxs = get_numpy_rng.choice(mc_size, size=self.mc_points_size, replace=False)
+        idxs = self.rng.choice(mc_size, size=self.mc_points_size, replace=False)
         return self.mc_samples['x'][idxs]
 
     def __call__(self, x, gp, **kwargs):
@@ -233,10 +227,8 @@ class WIPV(MonteCarloAcquisition):
     def __init__(self, gp, settings: Optional[dict] = None):
         super().__init__(gp, **(settings or {}))
 
-    def __call__(self, x, gp, **kwargs):
-        mc_points = kwargs.get('mc_points', self.mc_points)
-        var = gp.fantasy_var(x, mc_points=mc_points)
-
+    def fun(self, x, mc_points):
+        var = self.gp.fantasy_var(new_x=x, mc_points=mc_points)
         return jnp.mean(var)
 
 class MaxVar(MonteCarloAcquisition):

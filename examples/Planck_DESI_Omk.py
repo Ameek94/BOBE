@@ -16,7 +16,7 @@ start = time.time()
 sampler = BOBE(n_cobaya_init=32, n_sobol_init = 128, 
         miniters=750, maxiters=2000,max_gp_size=1800,
         loglikelihood=likelihood,
-        resume=False,
+        resume=True,
         resume_file=f'{likelihood.name}.npz',
         save=True,
         fit_step = 50, update_mc_step = 5, ns_step = 50,

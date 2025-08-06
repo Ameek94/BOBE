@@ -7,7 +7,7 @@ jax.config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
 from typing import Optional, Union, Tuple, Dict, Any
-from .acquisition import WIPV, EI #, logEI
+# from .acquisition import WIPV, EI #, logEI
 from .gp import DSLP_GP, SAAS_GP #, sample_GP_NUTS
 from .svm_gp import SVM_GP
 from .clf_gp import ClassifierGP
@@ -56,6 +56,21 @@ log.setLevel(logging.INFO)               # ensure INFO+ get processed
 log.addHandler(stdout_handler)
 log.addHandler(stderr_handler)
 
+def WIPV(x, gp, mc_points=None):
+    """
+    Computes the Weighted Integrated Posterior Variance acquisition function.
+    
+    Args:
+        x: Input points (shape: [n, ndim])
+        gp: Gaussian process model
+        mc_points: Optional Monte Carlo points for fantasy variance computation
+    
+    Returns:
+        Mean of the posterior variance at the input points.
+    """
+    var = gp.fantasy_var(x, mc_points=mc_points)
+    return jnp.mean(var)
+
 # Acquisition optimizer
 def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_optimizer=4):
     
@@ -65,7 +80,15 @@ def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_o
     def acq_val_grad(x):
         return jax.value_and_grad(f)(x)
 
-    params = jnp.array(np.random.uniform(0, 1, size=mc_points.shape[1])) if x0 is None else x0
+    if x0 is None:
+        x0 = np.random.uniform(size=(n_restarts_optimizer, mc_points.shape[1]))
+    else:
+        x0 = jnp.atleast_2d(x0)  # Ensure x0 is at least 2D
+        n_x0 = x0.shape[0]
+        added_x0 = np.random.uniform(size=(n_restarts_optimizer - n_x0, mc_points.shape[1]))
+        x0 = jnp.concatenate([x0, added_x0], axis=0)
+
+    # params = jnp.array(np.random.uniform(0, 1, size=mc_points.shape[1])) if x0 is None else x0
     optimizer = adam(learning_rate=lr)
 
     @jax.jit
@@ -87,7 +110,7 @@ def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_o
             if fval < best_f:
                 best_f, best_params = fval, params
         # Perturb for next restart
-        params = jnp.clip(best_params + 0.5 * jnp.array(np.random.normal(size=params.shape)), 0., 1.)
+        # params = jnp.clip(best_params + 0.5 * jnp.array(np.random.normal(size=params.shape)), 0., 1.)
 
     # print(f"Best params: {best_params}, fval: {best_f}")
     return jnp.atleast_2d(best_params), best_f
@@ -104,7 +127,7 @@ def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_o
 def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,method="NUTS",init_params=None):
     if method=='NUTS':
         try:
-            mc_samples = gp.sample_GP_NUTS(rng_key=rng_key, warmup_steps=warmup_steps,
+            mc_samples = gp.sample_GP_NUTS(warmup_steps=warmup_steps,
             num_samples=num_samples, thinning=thinning
             )
         except Exception as e:
@@ -306,6 +329,10 @@ class BOBE:
         self.logz_threshold = logz_threshold
         self.converged = False
         self.termination_reason = "Max iterations reached"
+
+        if self.save:
+            self.gp.save(outfile=self.output_file)
+            log.info(f" Saving GP to file {self.output_file}")
 
     def check_convergence(self, step, logz_dict, threshold=2.0,ndim=1):
         """
