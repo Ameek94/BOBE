@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from .gp import GP, DSLP_GP, SAAS_GP
 from .clf import train_svm, svm_predict_proba, train_nn, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
 import numpyro
+# numpyro.set_host_device_count(4) ?
 from numpyro.infer import MCMC, NUTS, SA, AIES
 import numpyro.distributions as dist
 from numpyro.infer.initialization import init_to_value, init_to_sample
@@ -13,6 +14,7 @@ from numpyro.util import enable_x64
 enable_x64()
 import logging
 log = logging.getLogger(__name__)
+
 
 available_classifiers = {
     'svm': {
@@ -29,7 +31,7 @@ available_classifiers = {
 
 class ClassifierGP:
     def __init__(self, train_x=None, train_y=None, clf_flag=True,
-                 clf_type='svm', clf_params=None,
+                 clf_type='svm', clf_settings={},
                  clf_use_size=400, clf_update_step=5,
                  probability_threshold=0.5, minus_inf=-1e5,
                  clf_threshold=250, gp_threshold=1000,
@@ -75,7 +77,8 @@ class ClassifierGP:
         self.clf_use_size = clf_use_size
         self.clf_update_step = clf_update_step
         self.clf_type = clf_type.lower()
-        self.clf_params = clf_params or {}
+        self.clf_settings = clf_settings
+        self.clf_params = None
         self.clf_metrics = {}
         self.probability_threshold = probability_threshold
         self.minus_inf = minus_inf
@@ -101,6 +104,10 @@ class ClassifierGP:
         else:
             self.gp = SAAS_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
                               outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
+
+        self.train_x = self.gp.train_x
+        self.train_y = self.gp.train_y
+        self.noise = self.gp.noise
 
         # Initialize Classifier
         self.use_clf = (self.clf_data_size >= self.clf_use_size) and self.clf_flag
@@ -133,11 +140,19 @@ class ClassifierGP:
 
         # Call the specific training function
         # Training functions return (predict_func, model_params, metrics_dict)
+
+        
+        best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+        kwargs = {
+            'best_pt': best_pt,
+            'probability_threshold': self.probability_threshold,
+        }
         self._clf_predict_func, self.clf_params, self.clf_metrics = train_func(self.train_x_clf, 
-                                                                               labels, **self.clf_params)
+                                                                               labels, init_params = self.clf_params,
+                                                                               **kwargs)
 
         log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
-        log.debug(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
+        log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
 
     def fit(self, lr=1e-2, maxiter=150, n_restarts=4):
         """Fits the GP hyperparameters."""
@@ -197,7 +212,7 @@ class ClassifierGP:
             self.train_x_clf = jnp.concatenate([self.train_x_clf, new_x], axis=0)
             self.train_y_clf = jnp.concatenate([self.train_y_clf, new_y], axis=0)
             self.clf_data_size += 1
-            log.debug(f"Added point to classifier data. New size: {self.clf_data_size}")
+            log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
 
             # Update GP data if within threshold
             gp_not_updated = False
@@ -263,8 +278,8 @@ class ClassifierGP:
         This is used for sampling using GP surrogate using the mean as the target for NUTS or SA.
         """
         x = numpyro.sample('x', dist.Uniform(
-                low=jnp.zeros(self.train_x.shape[1]),
-                high=jnp.ones(self.train_x.shape[1])
+                low=jnp.zeros(self.train_x_clf.shape[1]),
+                high=jnp.ones(self.train_x_clf.shape[1])
             ))
             
         mean = self.predict_mean(x)
@@ -278,14 +293,32 @@ class ClassifierGP:
         Optionally restarts MCMC if all logp values are the same or if HMC fails.
         """
 
-        init_params = self.get_random_point(rng_key) if init_params is None else init_params
+        num_chains = 1
+        # # init_params = jnp.array([self.get_random_point() for _ in range(num_chains-1)])#  if init_params is None else init_params
+        # best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+        # # init_params = jnp.concatenate([init_params, best_pt.reshape(1, -1)], axis=0) #if init_params is not None else None
+        # init_strategy = init_to_value(values = {'x': self.get_random_point()}) #values=[{'x': init_params[i]} for i in range(num_chains)]
 
+
+        init_params = self.get_random_point() if init_params is None else init_params
+        
         if self.use_clf and init_params is not None:
             init_strategy = init_to_value(values={'x': init_params})
         else:
             init_strategy = init_to_sample()
 
         start = time.time()
+        
+        # try:
+        #     kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
+        #     mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples= num_samples,
+        #                     num_chains=num_chains, progress_bar=False, thinning=thinning,
+        #                     chain_method='sequential')
+        #     mcmc.run(rng_key)
+        # except Exception as e:
+        #     if verbose:
+        #         log.error(f"SA kernel also failed with error: {e}")
+        #     raise e
         
         # First attempt with NUTS
         try:
@@ -322,11 +355,11 @@ class ClassifierGP:
         if should_restart:
             try:
                 num_chains = 1
-                best_pt = self.train_x[jnp.argmax(self.train_y)]
+                best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
                 init_strategy = init_to_value(values={'x': best_pt})
                 log.info(f"Reinitializing MCMC with {num_chains} chains using SA kernel.")
                 kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
-                mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=4 * num_samples,
+                mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=2 * num_samples,
                             num_chains=num_chains, progress_bar=False, thinning=thinning)
                 mcmc.run(rng_key)
             except Exception as e:
@@ -344,6 +377,8 @@ class ClassifierGP:
             'logp': mc_samples['logp'],
             'best': mc_samples['x'][jnp.argmax(mc_samples['logp'])]
         }
+
+        print(f"shape of samples: {samples['x'].shape}")
 
         return samples
     

@@ -109,11 +109,11 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
             )
         except Exception as e:
             log.error(f"Error in sampling GP NUTS: {e}")
-            mc_samples, logz, sucess = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
+            mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
                                             , dynamic=False, dlogz=0.5,equal_weights=True,
             )
     elif method=='NS':
-        mc_samples, logz, sucess = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
+        mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
                                             , dynamic=False, dlogz=0.5,equal_weights=True,
         )
     elif method=='uniform':
@@ -359,7 +359,7 @@ class BOBE:
 
             ii = i + 1
             refit = (ii % self.fit_step == 0)
-            ns_flag = (ii % self.ns_step == 0) and ii > self.miniters
+            ns_flag = (ii % self.ns_step == 0) and ii >= self.miniters
             update_mc = (ii % self.update_mc_step == 0) and not ns_flag
 
             print("\n")
@@ -447,9 +447,12 @@ class BOBE:
         log.info(f" Final GP training set size: {self.gp.train_x.shape[0]}, max size: {self.max_gp_size}")
         log.info(f" Number of iterations: {ii}, max iterations: {self.maxiters}")
 
+
+        # Prepare final results 
+
         if self.do_final_ns and not self.converged:
             log.info(" Final Nested Sampling")
-            ns_samples, logz_dict = nested_sampling_Dy(
+            ns_samples, logz_dict, ns_success = nested_sampling_Dy(
                 self.gp, self.ndim, maxcall=int(1e7), dynamic=True, dlogz=0.01
             )
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
