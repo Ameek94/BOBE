@@ -89,25 +89,6 @@ def optimize(
 
     init_params_unit = jnp.array(x0)
 
-    # # --- Handle initial points ---
-    # if x0 is not None:
-    #     x0_array = jnp.atleast_2d(x0)
-    #     if x0_array.shape[0] == 1:
-    #         # One point given: use it + random others
-    #         init_params_unit = np.random.uniform(size=(n_restarts - 1, ndim))
-    #         x0_unit = scale_to_unit(x0_array[0], bounds_arr)
-    #         init_params_unit = np.concatenate([x0_unit[None, :], init_params_unit], axis=0)
-    #     elif x0_array.shape[0] == n_restarts:
-    #         init_params_unit = scale_to_unit(x0_array, bounds_arr)
-    #     else:
-    #         log.warning(f"x0 provided with {x0_array.shape[0]} points, expected 1 or {n_restarts}. Using random initials.")
-    #         init_params_unit = np.random.uniform(size=(n_restarts, ndim))
-    # else:
-    #     init_params_unit = np.random.uniform(size=(n_restarts, ndim))
-
-    # init_params_unit = jnp.array(init_params_unit)
-
-    # Initialize optimizer states per restart
     
     opt_states = [optimizer.init(init_params_unit[i]) for i in range(n_restarts)]
 
@@ -175,6 +156,27 @@ def optimize(
         log.info(f"{desc}: Final best_f = {float(best_f_original):.6f}")
 
     return best_params_original, float(best_f_original)
+
+
+    # # --- Handle initial points ---
+    # if x0 is not None:
+    #     x0_array = jnp.atleast_2d(x0)
+    #     if x0_array.shape[0] == 1:
+    #         # One point given: use it + random others
+    #         init_params_unit = np.random.uniform(size=(n_restarts - 1, ndim))
+    #         x0_unit = scale_to_unit(x0_array[0], bounds_arr)
+    #         init_params_unit = np.concatenate([x0_unit[None, :], init_params_unit], axis=0)
+    #     elif x0_array.shape[0] == n_restarts:
+    #         init_params_unit = scale_to_unit(x0_array, bounds_arr)
+    #     else:
+    #         log.warning(f"x0 provided with {x0_array.shape[0]} points, expected 1 or {n_restarts}. Using random initials.")
+    #         init_params_unit = np.random.uniform(size=(n_restarts, ndim))
+    # else:
+    #     init_params_unit = np.random.uniform(size=(n_restarts, ndim))
+
+    # init_params_unit = jnp.array(init_params_unit)
+
+    # Initialize optimizer states per restart
 
 
 # Jax control flow version

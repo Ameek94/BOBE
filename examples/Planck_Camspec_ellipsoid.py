@@ -43,3 +43,11 @@ plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=
 
 # 2025-07-26 05:39:58,814 INFO:[BO]:  Final LogZ: mean=-5529.6915, dlogz sampler=0.1793, upper=-5509.8101, lower=-5530.1042
 # Total time taken = 9495.8532 seconds
+
+# Ellipsoid classifier used for Planck Camspec data
+# INFO:[bo]: LogZ info: mean=-5529.5996, dlogz sampler=0.2407, upper=-5529.2020, lower=-5529.9512
+# INFO:[bo]: Convergence check: delta = 0.7493, step = 350
+# INFO:[bo]: Converged
+# INFO:[bo]: Sampling stopped: LogZ converged
+# INFO:[bo]: Final GP training set size: 1251, max size: 1500
+# INFO:[bo]: Number of iterations: 350, max iterations: 2500

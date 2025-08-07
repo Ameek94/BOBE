@@ -377,7 +377,6 @@ class BOBE:
 
         results_dict = {}
 
-
         # Monte Carlo points for acquisition function
         self.mc_samples = get_mc_samples(self.gp,warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, 
                                          thinning=4,method=self.mc_points_method)
@@ -393,6 +392,8 @@ class BOBE:
 
         for i in range(self.maxiters):
 
+
+            # ideally, we want to decide whether to do the mc_update depending on the results of the previous steps
             ii = i + 1
             refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and ii >= self.miniters

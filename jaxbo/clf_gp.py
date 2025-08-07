@@ -5,7 +5,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from .gp import GP, DSLP_GP, SAAS_GP
 from .clf import train_svm, svm_predict_proba, train_nn, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
-from .seed_utils import get_new_jax_key
+from .seed_utils import get_new_jax_key, get_numpy_rng
 from .logging_utils import get_logger
 import numpyro
 # numpyro.set_host_device_count(4) ?
@@ -310,7 +310,9 @@ class ClassifierGP:
         samples_logp = []
 
         # temps = np.arange(1, num_chains+1, 1)
-        prob = np.random.uniform(0, 1)
+
+        rng_mcmc = get_numpy_rng()
+        prob = rng_mcmc.uniform(0, 1)
         temp = np.where(prob < 0.5, 1., 4.) # Randomly choose temperature between 1 and 4
         log.info(f"Running MCMC chains with temperature {temp:.2f}")
         for i in range(num_chains):

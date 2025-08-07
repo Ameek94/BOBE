@@ -9,9 +9,10 @@ from sklearn.svm import SVC
 from flax import linen as nn
 from flax.core import freeze
 import optax
-from typing import Callable, Dict, Any, Union, List, Optional
+from typing import Callable, Dict, Any, Union, List, Optional, Tuple
 from functools import partial
 from .logging_utils import get_logger 
+from .seed_utils import get_numpy_rng, get_new_jax_key
 log = get_logger("[clf]")
 
 # -----------------------------------------------------------------------------
@@ -46,7 +47,8 @@ def train_nn(x: jnp.ndarray,
              val_frac=0.2,
              early_stop_patience=100,
              init_params = None,
-             seed=0):
+             seed=0,
+             **kwargs: Any) -> Tuple[Callable, Dict, Dict]:
     """
     Train an MLP logistic classifier with weight decay and early-stopping.
 
@@ -62,15 +64,15 @@ def train_nn(x: jnp.ndarray,
     """
     N, d = x.shape
     # Split train/validation
-    rng = np.random.RandomState(seed)
-    perm = rng.permutation(N)
+    rng_opt = get_numpy_rng()
+    perm = rng_opt.permutation(N)
     split = int(N * (1 - val_frac))
     train_idx, val_idx = perm[:split], perm[split:]
     x_train, y_train = x[train_idx], y[train_idx]
     x_val, y_val     = x[val_idx],   y[val_idx]
 
     model = FeasibilityMLP(hidden_dims=list(hidden_dims), dropout_rate=dropout_rate)
-    key = jax.random.PRNGKey(seed)
+    key = jax.  random.PRNGKey(seed)
 
     # if init_params is not None:
     #     # Use provided initial parameters if available
@@ -108,7 +110,7 @@ def train_nn(x: jnp.ndarray,
 
     for epoch in range(n_epochs):
         # training
-        perm_train = rng.permutation(x_train.shape[0])
+        perm_train = rng_opt.permutation(x_train.shape[0])
         for i in range(steps):
             idx = perm_train[i*batch_size:(i+1)*batch_size]
             bx = jnp.array(x_np[idx])
@@ -133,6 +135,7 @@ def train_nn(x: jnp.ndarray,
     metrics = {
         'train_loss': f"{float(loss_fn(best_params, x_train, y_train, key)):.2e}",
         'val_loss': f"{float(best_val_loss):.2e}",
+        'epochs': epoch + 1,
         # 'params': best_params,
     }
 
@@ -234,7 +237,7 @@ def train_ellipsoid(
     Train the EllipsoidClassifier with a fixed center mu, optionally warm-starting from initial_params.
     """
 
-    mu = kwargs.get('best_pt', 0.5 * jnp.ones(x.shape[1]))  # Default to zero vector if not provided
+    mu = kwargs.get('best_pt', 0.5 * jnp.ones(x.shape[1]))  # Default to center of hypercube if not provided
     
     N, d = x.shape
     model = EllipsoidClassifier(d=d, mu=mu)
@@ -346,8 +349,11 @@ def train_ellipsoid(
 
     train_loss = loss_fn(best_params, x_train, y_train)
 
-    metrics['train_loss'] = f"{train_loss:.2e}" #f"{np.min(np.array(metrics['train_loss'])):.4e}" if metrics['train_loss'] else 'N/A'
-    metrics['val_loss'] = f"{val_loss:.2e}" #f"{np.min(np.array(metrics['val_loss'])):.4e}" if metrics['val_loss'] else 'N/A'
+    metrics = {
+        'train_loss': f"{float(train_loss):.2e}",
+        'val_loss': f"{float(best_val_loss):.2e}",
+        'epochs': epoch + 1,
+    }
 
     apply_fn = lambda p, xx: model.apply(p, xx, train=False)
 

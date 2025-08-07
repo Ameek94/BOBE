@@ -15,7 +15,7 @@ likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999
 if clf == 'svm':
     clf_update_step = 1
 else:
-    clf_update_step = 2
+    clf_update_step = 6
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=32, n_sobol_init = 128, 
