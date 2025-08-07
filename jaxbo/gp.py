@@ -17,7 +17,7 @@ enable_x64()
 from functools import partial
 import logging
 from .logging_utils import get_logger
-log = get_logger("[GP]")
+log = get_logger("[gp]")
 from optax import adam, apply_updates
 from .optim import optimize
 import tqdm

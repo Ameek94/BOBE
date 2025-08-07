@@ -7,9 +7,8 @@ import random
 import numpy as np
 import jax
 import jax.random as jax_random
-import logging
-
-log = logging.getLogger(__name__)
+from .logging_utils import get_logger
+log = get_logger("[seed_utils]")
 
 # Global variables
 _global_seed = None

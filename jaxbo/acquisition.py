@@ -13,7 +13,7 @@ from .logging_utils import get_logger
 from .seed_utils import get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
 config.update("jax_enable_x64", True)
-log = get_logger("[ACQ]")
+log = get_logger("[acq]")
 
 #------------------Helper functions-------------------------
 # These are jax versions of the BoTorch functions.
@@ -34,10 +34,10 @@ log = get_logger("[ACQ]")
 #     return jnp.mean(var)
 
 
-def _scaled_improvement(mean, sigma, best_f, maximize=True):
-    """Returns `u = (mean - best_f) / sigma`, -u if maximize == True."""
+def _scaled_improvement(mean, sigma, best_f):
+    """Returns `u = (mean - best_f) / sigma`"""
     u = (mean - best_f) / sigma
-    return u if maximize else -u
+    return u 
 
 def _ei_helper(u):
     """Computes phi(u) + u * Phi(u), where phi and Phi are the standard normal
@@ -118,10 +118,10 @@ class AcquisitionFunction:
         self.gp = gp
         self.optimizer_kwargs = optimizer_kwargs
 
-    def fun(self, x, **kwargs):
+    def fun(self, x):
         raise NotImplementedError
-    
-    def get_next(self, **kwargs):
+
+    def get_next(self, fun_args: Tuple = (), fun_kwargs: Dict[str, Any] = {}, step: int = 0) -> Tuple[np.ndarray, float]:
         """
         Optimize the acquisition function to obtain the next point to sample.
         
@@ -135,16 +135,16 @@ class AcquisitionFunction:
             Tuple of (best_x, best_value)
         """
 
-        return optimize(func = self.fun, fun_args = (), fun_kwargs = {}, ndim=self.gp.ndim, bounds=None, 
+        return optimize(func = self.fun, fun_args = fun_args, fun_kwargs = fun_kwargs, ndim=self.gp.ndim, bounds=None, 
                         **self.optimizer_kwargs)
 
 class EI(AcquisitionFunction):
     """Expected Improvement acquisition function"""
-    def __init__(self, gp, zeta: float = 0.0):
-        super().__init__(gp)
+    def __init__(self, gp, zeta: float = 0.0, optimizer_kwargs: Optional[Dict[str, Any]] = {}):
+        super().__init__(gp, optimizer_kwargs=optimizer_kwargs)
         self.zeta = zeta
 
-    def fun(self, x, **kwargs):
+    def fun(self, x):
         mu, var = self.gp.predict(x)
         std = jnp.sqrt(var)
         best_f = self.gp.train_y.max() - self.zeta
@@ -154,11 +154,10 @@ class EI(AcquisitionFunction):
 
 class LogEI(EI):
     """Log Expected Improvement acquisition function"""
-    def __init__(self, gp, zeta: float = 0.0):
-        super().__init__(gp)
-        self.zeta = zeta
+    def __init__(self, gp, zeta: float = 0.0, optimizer_kwargs: Optional[Dict[str, Any]] = {}):
+        super().__init__(gp, zeta=zeta, optimizer_kwargs=optimizer_kwargs)
 
-    def fun(self, x, **kwargs):
+    def fun(self, x):
         mu, var = self.gp.predict(x)
         sigma = jnp.sqrt(var)
         best_f = self.gp.train_y.max() - self.zeta
@@ -174,19 +173,19 @@ class LogEI(EI):
 class MonteCarloAcquisition(AcquisitionFunction):
     """Monte Carlo acquisition function base class"""
 
-    def __init__(self, gp, acq_kwargs: Optional[Dict[str, Any]] = {}, optimizer_kwargs: Optional[Dict[str, Any]] = {}):
+    def __init__(self, gp, mc_kwargs: Optional[Dict[str, Any]] = {}, optimizer_kwargs: Optional[Dict[str, Any]] = {}):
 
         super().__init__(gp, optimizer_kwargs)
-        self.mc_points_method = acq_kwargs.get('mc_points_method', "NUTS")
-        self.mc_points_size = acq_kwargs.get('mc_points_size', 64)
-        self.warmup_steps = acq_kwargs.get('warmup_steps', 512)
-        self.num_samples = acq_kwargs.get('num_samples', 1024)
-        self.mc_update_step = acq_kwargs.get('mc_update_step', 5)
-        self.num_chains = acq_kwargs.get('num_chains', 1)
-        self.ns_maxcall = acq_kwargs.get('ns_maxcall', int(1e6))
-        self.ns_dynamic = acq_kwargs.get('ns_dynamic', False)
-        self.ns_dlogz = acq_kwargs.get('ns_dlogz', 0.25)
-        self.mc_samples = {}
+        self.mc_points_method = mc_kwargs.get('mc_points_method', "NUTS")
+        self.mc_points_size = mc_kwargs.get('mc_points_size', 64)
+        self.warmup_steps = mc_kwargs.get('warmup_steps', 512)
+        self.num_samples = mc_kwargs.get('num_samples', 1024)
+        self.mc_update_step = mc_kwargs.get('mc_update_step', 5)
+        self.num_chains = mc_kwargs.get('num_chains', 1)
+        self.ns_maxcall = mc_kwargs.get('ns_maxcall', int(1e6))
+        self.ns_dynamic = mc_kwargs.get('ns_dynamic', False)
+        self.ns_dlogz = mc_kwargs.get('ns_dlogz', 0.25)
+        self.mc_samples = None
         self.mc_points = None
         self.rng = get_numpy_rng()
 
@@ -222,24 +221,31 @@ class MonteCarloAcquisition(AcquisitionFunction):
     def get_next(self, **kwargs):
         # Here add logic to regenerate and retrieve mc_points based on step
         update_mc = kwargs.get('update_mc', False)
+        if update_mc or self.mc_samples is None:
+            log.info("Generating new Monte Carlo samples")
+            self.generate_mc_samples()
         mc_points = self.get_mc_points()
         return super().get_next(fun_kwargs={'mc_points': mc_points}, **kwargs)
 
 
 class WIPV(MonteCarloAcquisition):
     """Weighted Integrated Posterior Variance acquisition function"""
-    def __init__(self, gp, settings: Optional[dict] = None):
-        super().__init__(gp, **(settings or {}))
+    def __init__(self, gp, mc_kwargs: Optional[dict] = {}, optimizer_kwargs: Optional[dict] = {}):
+        super().__init__(gp, mc_kwargs=mc_kwargs, optimizer_kwargs=optimizer_kwargs)
 
-    def fun(self, x, mc_points):
+    def fun(self, x, mc_points=None):
         var = self.gp.fantasy_var(new_x=x, mc_points=mc_points)
         return jnp.mean(var)
+    
+    def get_next(self, **kwargs):
+        return super().get_next(**kwargs)
 
 class MaxVar(MonteCarloAcquisition):
     """Maximum Variance acquisition function"""
-    def __init__(self, gp, settings: Optional[dict] = None):
-        super().__init__(gp, **(settings or {}))
-    
+
+    def __init__(self, gp, mc_kwargs: Optional[dict] = {}, optimizer_kwargs: Optional[dict] = {}):
+        super().__init__(gp, mc_kwargs=mc_kwargs, optimizer_kwargs=optimizer_kwargs)
+
     def __call__(self, x, gp, **kwargs):
         mc_points = kwargs.get('mc_points', self.mc_points)
         var = gp.fantasy_var(x, mc_points=mc_points)

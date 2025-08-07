@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import jax.numpy as jnp
 from jax import vmap
 from .logging_utils import get_logger
-log = get_logger(__name__)
+log = get_logger("[utils]")
 
 # use this to suppress unecessary output, https://stackoverflow.com/questions/2125702/how-to-suppress-console-output-in-python
 @contextmanager
@@ -53,7 +53,7 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
     ----------
     gp : GP object
         The Gaussian process object used for the optimization.
-    ns_samples : dict
+    samples_dict : dict
         The samples from the nested sampling or MCMC process.
     param_list : list
         The list of parameter names.

@@ -34,7 +34,10 @@ sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8,
         logz_threshold=0.1,
         lengthscale_priors='DSLP', use_clf=False,minus_inf=-1e5,)
 
-gp, ns_samples, logz_dict = sampler.run()
+results = sampler.run()
+gp = results['gp']
+ns_samples = results['samples']
+
 end = time.time()
 print(f"Total time taken = {end-start:.4f} seconds")
 dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,

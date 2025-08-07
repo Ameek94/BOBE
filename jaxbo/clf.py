@@ -11,8 +11,8 @@ from flax.core import freeze
 import optax
 from typing import Callable, Dict, Any, Union, List, Optional
 from functools import partial
-import logging
-log = logging.getLogger(__name__)
+from .logging_utils import get_logger 
+log = get_logger("[clf]")
 
 # -----------------------------------------------------------------------------
 # Neural Network Classifier with train/validation split
@@ -41,7 +41,7 @@ def train_nn(x: jnp.ndarray,
              dropout_rate=0.1,
              lr=1e-3,
              weight_decay=1e-4,
-             n_epochs=500,
+             n_epochs=1000,
              batch_size=128,
              val_frac=0.2,
              early_stop_patience=100,
@@ -72,11 +72,11 @@ def train_nn(x: jnp.ndarray,
     model = FeasibilityMLP(hidden_dims=list(hidden_dims), dropout_rate=dropout_rate)
     key = jax.random.PRNGKey(seed)
 
-    if init_params is not None:
-        # Use provided initial parameters if available
-        params = init_params
-    else:
-        params = model.init(key, jnp.ones((1, d)), train=True)
+    # if init_params is not None:
+    #     # Use provided initial parameters if available
+    #     params = init_params
+    # else:
+    params = model.init(key, jnp.ones((1, d)), train=True)
 
     optimizer = optax.adamw(lr, weight_decay=weight_decay)
     opt_state = optimizer.init(params)
@@ -221,12 +221,12 @@ def train_ellipsoid(
     y: Optional[jnp.ndarray] = None,  # Labels for supervised training
     lr: float = 1e-2,
     weight_decay: float = 1e-4,
-    n_epochs: int = 200,
+    n_epochs: int = 1000,
     batch_size: int = 32,
     seed: int = 0,
     init_params: Optional[Dict] = None,
     val_frac: float = 0.2,
-    patience: int = 100,
+    patience: int = 500,
     verbose: bool = False,
     **kwargs: Any
 ):

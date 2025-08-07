@@ -10,7 +10,9 @@ import jax
 from jax import config, vmap, jit
 config.update("jax_enable_x64", True)
 from .gp import GP
+from .logging_utils import get_logger
 from scipy.special import logsumexp
+log = get_logger("[ns]")
 
 try:
     from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
@@ -23,8 +25,6 @@ tfpd = tfp.distributions
 from jaxns.framework.model import Model
 from jaxns.framework.prior import Prior
 from jaxns import NestedSampler, TerminationCondition, resample
-import logging
-log = logging.getLogger("[NS]")
 
 def renormalise_log_weights(log_weights):
     log_total = logsumexp(log_weights)
@@ -125,7 +125,7 @@ def nested_sampling_Dy(gp: GP
 
     success = True
 
-    nlive = 750
+    nlive = 600
 
     if dynamic:
         sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,

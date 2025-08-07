@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from .gp import GP, DSLP_GP, SAAS_GP
 from .clf import train_svm, svm_predict_proba, train_nn, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
 from .seed_utils import get_new_jax_key
+from .logging_utils import get_logger
 import numpyro
 # numpyro.set_host_device_count(4) ?
 from numpyro.infer import MCMC, NUTS, SA, AIES
@@ -13,8 +14,7 @@ import numpyro.distributions as dist
 from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
-import logging
-log = logging.getLogger(__name__)
+log = get_logger("[clf_gp]")
 
 
 available_classifiers = {
@@ -278,7 +278,7 @@ class ClassifierGP:
                 lengthscales=self.gp.lengthscales,outputscale=self.gp.outputscale
                 )
         
-    def gp_numpyro_model(self,temp=4.):
+    def gp_numpyro_model(self,temp=1.):
         """
         Returns a numpyro model for the GP.
         This is used for sampling using GP surrogate using the mean as the target for NUTS or SA.
@@ -298,23 +298,33 @@ class ClassifierGP:
         Obtain samples from the posterior represented by the GP mean as the logprob.
         Optionally restarts MCMC if all logp values are the same or if HMC fails.
         """
-
-        num_chains = 1
+        start = time.time()
+        
+        num_chains = 4
         # # init_params = jnp.array([self.get_random_point() for _ in range(num_chains-1)])#  if init_params is None else init_params
         # best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
         # # init_params = jnp.concatenate([init_params, best_pt.reshape(1, -1)], axis=0) #if init_params is not None else None
         # init_strategy = init_to_value(values = {'x': self.get_random_point()}) #values=[{'x': init_params[i]} for i in range(num_chains)]
 
+        samples_x = []
+        samples_logp = []
 
-        init_params = self.get_random_point() if init_params is None else init_params
+        # temps = np.arange(1, num_chains+1, 1)
+        prob = np.random.uniform(0, 1)
+        temp = np.where(prob < 0.5, 1., 4.) # Randomly choose temperature between 1 and 4
+        log.info(f"Running MCMC chains with temperature {temp:.2f}")
+        for i in range(num_chains):
+            if i== 0:
+                init_params = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+            else:
+                init_params = self.get_random_point() #if init_params is None else init_params
         
-        if self.use_clf and init_params is not None:
-            init_strategy = init_to_value(values={'x': init_params})
-        else:
-            init_strategy = init_to_sample()
+            if self.use_clf and init_params is not None:
+                init_strategy = init_to_value(values={'x': init_params})
+            else:
+                init_strategy = init_to_sample()
 
-        start = time.time()
-        
+
         # try:
         #     kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
         #     mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples= num_samples,
@@ -326,66 +336,77 @@ class ClassifierGP:
         #         log.error(f"SA kernel also failed with error: {e}")
         #     raise e
 
-        rng_key = get_new_jax_key()
+            rng_key = get_new_jax_key()
         
         # First attempt with NUTS
-        try:
-            kernel = NUTS(self.gp_numpyro_model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
-            mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
-                        num_chains=1, progress_bar=progress_bar, thinning=thinning)
-            mcmc.run(rng_key,temp)
-            
-            # Check if HMC ran successfully
-            mc_samples = mcmc.get_samples()
-            logp_vals = mc_samples['logp']
-            hmc_success = True
-            
-        except Exception as e:
-            if verbose:
-                log.info(f"HMC failed with error: {e}. Falling back to SA kernel.")
-            hmc_success = False
-            logp_vals = None
-
-        # Check if we need to restart due to flat logp or HMC failure
-        should_restart = False
-        
-        if not hmc_success:
-            should_restart = True
-            if verbose:
-                log.info("HMC failed. Restarting with SA kernel and best point as initial point.")
-        elif restart_on_flat_logp and (jnp.any(logp_vals == self.minus_inf) or 
-                                       jnp.allclose(logp_vals, logp_vals[0])):
-            should_restart = True
-            if verbose:
-                log.info("All logp values are the same or contain invalid values. Restarting MCMC from best training point.")
-
-        # Restart with SA if needed
-        if should_restart:
             try:
-                rng_key = get_new_jax_key()
-                num_chains = 1
-                best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
-                init_strategy = init_to_value(values={'x': best_pt})
-                log.info(f"Reinitializing MCMC with {num_chains} chains using SA kernel.")
-                kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
-                mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=2 * num_samples,
-                            num_chains=num_chains, progress_bar=False, thinning=thinning)
+                kernel = NUTS(self.gp_numpyro_model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
+                mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
+                        num_chains=1, progress_bar=progress_bar, thinning=thinning)
                 mcmc.run(rng_key,temp)
+            
+                # Check if HMC ran successfully
+                mc_samples = mcmc.get_samples()
+                logp_vals = mc_samples['logp']
+                hmc_success = True
+            
             except Exception as e:
                 if verbose:
-                    log.error(f"SA kernel also failed with error: {e}")
-                raise e
+                    log.info(f"HMC failed with error: {e}. Falling back to SA kernel.")
+                hmc_success = False
+                logp_vals = None
 
-        if verbose:
-            mcmc.print_summary(exclude_deterministic=False)
+            # Check if we need to restart due to flat logp or HMC failure
+            should_restart = False
+        
+            if not hmc_success:
+                should_restart = True
+                if verbose:
+                    log.info("HMC failed. Restarting with SA kernel and best point as initial point.")
+            elif restart_on_flat_logp and (jnp.any(logp_vals == self.minus_inf) or 
+                                       jnp.allclose(logp_vals, logp_vals[0])):
+                should_restart = True
+                if verbose:
+                    log.info("All logp values are the same or contain invalid values. Restarting MCMC from best training point.")
+
+            # Restart with SA if needed
+            if should_restart:
+                try:
+                    rng_key = get_new_jax_key()
+                    num_chains = 1
+                    best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+                    init_strategy = init_to_value(values={'x': best_pt})
+                    log.info(f"Reinitializing MCMC with {num_chains} chains using SA kernel.")
+                    kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
+                    mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=2 * num_samples,
+                            num_chains=num_chains, progress_bar=False, thinning=thinning)
+                    mcmc.run(rng_key,temp)
+                except Exception as e:
+                    if verbose:
+                        log.error(f"SA kernel also failed with error: {e}")
+                    raise e
+                
+            samples = mcmc.get_samples()
+            logp_vals = samples['logp']
+            samples_x.append(samples['x'])
+            samples_logp.append(logp_vals)
+
+            if verbose:
+                mcmc.print_summary(exclude_deterministic=False)
+    
         log.info(f"Sampled parameters MCMC took {time.time() - start:.4f} s")
 
-        mc_samples = mcmc.get_samples()
-        samples = {
-            'x': mc_samples['x'],
-            'logp': mc_samples['logp'],
-            'best': mc_samples['x'][jnp.argmax(mc_samples['logp'])]
-        }
+        # mc_samples = mcmc.get_samples()
+        # samples = {
+        #     'x': mc_samples['x'],
+        #     'logp': mc_samples['logp'],
+        #     'best': mc_samples['x'][jnp.argmax(mc_samples['logp'])]
+        # }
+
+        samples_x = jnp.concatenate(samples_x, axis=0)
+        samples_logp = jnp.concatenate(samples_logp, axis=0)
+
+        samples = {'x': samples_x, 'logp': samples_logp, 'best': samples_x[jnp.argmax(samples_logp)]}
 
         print(f"shape of samples: {samples['x'].shape}")
 

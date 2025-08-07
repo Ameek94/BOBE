@@ -7,6 +7,10 @@ jax.config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
 from typing import Optional, Union, Tuple, Dict, Any
+from optax import adam, apply_updates
+from getdist import plots, MCSamples, loadMCSamples
+import tqdm
+import time
 # from .acquisition import WIPV, EI #, logEI
 from .gp import DSLP_GP, SAAS_GP #, sample_GP_NUTS
 from .svm_gp import SVM_GP
@@ -16,45 +20,42 @@ from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from .utils import scale_from_unit, scale_to_unit
 from .seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
-from optax import adam, apply_updates
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
-from getdist import plots, MCSamples, loadMCSamples
-import tqdm
-import time
-import logging
+from .optim import optimize
+from .logging_utils import get_logger
 
-# log = logging.getLogger("[BO]")
+log = get_logger("[bo]")
 
-# 1) Filter class: only allow exactly INFO
-class InfoFilter(logging.Filter):
-    """
-    """
-    def filter(self, record):
-        """
-        """
-        return record.levelno == logging.INFO
+# # 1) Filter class: only allow exactly INFO
+# class InfoFilter(logging.Filter):
+#     """
+#     """
+#     def filter(self, record):
+#         """
+#         """
+#         return record.levelno == logging.INFO
 
-# 2) Create and configure the stdout handler
-stdout_handler = logging.StreamHandler(sys.stdout)
-stdout_handler.setLevel(logging.INFO)       # accept INFO and above...
-stdout_handler.addFilter(InfoFilter())      # ...but filter down to only INFO
-stdout_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
-stdout_handler.setFormatter(stdout_fmt)
+# # 2) Create and configure the stdout handler
+# stdout_handler = logging.StreamHandler(sys.stdout)
+# stdout_handler.setLevel(logging.INFO)       # accept INFO and above...
+# stdout_handler.addFilter(InfoFilter())      # ...but filter down to only INFO
+# stdout_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
+# stdout_handler.setFormatter(stdout_fmt)
 
-# 3) Create and configure the stderr handler
-stderr_handler = logging.StreamHandler(sys.stderr)
-stderr_handler.setLevel(logging.WARNING)    # accept WARNING and above
-stderr_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
-stderr_handler.setFormatter(stderr_fmt)
+# # 3) Create and configure the stderr handler
+# stderr_handler = logging.StreamHandler(sys.stderr)
+# stderr_handler.setLevel(logging.WARNING)    # accept WARNING and above
+# stderr_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
+# stderr_handler.setFormatter(stderr_fmt)
 
-# 4) Get your logger, clear defaults, add both handlers
-log = logging.getLogger(name="[BO]")
-# stop this logger “bubbling” messages up to root
-log.propagate = False  
-log.handlers.clear()
-log.setLevel(logging.INFO)               # ensure INFO+ get processed
-log.addHandler(stdout_handler)
-log.addHandler(stderr_handler)
+# # 4) Get your logger, clear defaults, add both handlers
+# log = logging.getLogger(name="[BO]")
+# # stop this logger “bubbling” messages up to root
+# log.propagate = False  
+# log.handlers.clear()
+# log.setLevel(logging.INFO)               # ensure INFO+ get processed
+# log.addHandler(stdout_handler)
+# log.addHandler(stderr_handler)
 
 def WIPV(x, gp, mc_points=None):
     """
@@ -71,54 +72,54 @@ def WIPV(x, gp, mc_points=None):
     var = gp.fantasy_var(x, mc_points=mc_points)
     return jnp.mean(var)
 
-# Acquisition optimizer
-def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_optimizer=4):
+# # Acquisition optimizer
+# def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_optimizer=4):
     
-    f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
+#     f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
 
-    @jax.jit
-    def acq_val_grad(x):
-        return jax.value_and_grad(f)(x)
+#     @jax.jit
+#     def acq_val_grad(x):
+#         return jax.value_and_grad(f)(x)
 
-    if x0 is None:
-        x0 = np.random.uniform(size=(n_restarts_optimizer, mc_points.shape[1]))
-    else:
-        x0 = jnp.atleast_2d(x0)  # Ensure x0 is at least 2D
-        # print(f"x0 shape: {x0.shape}, expected shape: {(n_restarts_optimizer, mc_points.shape[1])}")
-        n_x0 = x0.shape[0]
-        if n_x0 < n_restarts_optimizer:
-            needed_x0 = n_restarts_optimizer - n_x0
-            added_x0 = np.random.uniform(size=(needed_x0, mc_points.shape[1]))
-            x0 = jnp.concatenate([x0, added_x0], axis=0)
-    # print(f"x0 shape after processing: {x0.shape}, expected shape: {(n_restarts_optimizer, mc_points.shape[1])}")
+#     if x0 is None:
+#         x0 = np.random.uniform(size=(n_restarts_optimizer, mc_points.shape[1]))
+#     else:
+#         x0 = jnp.atleast_2d(x0)  # Ensure x0 is at least 2D
+#         # print(f"x0 shape: {x0.shape}, expected shape: {(n_restarts_optimizer, mc_points.shape[1])}")
+#         n_x0 = x0.shape[0]
+#         if n_x0 < n_restarts_optimizer:
+#             needed_x0 = n_restarts_optimizer - n_x0
+#             added_x0 = np.random.uniform(size=(needed_x0, mc_points.shape[1]))
+#             x0 = jnp.concatenate([x0, added_x0], axis=0)
+#     # print(f"x0 shape after processing: {x0.shape}, expected shape: {(n_restarts_optimizer, mc_points.shape[1])}")
 
-    # params = jnp.array(np.random.uniform(0, 1, size=mc_points.shape[1])) if x0 is None else x0
-    optimizer = adam(learning_rate=lr)
+#     # params = jnp.array(np.random.uniform(0, 1, size=mc_points.shape[1])) if x0 is None else x0
+#     optimizer = adam(learning_rate=lr)
 
-    @jax.jit
-    def step(carry):
-        params, opt_state = carry
-        (val, grad) = acq_val_grad(params)
-        updates, opt_state = optimizer.update(grad, opt_state)
-        params = apply_updates(params, updates)
-        return (jnp.clip(params, 0., 1.), opt_state), val
+#     @jax.jit
+#     def step(carry):
+#         params, opt_state = carry
+#         (val, grad) = acq_val_grad(params)
+#         updates, opt_state = optimizer.update(grad, opt_state)
+#         params = apply_updates(params, updates)
+#         return (jnp.clip(params, 0., 1.), opt_state), val
 
-    best_f, best_params = jnp.inf, None
-    r = jnp.arange(maxiter)
-    for n in range(n_restarts_optimizer):
-        params = x0[n]
-        opt_state = optimizer.init(x0[n])
-        progress_bar = tqdm.tqdm(r,desc=f'ACQ Optimization restart {n+1}')
-        for i in progress_bar:
-            (params, opt_state), fval = step((params, opt_state))
-            progress_bar.set_postfix({"fval": float(fval)})
-            if fval < best_f:
-                best_f, best_params = fval, params
-        # Perturb for next restart
-        # params = jnp.clip(best_params + 0.5 * jnp.array(np.random.normal(size=params.shape)), 0., 1.)
+#     best_f, best_params = jnp.inf, None
+#     r = jnp.arange(maxiter)
+#     for n in range(n_restarts_optimizer):
+#         params = x0[n]
+#         opt_state = optimizer.init(x0[n])
+#         progress_bar = tqdm.tqdm(r,desc=f'ACQ Optimization restart {n+1}')
+#         for i in progress_bar:
+#             (params, opt_state), fval = step((params, opt_state))
+#             progress_bar.set_postfix({"fval": float(fval)})
+#             if fval < best_f:
+#                 best_f, best_params = fval, params
+#         # Perturb for next restart
+#         # params = jnp.clip(best_params + 0.5 * jnp.array(np.random.normal(size=params.shape)), 0., 1.)
 
-    # print(f"Best params: {best_params}, fval: {best_f}")
-    return jnp.atleast_2d(best_params), best_f
+#     # print(f"Best params: {best_params}, fval: {best_f}")
+#     return jnp.atleast_2d(best_params), best_f
 
 # Utility functions
 
@@ -129,7 +130,7 @@ def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_o
 #     idx = jnp.argsort(train_y.flatten())[-n_points:]
 #     return train_x[idx].flatten()
 
-def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,method="NUTS",init_params=None):
+def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",init_params=None):
     if method=='NUTS':
         try:
             mc_samples = gp.sample_GP_NUTS(warmup_steps=warmup_steps,
@@ -344,7 +345,7 @@ class BOBE:
         Check if the nested sampling has converged.
         """
         if ndim > 10:
-            delta = logz_dict['mean'] - logz_dict['lower'] # for now just to speed up results
+            delta = logz_dict['upper'] - logz_dict['lower'] # for now just to speed up results
         else:
             delta = logz_dict['upper'] - logz_dict['lower']
         mean = logz_dict['mean']
@@ -355,7 +356,7 @@ class BOBE:
         else:
             return False
 
-    def run(self):
+    def run(self,maxsteps=1000,minsteps=0):
         """
         Run the iterative Bayesian Optimization loop.
 
@@ -374,9 +375,12 @@ class BOBE:
         """
 
 
+        results_dict = {}
+
+
         # Monte Carlo points for acquisition function
-        self.mc_samples = get_mc_samples(self.gp, rng_key=jax.random.PRNGKey(0),
-            warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, thinning=1,method=self.mc_points_method)
+        self.mc_samples = get_mc_samples(self.gp,warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, 
+                                         thinning=4,method=self.mc_points_method)
         self.mc_samples['method'] = 'MCMC'        
         self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
         ns_samples = None
@@ -402,11 +406,22 @@ class BOBE:
             # x0_acq = self.mc_points[jnp.argmax(mc_points_var)]
 
             x0_acq1 = self.mc_samples['best']
-            x0_acq2 = self.gp.train_x[jnp.argmax(self.gp.train_y)]
-            x0_acq = jnp.vstack([x0_acq1, x0_acq2])
-            print(f"x0_acq shape: {x0_acq.shape}, expected shape: (2, ndim)")
-            new_pt_u, acq_val = optimize_acq(
-                self.gp, WIPV, self.mc_points, x0=x0_acq)
+            vars = jax.lax.map(self.gp.predict_var,self.mc_points,batch_size=10)
+            x0_acq2 = self.mc_points[jnp.argmax(vars)]
+            x0_acq3 = self.gp.train_x[jnp.argmax(self.gp.train_y)]
+            x0_acq = jnp.vstack([x0_acq1, x0_acq2, x0_acq3])
+            # print(f"x0_acq shape: {x0_acq.shape}, expected shape: (2, ndim)")
+            # new_pt_u, acq_val = optimize_acq(
+            #     self.gp, WIPV, self.mc_points, x0=x0_acq)
+
+            new_pt_u, acq_val = optimize(WIPV, 
+                                         func_args = (self.gp,), 
+                                         func_kwargs = {'mc_points': self.mc_points},
+                                         ndim = self.ndim,
+                                         x0 = x0_acq,
+                                         n_restarts=4,
+                                         verbose=True,)
+            new_pt_u = jnp.atleast_2d(new_pt_u)  # Ensure new_pt_u is at least 2D
             
             new_pt = scale_from_unit(new_pt_u, self.loglikelihood.param_bounds) #.flatten()
 
@@ -427,9 +442,8 @@ class BOBE:
             if update_mc:
                 x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
                 self.mc_samples = get_mc_samples(
-                    self.gp, rng_key=jax.random.PRNGKey(ii*10),
-                    warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples,
-                    thinning=1, method=self.mc_points_method,init_params=x0_hmc
+                    self.gp, warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples,
+                    thinning=4, method=self.mc_points_method,init_params=x0_hmc
                 )
                 self.mc_samples['method'] = 'MCMC'
 
@@ -453,10 +467,12 @@ class BOBE:
                     self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1
                 )
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-
-                if ns_success and self.check_convergence(i, logz_dict,threshold=self.logz_threshold,ndim=self.ndim):
+                self.converged = self.check_convergence(ii, logz_dict, threshold=self.logz_threshold,ndim=self.ndim)
+                if ns_success and self.converged:
                     self.converged = True
                     self.termination_reason = "LogZ converged"
+                    results_dict['logz'] = logz_dict
+                    results_dict['termination_reason'] = self.termination_reason
                     break
 
                 self.mc_samples = ns_samples
@@ -471,20 +487,22 @@ class BOBE:
             if self.gp.train_x.shape[0] > 1600:
                 self.ns_step = 25
 
-        if not self.converged:
-            self.gp.fit()
-
-        # Save and final nested sampling
-        if self.save:
-            self.gp.save(outfile=self.output_file)
         log.info(f" Sampling stopped: {self.termination_reason}")
-
         log.info(f" Final GP training set size: {self.gp.train_x.shape[0]}, max size: {self.max_gp_size}")
         log.info(f" Number of iterations: {ii}, max iterations: {self.maxiters}")
 
 
-        # Prepare final results 
+        if not self.converged:
+            self.gp.fit()
 
+
+        results_dict['gp'] = self.gp
+
+        # Save and final nested sampling
+        if self.save:
+            self.gp.save(outfile=self.output_file)
+
+        # Prepare final results 
         if self.do_final_ns and not self.converged:
             log.info(" Final Nested Sampling")
             ns_samples, logz_dict, ns_success = nested_sampling_Dy(
@@ -492,11 +510,15 @@ class BOBE:
             )
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
 
+
         if ns_samples is None:
             log.info("No nested sampling results found, MC samples from HMC/MCMC will be used instead.")
-            samples = self.mc_samples['x']
-            weights = self.mc_samples['weights']
-            loglikes = self.mc_samples['logl']
+            mc_samples = get_mc_samples(
+                    self.gp, warmup_steps=512, num_samples=16384,
+                    thinning=4, method="NUTS")
+            samples = mc_samples['x']
+            weights = mc_samples['weights'] if 'weights' in mc_samples else jnp.ones(mc_samples['x'].shape[0])
+            loglikes = mc_samples['logp']
         else:
             samples = ns_samples['x']
             weights = ns_samples['weights']
@@ -507,7 +529,7 @@ class BOBE:
         samples_dict = {
             'x': samples,
             'weights': weights,
-            'loglikes': loglikes
+            'logl': loglikes
         }
 
         if self.save:
@@ -525,5 +547,8 @@ class BOBE:
         else:
             output_samples = samples_dict
                 
-        return self.gp, output_samples, logz_dict
+
+        results_dict['samples'] = output_samples
+
+        return results_dict
 

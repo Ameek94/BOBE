@@ -6,8 +6,9 @@ import tqdm
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from scipy.stats import qmc
+from .logging_utils import get_logger
 import logging
-log = logging.getLogger("[Loglike]")
+log = get_logger("[loglike]")
 
 
 class ExternalLikelihood:
