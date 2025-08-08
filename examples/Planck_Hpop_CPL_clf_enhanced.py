@@ -3,52 +3,78 @@ from jaxbo.utils import plot_final_samples
 from jaxbo.loglike import CobayaLikelihood
 from jaxbo.summary_plots import BOBESummaryPlotter
 import time
+import sys
 import matplotlib.pyplot as plt
 
+# Configure matplotlib for better LaTeX rendering
+plt.rcParams['font.size'] = 12
+plt.rcParams['axes.labelsize'] = 14
+plt.rcParams['legend.fontsize'] = 12
+plt.rcParams['xtick.labelsize'] = 12
+plt.rcParams['ytick.labelsize'] = 12    
+
+# Get classifier type from command line argument
+clf = sys.argv[1] if len(sys.argv) > 1 else 'ellipsoid'
+
 # Set up the cosmological likelihood
-cobaya_input_file = './cosmo_input/LCDM_6D.yaml'
+cobaya_input_file = './cosmo_input/CPL_new_CMB.yaml'
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0, name='Planck_lite_clf_timing_test')
+        minus_inf=-1e6, noise_std=0.0, name=f'CPL_Hpop_{clf}')
 
+# Print detailed setup information
 print("="*60)
-print("PLANCK LITE CLF TIMING TEST")
+print(f"PLANCK HPOP ANALYSIS - {clf.upper()} CLASSIFIER")
 print("="*60)
 print(f"Likelihood: {likelihood.name}")
 print(f"Parameters: {likelihood.param_list}")
 print(f"Dimensions: {len(likelihood.param_list)}")
+print(f"Classifier type: {clf}")
 print("="*60)
 
+# Set classifier-specific parameters
+if clf == 'svm':
+    clf_update_step = 1
+else:
+    clf_update_step = 5
+
+# Record start time
 start = time.time()
+
+# Initialize BOBE sampler with comprehensive configuration
 sampler = BOBE(
-    n_cobaya_init=4, 
-    n_sobol_init=16, 
-    miniters=40, 
-    maxiters=150,
-    max_gp_size=200,
+    n_cobaya_init=32, 
+    n_sobol_init=64, 
+    miniters=1000, 
+    maxiters=5000,
+    max_gp_size=2000,
     loglikelihood=likelihood,
-    fit_step=5, 
+    resume=False,
+    resume_file=f'{likelihood.name}.npz',
+    save=True,
+    fit_step=50, 
     update_mc_step=5, 
-    ns_step=10,
+    ns_step=100,
     num_hmc_warmup=512,
-    num_hmc_samples=512, 
-    mc_points_size=64,
-    lengthscale_priors='DSLP', 
-    use_clf=False,
-    clf_use_size=25,
-    clf_threshold=250,
-    clf_update_step=1,  # SVM update step
-    clf_type='svm',  # Using SVM for classification
-    minus_inf=-1e5,
-    logz_threshold=1.,
+    num_hmc_samples=2048, 
+    mc_points_size=128,
+    lengthscale_priors='DSLP',
+    logz_threshold=5.,
+    clf_threshold=600,
+    gp_threshold=2500,
+    use_clf=True,
+    clf_type=clf,
+    clf_use_size=100,
+    clf_update_step=clf_update_step,
+    minus_inf=-1e6,
     seed=42,  # For reproducibility
-    do_final_ns=False,
 )
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
 results = sampler.run()
 
+# Record end time
 end = time.time()
 manual_timing = end - start
 
@@ -57,7 +83,7 @@ print("RUN COMPLETED")
 print("="*60)
 print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
 
-# Extract components for backward compatibility
+# Extract components for backward compatibility and analysis
 gp = results['gp']
 samples = results['samples']
 logz_dict = results.get('logz', {})
@@ -156,16 +182,20 @@ else:  # Dictionary format
     sample_array = samples['x']
     weights_array = samples['weights']
 
+# Define specific parameters for LCDM cosmology (Hpop specific)
+param_list_LCDM = ['w','w_a','omch2','ombh2','logA','ns','H0','tau']
+
 plot_final_samples(
     gp, 
-    {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+    samples,
     param_list=likelihood.param_list,
     param_bounds=likelihood.param_bounds,
+    plot_params=param_list_LCDM,
     param_labels=likelihood.param_labels,
     output_file=likelihood.name,
-    reference_file='./cosmo_input/chains/Planck_lite_LCDM',
-    reference_ignore_rows=0.3,
-    reference_label='MCMC',
+    reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
+    reference_ignore_rows=0.,
+    reference_label='Polychord',
     scatter_points=False
 )
 
@@ -180,29 +210,63 @@ print(f"✓ Timing data: {likelihood.name}_timing.json")
 print(f"✓ Legacy samples: {likelihood.name}_samples.npz")
 print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
 print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
-print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
+if comprehensive_results.get('logz_history'):
+    print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
 print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
 
-# Create timing comparison with previous runs (if comments in original file are accurate)
+# Performance comparison with previous runs (if applicable)
 print("\n" + "="*60)
 print("PERFORMANCE COMPARISON")
 print("="*60)
 
-# Previous timing from comments in original file
-previous_times = {
-    "Fast updates": 292.68,
-    "Older code": 387.66
+current_time = timing_data['total_runtime']
+print(f"Current run ({clf}): {current_time:.2f} seconds ({current_time/60:.2f} minutes)")
+
+# Compare with different classifier types if multiple runs exist
+classifier_times = {
+    "ellipsoid": None,  # These would be filled from previous runs
+    "svm": None,
+    "nn": None
 }
 
-current_time = timing_data['total_runtime']
-print(f"Current run: {current_time:.2f} seconds")
-
-for version, prev_time in previous_times.items():
-    speedup = prev_time / current_time
-    improvement = ((prev_time - current_time) / prev_time) * 100
-    print(f"vs {version}: {speedup:.2f}x speedup ({improvement:+.1f}%)")
+# If we have timing data from previous runs, we could compare
+print(f"Classifier efficiency for {clf} configuration")
+print(f"Total runtime: {current_time:.2f}s")
+if 'clf_phase' in timing_data['phase_times']:
+    clf_time = timing_data['phase_times']['clf_phase']
+    clf_efficiency = (clf_time / current_time) * 100
+    print(f"Classification overhead: {clf_time:.2f}s ({clf_efficiency:.1f}%)")
 
 print("\n" + "="*60)
 print("ANALYSIS COMPLETE")
 print("="*60)
 print("Check the generated plots and saved files for detailed analysis.")
+print(f"Final LogZ comparison with reference:")
+print(f"BOBE result: LogZ = {logz_dict.get('mean', 'N/A'):.4f}")
+print("PolyChord reference: LogZ = -5529.65 ± 0.45")
+
+# Calculate deviation from reference if we have a result
+if 'mean' in logz_dict:
+    reference_logz = -5529.65
+    deviation = abs(logz_dict['mean'] - reference_logz)
+    print(f"Deviation from reference: {deviation:.4f}")
+    
+    if 'upper' in logz_dict and 'lower' in logz_dict:
+        uncertainty = (logz_dict['upper'] - logz_dict['lower']) / 2
+        sigma_deviation = deviation / uncertainty if uncertainty > 0 else float('inf')
+        print(f"Deviation in σ: {sigma_deviation:.2f}")
+
+# Final summary statistics
+print("\n" + "="*60)
+print("HPOP ANALYSIS SUMMARY")
+print("="*60)
+print(f"Cosmological model: ΛCDM")
+print(f"Data: Planck High-ℓ polarization")
+print(f"Dimensions: {len(likelihood.param_list)}")
+print(f"Parameters: {', '.join(param_list_LCDM)}")
+print(f"Classifier: {clf}")
+print(f"Final GP size: {gp.train_x.shape[0]}")
+print(f"Runtime: {current_time/60:.2f} minutes")
+if 'mean' in logz_dict:
+    print(f"Evidence: LogZ = {logz_dict['mean']:.4f}")
+print("="*60)

@@ -574,7 +574,8 @@ class BOBE:
                     'x': equal_samples,
                     'logl': equal_logl,
                     'weights': np.ones(equal_samples.shape[0]),
-                    'method': 'NS'
+                    'method': 'NS',
+                    'best': ns_samples['best']
                 }
 
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))

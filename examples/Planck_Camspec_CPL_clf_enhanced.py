@@ -6,6 +6,13 @@ import time
 import sys
 import matplotlib.pyplot as plt
 
+# Configure matplotlib for better LaTeX rendering
+plt.rcParams['font.size'] = 12
+plt.rcParams['axes.labelsize'] = 14
+plt.rcParams['legend.fontsize'] = 11
+plt.rcParams['xtick.labelsize'] = 11
+plt.rcParams['ytick.labelsize'] = 11
+
 # Get classifier type from command line argument
 clf = sys.argv[1] if len(sys.argv) > 1 else 'svm'
 
@@ -17,7 +24,7 @@ likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999
 
 # Print detailed setup information
 print("="*60)
-print(f"PLANCK CAMSPEC CPL ANALYSIS - {clf.upper()}")
+print(f"PLANCK CAMSPEC CPL ANALYSIS - {clf.upper()} CLASSIFIER")
 print("="*60)
 print(f"Likelihood: {likelihood.name}")
 print(f"Parameters: {likelihood.param_list}")
@@ -36,10 +43,10 @@ start = time.time()
 
 # Initialize BOBE sampler with comprehensive configuration
 sampler = BOBE(
-    n_cobaya_init=36, 
-    n_sobol_init=64, 
+    n_cobaya_init=32, 
+    n_sobol_init=32, 
     miniters=0, 
-    maxiters=5000,
+    maxiters=20,
     max_gp_size=1800,
     loglikelihood=likelihood,
     resume=False,
@@ -47,17 +54,17 @@ sampler = BOBE(
     save=True,
     fit_step=50, 
     update_mc_step=5, 
-    ns_step=50,
+    ns_step=10,
     num_hmc_warmup=512,
     num_hmc_samples=2048, 
     mc_points_size=96,
     lengthscale_priors='DSLP',
     logz_threshold=5.,
-    clf_threshold=350,
-    gp_threshold=5000,
+    clf_threshold=400,
+    gp_threshold=1500,
     use_clf=True,
     clf_type=clf,
-    clf_use_size=100,
+    clf_use_size=50,
     clf_update_step=clf_update_step,
     minus_inf=-1e5,
     seed=42,  # For reproducibility
@@ -176,7 +183,7 @@ else:  # Dictionary format
     weights_array = samples['weights']
 
 # Define specific parameters for CPL cosmology
-plot_params = ['w','wa','omch2','logA','ns','H0','ombh2','tau'] #'omk'
+plot_params = ['w','wa','omch2','ombh2','logA','ns','H0','tau'] #'omk'
 
 plot_final_samples(
     gp, 
@@ -187,8 +194,8 @@ plot_final_samples(
     param_labels=likelihood.param_labels,
     output_file=likelihood.name,
     reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
-    reference_ignore_rows=0.3,
-    reference_label='MCMC',
+    reference_ignore_rows=0.,
+    reference_label='Polychord',
     scatter_points=False
 )
 
@@ -236,11 +243,11 @@ print("="*60)
 print("Check the generated plots and saved files for detailed analysis.")
 print(f"Final LogZ comparison with reference:")
 print(f"BOBE result: LogZ = {logz_dict.get('mean', 'N/A'):.4f}")
-print("PolyChord reference: LogZ = -5529.65 ± 0.45")
+print("PolyChord reference: LogZ = -6231")
 
 # Calculate deviation from reference if we have a result
 if 'mean' in logz_dict:
-    reference_logz = -5529.65
+    reference_logz = -6231
     deviation = abs(logz_dict['mean'] - reference_logz)
     print(f"Deviation from reference: {deviation:.4f}")
     

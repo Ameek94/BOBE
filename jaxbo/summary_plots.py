@@ -39,6 +39,11 @@ plt.style.use('default')
 if HAS_SEABORN:
     sns.set_palette("husl")
 
+# Enable LaTeX rendering for mathematical expressions
+plt.rcParams['text.usetex'] = False  # Use mathtext instead of full LaTeX for compatibility
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['mathtext.fontset'] = 'cm'  # Computer Modern font for math
+
 
 class BOBESummaryPlotter:
     """
@@ -66,6 +71,21 @@ class BOBESummaryPlotter:
         self.ndim = self.results.ndim
         
         log.info(f"Initialized summary plotter for {self.ndim}D problem: {self.output_file}")
+    
+    def _format_latex_label(self, label: str) -> str:
+        """
+        Format a parameter label for proper LaTeX rendering in matplotlib.
+        
+        Args:
+            label: Raw parameter label
+            
+        Returns:
+            Formatted label with proper LaTeX delimiters
+        """
+        # Simply wrap in math mode if not already wrapped
+        if not label.startswith('$') and not label.endswith('$'):
+            label = f'${label}$'
+        return label
     
     def plot_evidence_evolution(self, ax: Optional[plt.Axes] = None, 
                                show_convergence: bool = True) -> plt.Axes:
@@ -182,9 +202,12 @@ class BOBESummaryPlotter:
         colors = plt.cm.Set1(np.linspace(0, 1, self.ndim))
         for i in range(self.ndim):
             if i < lengthscales.shape[1]:
+                # Format parameter label for LaTeX rendering
+                label = self._format_latex_label(self.param_labels[i])
+                
                 ax.plot(iterations, lengthscales[:, i], 
                        color=colors[i], linewidth=2, 
-                       label=f'{self.param_labels[i]}')
+                       label=label)
         
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Lengthscale')
@@ -449,7 +472,11 @@ class BOBESummaryPlotter:
                 
                 if iterations and values:
                     axes[i].plot(iterations, values, 'o-', linewidth=1, markersize=3, alpha=0.7)
-                    axes[i].set_ylabel(f'{self.param_labels[i]}')
+                    
+                    # Format parameter label for LaTeX rendering
+                    label = self._format_latex_label(self.param_labels[i])
+                    
+                    axes[i].set_ylabel(label)
                     axes[i].grid(True, alpha=0.3)
                     
                     # Add parameter bounds if available
@@ -619,8 +646,11 @@ class BOBESummaryPlotter:
                     else:
                         norm_values = np.array(values)
                     
+                    # Format parameter label for LaTeX rendering
+                    label = self._format_latex_label(self.param_labels[i])
+                    
                     ax.plot(iterations, norm_values, color=colors[i], 
-                           linewidth=1, alpha=0.7, label=self.param_labels[i])
+                           linewidth=1, alpha=0.7, label=label)
         
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Normalized Parameter Value')
@@ -676,8 +706,11 @@ class BOBESummaryPlotter:
                 ax.axhline(lower, color='red', linestyle=':', alpha=0.3)
                 ax.axhline(upper, color='red', linestyle=':', alpha=0.3)
         
+        # Format parameter labels for LaTeX rendering
+        formatted_labels = [self._format_latex_label(label) for label in self.param_labels]
+        
         ax.set_xticks(x_pos)
-        ax.set_xticklabels(self.param_labels)
+        ax.set_xticklabels(formatted_labels)
         ax.set_ylabel('Parameter Value')
         ax.set_title('Final Parameter Estimates')
         ax.grid(True, alpha=0.3)

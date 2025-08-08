@@ -1,17 +1,17 @@
 {
   "phase_times": {
-    "GP Training": 23.391040086746216,
-    "Acquisition Optimization": 28.14744210243225,
-    "True Objective Evaluations": 39.59319591522217,
-    "Nested Sampling": 19.85025906562805,
-    "MCMC Sampling": 83.91916084289551
+    "GP Training": 17.934168100357056,
+    "Acquisition Optimization": 22.515981674194336,
+    "True Objective Evaluations": 49.09280848503113,
+    "Nested Sampling": 68.4721131324768,
+    "MCMC Sampling": 23.525729179382324
   },
   "percentages": {
-    "GP Training": 8.59238321174592,
-    "Acquisition Optimization": 10.339583365152189,
-    "True Objective Evaluations": 14.544026713634059,
-    "Nested Sampling": 7.29172504137397,
-    "MCMC Sampling": 30.82657231556239
+    "GP Training": 7.740988663079388,
+    "Acquisition Optimization": 9.71865312640688,
+    "True Objective Evaluations": 21.19010325958679,
+    "Nested Sampling": 29.554861342302214,
+    "MCMC Sampling": 10.154494027779789
   },
-  "total_runtime": 272.2299449443817
+  "total_runtime": 231.67800498008728
 }
