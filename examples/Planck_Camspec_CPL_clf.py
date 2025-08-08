@@ -19,23 +19,34 @@ else:
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=32, n_sobol_init = 128, 
-        miniters=1000, maxiters=5000,max_gp_size=2000,
+        miniters=0, maxiters=5000,max_gp_size=1900,
         loglikelihood=likelihood,
-        resume=False,
+        resume=True,
         resume_file=f'{likelihood.name}.npz',
         save=True,
         fit_step = 50, update_mc_step = 5, ns_step = 50,
         num_hmc_warmup = 512,num_hmc_samples = 2048, mc_points_size = 96,
-        lengthscale_priors='DSLP',logz_threshold=2.,clf_threshold=350,gp_threshold=5000,
+        lengthscale_priors='DSLP',logz_threshold=5.,clf_threshold=350,gp_threshold=5000,
         use_clf=True,clf_type=clf,clf_use_size=100,clf_update_step=clf_update_step,minus_inf=-1e5,)
 
-gp, ns_samples, logz_dict = sampler.run()
+# gp, ns_samples, logz_dict = sampler.run()
+results = sampler.run()
+gp = results['gp']
+samples = results['samples']
+logz_dict = results.get('logz', {})
+
 end = time.time()
 print(f"Total time taken = {end-start:.4f} seconds")
 
- 
+print("Creating parameter samples plot...")
+if hasattr(samples, 'samples'):  # GetDist samples
+    sample_array = samples.samples
+    weights_array = samples.weights
+else:  # Dictionary format
+    sample_array = samples['x']
+    weights_array = samples['weights']
 plot_params = ['w','wa','omch2','logA','ns','H0','ombh2','tau'] #'omk'
-plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
+plot_final_samples(gp, samples,param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
                    plot_params=plot_params,
                    param_labels=likelihood.param_labels,output_file=likelihood.name,
                    reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',reference_ignore_rows=0.3,

@@ -12,6 +12,7 @@ config.update("jax_enable_x64", True)
 from .gp import GP
 from .logging_utils import get_logger
 from .seed_utils import get_numpy_rng
+from .utils import renormalise_log_weights, resample_equal
 from scipy.special import logsumexp
 log = get_logger("[ns]")
 
@@ -27,31 +28,7 @@ from jaxns.framework.model import Model
 from jaxns.framework.prior import Prior
 from jaxns import NestedSampler, TerminationCondition, resample
 
-def renormalise_log_weights(log_weights):
-    log_total = logsumexp(log_weights)
-    normalized_weights = np.exp(log_weights - log_total)
-    return normalized_weights
 
-def resample_equal(samples, aux, logwts, rstate):
-    # Resample samples to obtain equal weights. Taken from jaxns
-    wts = renormalise_log_weights(logwts)
-    weights = wts / wts.sum()
-    cumulative_sum = np.cumsum(weights)
-    cumulative_sum /= cumulative_sum[-1]
-    nsamples = len(weights)
-    positions = (rstate.random() + np.arange(nsamples)) / nsamples
-    idx = np.zeros(nsamples, dtype=int)
-    i, j = 0, 0
-    while i < nsamples:
-        if positions[i] < cumulative_sum[j]:
-            idx[i] = j
-            i += 1
-        else:
-            j += 1
-    perm = rstate.permutation(nsamples)
-    resampled_samples = samples[idx][perm]
-    resampled_aux = aux[idx][perm]
-    return resampled_samples, resampled_aux
 #-------------Dynesty functions---------------------
 def prior_transform(x):
     return x

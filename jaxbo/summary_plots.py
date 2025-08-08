@@ -90,16 +90,24 @@ class BOBESummaryPlotter:
         # Extract data
         iterations = [entry['iteration'] for entry in self.results.logz_evolution]
         logz_values = [entry['logz'] for entry in self.results.logz_evolution]
-        logz_errors = [entry['logz_err'] for entry in self.results.logz_evolution]
+        
+        # Use actual upper and lower bounds if available, otherwise fall back to symmetric errors
+        if self.results.logz_evolution and 'logz_upper' in self.results.logz_evolution[0]:
+            logz_upper = [entry['logz_upper'] for entry in self.results.logz_evolution]
+            logz_lower = [entry['logz_lower'] for entry in self.results.logz_evolution]
+        else:
+            # Fallback to symmetric errors for backwards compatibility
+            logz_errors = [entry['logz_err'] for entry in self.results.logz_evolution]
+            logz_errors = np.array(logz_errors)
+            logz_values_arr = np.array(logz_values)
+            logz_upper = logz_values_arr + logz_errors
+            logz_lower = logz_values_arr - logz_errors
         
         # Convert to numpy arrays
         iterations = np.array(iterations)
         logz_values = np.array(logz_values)
-        logz_errors = np.array(logz_errors)
-        
-        # Calculate bounds
-        logz_upper = logz_values + logz_errors
-        logz_lower = logz_values - logz_errors
+        logz_upper = np.array(logz_upper)
+        logz_lower = np.array(logz_lower)
         
         # Plot mean line
         ax.plot(iterations, logz_values, 'b-', linewidth=2, label='Mean log Z', alpha=0.9)
@@ -176,7 +184,7 @@ class BOBESummaryPlotter:
             if i < lengthscales.shape[1]:
                 ax.plot(iterations, lengthscales[:, i], 
                        color=colors[i], linewidth=2, 
-                       label=f'Lengthscale {self.param_names[i]}')
+                       label=f'{self.param_labels[i]}')
         
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Lengthscale')

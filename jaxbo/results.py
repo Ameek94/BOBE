@@ -107,6 +107,15 @@ class BOBEResults:
         }
         self._active_timers = {}  # Track start times for active phases
         
+        # GP hyperparameter tracking
+        self.gp_iterations = []
+        self.gp_lengthscales = []
+        self.gp_outputscales = []
+        
+        # Best loglikelihood tracking 
+        self.best_loglike_iterations = []
+        self.best_loglike_values = []
+        
         # Final results
         self.final_samples = None
         self.final_weights = None
@@ -128,6 +137,30 @@ class BOBEResults:
         # Save intermediate results periodically
         if iteration % 50 == 0:
             self.save_intermediate()
+    
+    def update_gp_hyperparams(self, iteration: int, lengthscales: list, outputscale: float):
+        """
+        Track GP hyperparameters evolution.
+        
+        Args:
+            iteration: Current iteration number
+            lengthscales: List of lengthscale values
+            outputscale: Outputscale value
+        """
+        self.gp_iterations.append(iteration)
+        self.gp_lengthscales.append(lengthscales)
+        self.gp_outputscales.append(outputscale)
+    
+    def update_best_loglike(self, iteration: int, best_loglike: float):
+        """
+        Track best loglikelihood evolution.
+        
+        Args:
+            iteration: Current iteration number
+            best_loglike: Current best loglikelihood value
+        """
+        self.best_loglike_iterations.append(iteration)
+        self.best_loglike_values.append(best_loglike)
     
     def update_convergence(self,
                           iteration: int,
@@ -159,6 +192,8 @@ class BOBEResults:
         self.logz_evolution.append({
             'iteration': iteration,
             'logz': logz_dict.get('mean', np.nan),
+            'logz_upper': logz_dict.get('upper', np.nan),
+            'logz_lower': logz_dict.get('lower', np.nan),
             'logz_err': delta
         })
     
@@ -199,6 +234,31 @@ class BOBEResults:
             json.dump(timing_data, f, indent=2)
         
         log.info(f"Saved timing data to {timing_file}")
+    
+    def get_gp_data(self) -> Dict[str, list]:
+        """
+        Get GP hyperparameter evolution data for plotting.
+        
+        Returns:
+            Dictionary with 'iterations', 'lengthscales', and 'outputscales' keys
+        """
+        return {
+            'iterations': self.gp_iterations,
+            'lengthscales': self.gp_lengthscales,
+            'outputscales': self.gp_outputscales
+        }
+    
+    def get_best_loglike_data(self) -> Dict[str, list]:
+        """
+        Get best loglikelihood evolution data for plotting.
+        
+        Returns:
+            Dictionary with 'iterations' and 'best_loglike' keys
+        """
+        return {
+            'iterations': self.best_loglike_iterations,
+            'best_loglike': self.best_loglike_values
+        }
     
     def finalize(self,
                  samples: np.ndarray,

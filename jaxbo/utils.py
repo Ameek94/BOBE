@@ -5,7 +5,9 @@ from getdist import plots,MCSamples,loadMCSamples
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
 from jax import vmap
+from scipy.special import logsumexp
 from .logging_utils import get_logger
+from .seed_utils import get_numpy_rng
 log = get_logger("[utils]")
 
 # use this to suppress unecessary output, https://stackoverflow.com/questions/2125702/how-to-suppress-console-output-in-python
@@ -41,6 +43,33 @@ def scale_from_unit(x,param_bounds):
     """
     x = x * (param_bounds[1] - param_bounds[0]) + param_bounds[0]
     return x
+
+def renormalise_log_weights(log_weights):
+    log_total = logsumexp(log_weights)
+    normalized_weights = np.exp(log_weights - log_total)
+    return normalized_weights
+
+def resample_equal(samples, aux, logwts):
+    rstate = get_numpy_rng()
+    # Resample samples to obtain equal weights. Taken from jaxns
+    wts = renormalise_log_weights(logwts)
+    weights = wts / wts.sum()
+    cumulative_sum = np.cumsum(weights)
+    cumulative_sum /= cumulative_sum[-1]
+    nsamples = len(weights)
+    positions = (rstate.random() + np.arange(nsamples)) / nsamples
+    idx = np.zeros(nsamples, dtype=int)
+    i, j = 0, 0
+    while i < nsamples:
+        if positions[i] < cumulative_sum[j]:
+            idx[i] = j
+            i += 1
+        else:
+            j += 1
+    perm = rstate.permutation(nsamples)
+    resampled_samples = samples[idx][perm]
+    resampled_aux = aux[idx][perm]
+    return resampled_samples, resampled_aux
 
 def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,param_bounds=None,
                        reference_samples = None,

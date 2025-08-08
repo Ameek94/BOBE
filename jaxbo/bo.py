@@ -18,7 +18,7 @@ from .clf_gp import ClassifierGP
 from .loglike import ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
-from .utils import scale_from_unit, scale_to_unit
+from .utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal
 from .seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from .optim import optimize
@@ -259,30 +259,7 @@ class BOBE:
         self.loglikelihood = loglikelihood
         self.ndim = len(self.loglikelihood.param_list)
 
-        if resume and resume_file is not None:
-            # assert resume_file is not None, "resume_file must be provided if resume is True"
-            log.info(f" Resuming from file {resume_file}")
-            data = np.load(resume_file)
-            self.train_x = jnp.array(data['train_x'])
-            self.train_y = jnp.array(data['train_y'])
-            lengthscales = data['lengthscales']
-            outputscale = data['outputscale']
-        else:
-            init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
-                                    n_init_sobol=n_sobol_init)
-            self.train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
-            self.train_y = jnp.array(init_vals)
-            lengthscales = None
-            outputscale = None
-
-        # Best point so far
-        idx_best = jnp.argmax(self.train_y)
-        self.best_pt = scale_from_unit(self.train_x[idx_best],self.loglikelihood.param_bounds).flatten()
-        self.best_f = float(self.train_y.max())
-        self.best = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
-        log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
-
-        # Store basic settings needed for results manager
+        # Store basic settings needed for results manager early
         self.output_file = self.loglikelihood.name
         self.save = save
         self.return_getdist_samples = return_getdist_samples
@@ -291,7 +268,7 @@ class BOBE:
         self.converged = False
         self.termination_reason = "Max iterations reached"
 
-        # Initialize results manager BEFORE any GP operations
+        # Initialize results manager BEFORE any timing operations
         self.results_manager = BOBEResults(
             output_file=self.output_file,
             param_names=self.loglikelihood.param_list,
@@ -315,8 +292,8 @@ class BOBE:
                 'use_clf': use_clf,
                 'clf_type': clf_type,
                 'clf_use_size': clf_use_size,
-                'clf_update_step': clf_update_step,
                 'clf_threshold': clf_threshold,
+                'clf_update_step': clf_update_step,
                 'gp_threshold': gp_threshold,
                 'logz_threshold': logz_threshold,
                 'minus_inf': minus_inf,
@@ -326,6 +303,33 @@ class BOBE:
             },
             likelihood_name=self.loglikelihood.name
         )
+
+        if resume and resume_file is not None:
+            # assert resume_file is not None, "resume_file must be provided if resume is True"
+            log.info(f" Resuming from file {resume_file}")
+            data = np.load(resume_file)
+            self.train_x = jnp.array(data['train_x'])
+            self.train_y = jnp.array(data['train_y'])
+            lengthscales = data['lengthscales']
+            outputscale = data['outputscale']
+        else:
+            # Time the initial points evaluation
+            self.results_manager.start_timing('True Objective Evaluations')
+            init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
+                                    n_init_sobol=n_sobol_init)
+            self.results_manager.end_timing('True Objective Evaluations')
+            
+            self.train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
+            self.train_y = jnp.array(init_vals)
+            lengthscales = None
+            outputscale = None
+
+        # Best point so far
+        idx_best = jnp.argmax(self.train_y)
+        self.best_pt = scale_from_unit(self.train_x[idx_best],self.loglikelihood.param_bounds).flatten()
+        self.best_f = float(self.train_y.max())
+        self.best = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
+        log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
 
         # GP setup
         if use_clf:
@@ -507,6 +511,10 @@ class BOBE:
                     }
                     if hasattr(gp_obj, 'tausq'):
                         gp_hyperparams['tausq'] = float(gp_obj.tausq)
+                    
+                    # Track GP hyperparameters evolution
+                    lengthscales_list = gp_hyperparams['lengthscales'] if isinstance(gp_hyperparams['lengthscales'], list) else [gp_hyperparams['lengthscales']]
+                    self.results_manager.update_gp_hyperparams(ii, lengthscales_list, gp_hyperparams['outputscale'])
                 else:
                     gp_hyperparams = None
             except:
@@ -540,6 +548,10 @@ class BOBE:
                 self.best_pt = new_pt
                 self.best = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt.flatten())}
                 best_pt_iteration = ii
+            
+            # Track best loglikelihood evolution
+            self.results_manager.update_best_loglike(ii, self.best_f)
+            
             log.info(f" Current best point {self.best} with value = {self.best_f:.4f}, found at iteration {best_pt_iteration}")
 
             if i % 4 == 0 and i > 0:
@@ -553,9 +565,18 @@ class BOBE:
                 log.info(" Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1,equal_weights=True,
+                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1,equal_weights=False,
                 )
                 self.results_manager.end_timing('Nested Sampling')
+                # now get equally weighted samples
+                equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], ns_samples['weights'])
+                self.mc_samples = {
+                    'x': equal_samples,
+                    'logl': equal_logl,
+                    'weights': np.ones(equal_samples.shape[0]),
+                    'method': 'NS'
+                }
+
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
                 self.converged = self.check_convergence(ii, logz_dict, threshold=self.logz_threshold)
                 if ns_success and self.converged:
@@ -564,9 +585,6 @@ class BOBE:
                     results_dict['logz'] = logz_dict
                     results_dict['termination_reason'] = self.termination_reason
                     break
-
-                self.mc_samples = ns_samples
-                self.mc_samples['method'] = 'NS'
 
             self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
@@ -606,14 +624,15 @@ class BOBE:
 
 
         if ns_samples is None:
+        # if not self.do_final_ns:
             log.info("No nested sampling results found, MC samples from HMC/MCMC will be used instead.")
             self.results_manager.start_timing('MCMC Sampling')
             mc_samples = get_mc_samples(
-                    self.gp, warmup_steps=512, num_samples=16384,
+                    self.gp, warmup_steps=512, num_samples=1000*self.ndim,
                     thinning=4, method="NUTS")
             self.results_manager.end_timing('MCMC Sampling')
             samples = mc_samples['x']
-            weights = mc_samples['weights'] if 'weights' in mc_samples else jnp.ones(mc_samples['x'].shape[0])
+            weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
             loglikes = mc_samples['logp']
         else:
             samples = ns_samples['x']
