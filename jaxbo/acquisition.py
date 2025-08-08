@@ -163,7 +163,7 @@ class LogEI(EI):
         best_f = self.gp.train_y.max() - self.zeta
 
         # Compute scaled improvement
-        u = _scaled_improvement(mu, sigma, best_f, self.maximize)
+        u = _scaled_improvement(mu, sigma, best_f)
         
         # Compute log EI
         log_ei = _log_ei_helper(u) + jnp.log(sigma)

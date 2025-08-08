@@ -18,7 +18,7 @@ from .clf_gp import ClassifierGP
 from .loglike import ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
-from .utils import scale_from_unit, scale_to_unit
+from .utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal
 from .seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from .optim import optimize
@@ -394,6 +394,7 @@ class BOBE:
 
 
             # ideally, we want to decide whether to do the mc_update depending on the results of the previous steps
+            #  e.g. if using ns_samples we can stay on it for a bit longer since it explores the space better
             ii = i + 1
             refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and ii >= self.miniters
@@ -421,6 +422,7 @@ class BOBE:
                                          ndim = self.ndim,
                                          x0 = x0_acq,
                                          n_restarts=4,
+                                         maxiter=200,
                                          verbose=True,)
             new_pt_u = jnp.atleast_2d(new_pt_u)  # Ensure new_pt_u is at least 2D
             
@@ -465,9 +467,18 @@ class BOBE:
             if ns_flag:
                 log.info(" Running Nested Sampling")
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1
+                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1,equal_weights=False
                 )
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
+                # now get equally weighted samples
+                equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], ns_samples['weights'])
+                self.mc_samples = {
+                    'x': equal_samples,
+                    'logl': equal_logl,
+                    'weights': np.ones(equal_samples.shape[0]),
+                    'method': 'NS',
+                    'best': ns_samples['best']
+                }
                 self.converged = self.check_convergence(ii, logz_dict, threshold=self.logz_threshold,ndim=self.ndim)
                 if ns_success and self.converged:
                     self.converged = True
@@ -476,8 +487,8 @@ class BOBE:
                     results_dict['termination_reason'] = self.termination_reason
                     break
 
-                self.mc_samples = ns_samples
-                self.mc_samples['method'] = 'NS'
+                # self.mc_samples = ns_samples
+                # self.mc_samples['method'] = 'NS'
 
             self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
