@@ -39,3 +39,7 @@ MANIFEST
 resume_plot*
 test_methods/
 *.log
+*.json
+*.pkl
+*.paramnames
+*.ranges
