@@ -41,3 +41,31 @@ plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=
 # PolyChord result: # log-evidence
 # logZ: -5529.65218118231
 # logZstd: 0.447056743748251
+
+# INFO:[NS]: Nested Sampling took 289.45s
+# INFO:[NS]: Log Z evaluated using (30859,) points
+# INFO:[NS]: Dynesty made 1084416 function calls, max value of logl = -5488.9169
+# 2025-08-06 17:34:02,615 INFO:[BO]:  LogZ info: mean=-5529.2378, dlogz sampler=0.2430, upper=-5513.5731, lower=-5529.9985
+# 2025-08-06 17:34:02,616 INFO:[BO]:  Convergence check: delta = 0.7608, step = 1349
+# 2025-08-06 17:34:02,616 INFO:[BO]:  Converged
+# 2025-08-06 17:34:02,621 INFO:[BO]:  Sampling stopped: LogZ converged
+# 2025-08-06 17:34:02,621 INFO:[BO]:  Final GP training set size: 1360, max size: 1800
+# 2025-08-06 17:34:02,621 INFO:[BO]:  Number of iterations: 1350, max iterations: 2000
+# 2025-08-06 17:34:02,621 INFO:[BO]: Using nested sampling results
+# Total time taken = 10917.0748 seconds
+# INFO:jaxbo.utils:Parameter limits from GP
+# INFO:jaxbo.utils:\Omega_K = 0.0023\pm 0.0014
+# INFO:jaxbo.utils:\Omega_\mathrm{c} h^2 = 0.1199^{+0.0011}_{-0.00099}
+# INFO:jaxbo.utils:\log(10^{10} A_\mathrm{s}) = 3.039^{+0.015}_{-0.017}
+# INFO:jaxbo.utils:n_\mathrm{s} = 0.9626\pm 0.0041
+# INFO:jaxbo.utils:H_0 = 68.32^{+0.48}_{-0.55}
+# INFO:jaxbo.utils:\Omega_\mathrm{b} h^2 = 0.02217\pm 0.00014
+# INFO:jaxbo.utils:\tau_\mathrm{reio} = 0.0533^{+0.0073}_{-0.0083}
+# INFO:jaxbo.utils:Parameter limits from MCMC
+# INFO:jaxbo.utils:\Omega_K = 0.0022^{+0.0015}_{-0.0013}
+# INFO:jaxbo.utils:\Omega_\mathrm{c} h^2 = 0.1194^{+0.0011}_{-0.0010}
+# INFO:jaxbo.utils:\log(10^{10} A_\mathrm{s}) = 3.044\pm 0.014
+# INFO:jaxbo.utils:n_\mathrm{s} = 0.9639\pm 0.0040
+# INFO:jaxbo.utils:H_0 = 68.45\pm 0.49
+# INFO:jaxbo.utils:\Omega_\mathrm{b} h^2 = 0.02220\pm 0.00013
+# INFO:jaxbo.utils:\tau_\mathrm{reio} = 0.0558\pm 0.0070

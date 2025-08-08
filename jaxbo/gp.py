@@ -186,9 +186,83 @@ class GP(ABC):
         self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.outputscale_bounds]
         log.info(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
 
-    @abstractmethod
-    def fit(self):
-        pass
+
+    def fit(self,lr=1e-2,maxiter=150,n_restarts=2):
+        """
+        Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
+
+        Arguments
+        ---------
+        lr: float
+            The learning rate for the optax optimizer. Default is 1e-2.
+        maxiter: int
+            The maximum number of iterations for the optax optimizer. Default is 250.
+        n_restarts: int
+            The number of restarts for the optax optimizer. Default is 2.
+
+        """
+        ndim = self.ndim
+        outputscale = jnp.array([self.outputscale])
+        init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
+        log.info(f" Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+        bounds = jnp.array(self.hyperparam_bounds)
+        mins = bounds[:,0]
+        maxs = bounds[:,1]
+        scales = maxs - mins
+        optimizer = adam(learning_rate=lr)
+
+        # Optimization to be moved, use the method in optim.py
+        @jax.jit
+        def mll_optim(params):
+            hyperparams = 10**params
+            lengthscales = hyperparams[0:-1]
+            outputscale = hyperparams[-1]
+            k = self.kernel(self.train_x,self.train_x,lengthscales,outputscale,noise=self.noise,include_noise=True)
+            mll = gp_mll(k,self.train_y,self.train_y.shape[0])
+            return -mll    
+
+        @jax.jit
+        def step(carry):
+            """
+            Step function for the optimizer
+            """
+            u_params, opt_state = carry
+            params = scale_from_unit(u_params,bounds.T)
+            loss, grads = jax.value_and_grad(mll_optim)(params)
+            grads = grads * scales
+            updates, opt_state = optimizer.update(grads, opt_state)
+            u_params = apply_updates(u_params, updates)
+            u_params = jnp.clip(u_params, 0.,1.)
+            carry = u_params, opt_state
+            return carry, loss
+        
+        best_f = jnp.inf
+        best_params = None
+
+        u_params = scale_to_unit(init_params,bounds.T)
+
+        # display with progress bar
+        r = jnp.arange(maxiter)
+        for n in range(n_restarts):
+            opt_state = optimizer.init(u_params)
+            progress_bar = tqdm.tqdm(r,desc=f'Training GP')
+            with logging_redirect_tqdm():
+                for i in progress_bar:
+                    (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
+                    progress_bar.set_postfix({"fval": float(fval)})
+                    if fval < best_f:
+                        best_f = fval
+                        best_params = u_params
+            u_params = jnp.clip(u_params + 0.25*np.random.normal(size=init_params.shape),0,1)
+        params = scale_from_unit(best_params,bounds.T)
+        hyperparams = 10 ** params
+        self.lengthscales = hyperparams[0:-1]
+        self.outputscale = hyperparams[-1]
+        log.info(f" Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+        self.K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+        self.cholesky = jnp.linalg.cholesky(self.K)
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
+        self.fitted = True
 
     def predict_mean(self,x):
         """

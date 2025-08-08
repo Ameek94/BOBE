@@ -11,6 +11,7 @@ from jax import config, vmap, jit
 config.update("jax_enable_x64", True)
 from .gp import GP
 from .logging_utils import get_logger
+from .seed_utils import get_numpy_rng
 from scipy.special import logsumexp
 log = get_logger("[ns]")
 
@@ -31,6 +32,26 @@ def renormalise_log_weights(log_weights):
     normalized_weights = np.exp(log_weights - log_total)
     return normalized_weights
 
+def resample_equal(samples, aux, logwts, rstate):
+    # Resample samples to obtain equal weights. Taken from jaxns
+    wts = renormalise_log_weights(logwts)
+    weights = wts / wts.sum()
+    cumulative_sum = np.cumsum(weights)
+    cumulative_sum /= cumulative_sum[-1]
+    nsamples = len(weights)
+    positions = (rstate.random() + np.arange(nsamples)) / nsamples
+    idx = np.zeros(nsamples, dtype=int)
+    i, j = 0, 0
+    while i < nsamples:
+        if positions[i] < cumulative_sum[j]:
+            idx[i] = j
+            i += 1
+        else:
+            j += 1
+    perm = rstate.permutation(nsamples)
+    resampled_samples = samples[idx][perm]
+    resampled_aux = aux[idx][perm]
+    return resampled_samples, resampled_aux
 #-------------Dynesty functions---------------------
 def prior_transform(x):
     return x
@@ -135,22 +156,25 @@ def nested_sampling_Dy(gp: GP
         sampler = StaticNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
                                       sample=sample_method,nlive=nlive) 
         sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
+        res = sampler.results  # type: ignore # grab our results
+        logl = res['logl']
+        # add check for all same logl values in case of
+        if np.all(logl == logl[0]):
+            success = False
+            log.warning("All logl values are the same, this may indicate a problem with the model or the data. Retrying with the dynamic nested sampler.")
+            sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
+                                       sample=sample_method,nlive=nlive)
+            sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)
+            res = sampler.results
 
     log.info(f" Nested Sampling took {time.time() - start:.2f}s")
-    res = sampler.results  # type: ignore # grab our results
-    logl = res['logl']
-    # add check for all same logl values
-    if np.all(logl == logl[0]):
-        success = False
-        log.warning("All logl values are the same, this may indicate a problem with the model or the data.")
-        # how to deal with this case?
-
     log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
     log.info(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
     mean = res['logz'][-1]
     logz_err = res['logzerr'][-1]
     logz_dict = {'mean': mean}
     logz_dict['dlogz sampler'] = logz_err
+    logl = res['logl']
     if logz_std:
         logl_lower,logl_upper = logl - res['blob'], logl + res['blob'] 
         logvol = res['logvol']
@@ -163,9 +187,10 @@ def nested_sampling_Dy(gp: GP
     best_pt = res['samples'][np.argmax(res['logl'])]
     samples['best'] = best_pt
     if equal_weights:
-        samples['x'] = res.samples_equal()
-        weights = np.ones(samples['x'].shape[0])
-        samples['weights'] = weights
+        equal_samples, equal_logl = resample_equal(res['samples'], logl, res['logwt'], get_numpy_rng())
+        samples['x'] = equal_samples
+        samples['logl'] = equal_logl
+        samples['weights'] = np.ones(len(equal_samples))
     else:
         samples['x'] = res['samples']
         weights = renormalise_log_weights(res['logwt'])

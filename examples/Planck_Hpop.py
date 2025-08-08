@@ -5,12 +5,12 @@ import time
 import sys
 
 
-clf = sys.argv[1] if len(sys.argv) > 1 else 'ellipsoid'
+clf = sys.argv[1] if len(sys.argv) > 1 else 'svm'
 
 cobaya_input_file = './cosmo_input/LCDM_new_CMB.yaml'
 
 likelihood = cobaya_likelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e6, noise_std=0.0,name='Planck_Hpop')
+        minus_inf=-1e6, noise_std=0.0,name=f'Planck_Hpop_{clf}')
 
 if clf == 'svm':
     clf_update_step = 1
@@ -18,15 +18,15 @@ else:
     clf_update_step = 5
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=64, n_sobol_init = 32, 
+sampler = BOBE(n_cobaya_init=32, n_sobol_init = 32, 
         miniters=1000, maxiters=5000,max_gp_size=2000,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step = 50, update_mc_step = 5, ns_step = 100,
-        num_hmc_warmup = 512,num_hmc_samples = 4096, mc_points_size = 96,
-        lengthscale_priors='DSLP',logz_threshold=10.,clf_threshold=350,gp_threshold=5000,
+        fit_step = 50, update_mc_step = 5, ns_step = 50,
+        num_hmc_warmup = 512,num_hmc_samples = 2048, mc_points_size = 128,
+        lengthscale_priors='DSLP',logz_threshold=10.,clf_threshold=350,gp_threshold=1000,
         use_clf=True,clf_type=clf,clf_use_size=100,clf_update_step=clf_update_step,minus_inf=-1e6)
 
 gp, ns_samples, logz_dict = sampler.run()
@@ -34,7 +34,7 @@ end = time.time()
 print(f"Total time taken = {end-start:.4f} seconds")
 
 
-param_list_LCDM = ['omch2','logA','ns','H0','ombh2','tau']
+param_list_LCDM = ['omch2','ombh2','logA','ns','H0','tau']
 plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
                    plot_params=param_list_LCDM,
                    param_labels=likelihood.param_labels,output_file=f'{likelihood.name}',

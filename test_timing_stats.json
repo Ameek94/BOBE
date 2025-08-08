@@ -1,0 +1,35 @@
+{
+  "evidence": {
+    "logz": NaN,
+    "logz_err": 0.0,
+    "logz_lower": NaN,
+    "logz_upper": NaN
+  },
+  "parameters": {
+    "x": {
+      "mean": 0.5396746773279064,
+      "std": 0.28696491307571853,
+      "2.5_percentile": 0.07037667709527351,
+      "97.5_percentile": 0.9855783783792118,
+      "16_percentile": 0.17921905252821246,
+      "84_percentile": 0.8776892439522312,
+      "median": 0.575333624169299
+    },
+    "y": {
+      "mean": 0.4947217795499469,
+      "std": 0.3045353893792957,
+      "2.5_percentile": 0.005881916194579229,
+      "97.5_percentile": 0.9783993026424789,
+      "16_percentile": 0.15220275199875677,
+      "84_percentile": 0.872730444998089,
+      "median": 0.4557851065737637
+    }
+  },
+  "diagnostics": {
+    "n_samples": 100,
+    "n_effective": 99,
+    "runtime_hours": 0.00014496326446533203,
+    "converged": true,
+    "termination_reason": "Test completed"
+  }
+}

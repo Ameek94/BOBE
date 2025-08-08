@@ -24,8 +24,8 @@ sampler = BOBE(n_cobaya_init=64, n_sobol_init = 256,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step = 50, update_mc_step = 5, ns_step = 100,
-        num_hmc_warmup = 512,num_hmc_samples = 4096, mc_points_size = 96,
+        fit_step = 50, update_mc_step = 5, ns_step = 75,
+        num_hmc_warmup = 512,num_hmc_samples = 4096, mc_points_size = 128,
         lengthscale_priors='DSLP',logz_threshold=5.,clf_threshold=400,gp_threshold=5000,
         use_clf=True,clf_type=clf,clf_use_size=100,clf_update_step=clf_update_step,minus_inf=-1e6)
 
