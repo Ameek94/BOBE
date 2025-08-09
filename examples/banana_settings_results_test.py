@@ -73,8 +73,8 @@ def demonstrate_settings_system():
     # Method 1: Create settings manually using dataclasses
     print("\n1. Creating custom settings...")
     bobe_settings = BOBESettings(
-        maxiters=150,
-        miniters=60,
+        maxiters=100,
+        miniters=30,
         use_clf=False,  # No classifier for 2D problem
         max_gp_size=250,
         logz_threshold=0.05,
@@ -211,6 +211,10 @@ def compare_with_dynesty(likelihood, bobe_results=None):
     
     print(f"\n=== Comparison with Dynesty ===")
     
+    def loglike(X):
+        logpdf = -0.25*(5*(0.2-X[0]))**2 - (20*(X[1]/4 - X[0]**4))**2
+        return logpdf
+
     def prior_transform(x):
         """Transform unit cube to parameter space."""
         x_new = x.copy()
@@ -221,15 +225,15 @@ def compare_with_dynesty(likelihood, bobe_results=None):
     print("Running Dynesty for comparison...")
     start_time = time.time()
     
-    # Get the correct method for the likelihood
-    loglike_func = getattr(likelihood, 'loglikelihood', None)
-    if loglike_func is None:
-        loglike_func = getattr(likelihood, '__call__', None)
-    if loglike_func is None:
-        loglike_func = likelihood  # In case it's callable directly
+    # # Get the correct method for the likelihood
+    # loglike_func = getattr(likelihood, 'loglikelihood', None)
+    # if loglike_func is None:
+    #     loglike_func = getattr(likelihood, '__call__', None)
+    # if loglike_func is None:
+    #     loglike_func = likelihood  # In case it's callable directly
     
     dns_sampler = DynamicNestedSampler(
-        loglike_func, 
+        loglike, 
         prior_transform, 
         ndim=likelihood.ndim,
         sample='rwalk'
@@ -301,7 +305,7 @@ def check_getdist_compatibility(output_file="banana_test"):
     try:
         # Load with GetDist directly
         from getdist import loadMCSamples
-        samples = loadMCSamples(output_file)
+        samples = loadMCSamples(f'./{output_file}')
         
         print(f"✓ GetDist successfully loaded {samples.numrows} samples")
         print(f"✓ Parameters: {samples.getParamNames().list()}")

@@ -314,9 +314,8 @@ class BOBE:
             converged=converged,
             threshold=threshold
         )
-        
+        log.info(f" Convergence check: delta = {delta:.4f}, step = {step}, threshold = {threshold}")
         if converged:
-            log.info(f" Convergence check: delta = {delta:.4f}, step = {step}")
             log.info(" Converged")
             return True
         else:
@@ -386,8 +385,8 @@ class BOBE:
 
             self.results_manager.start_timing('Acquisition Optimization')
             new_pt_u, acq_val = optimize(WIPV, 
-                                         func_args = (self.gp,), 
-                                         func_kwargs = {'mc_points': self.mc_points},
+                                         fun_args = (self.gp,), 
+                                         fun_kwargs = {'mc_points': self.mc_points},
                                          ndim = self.ndim,
                                          x0 = x0_acq,
                                          n_restarts=4,
@@ -411,22 +410,36 @@ class BOBE:
 
             # Extract GP hyperparameters for tracking
             try:
-                gp_obj = self.gp                    
-                if hasattr(gp_obj, 'lengthscales') and hasattr(gp_obj, 'outputscale'):
-                    gp_hyperparams = {
-                        'lengthscales': gp_obj.lengthscales.tolist() if hasattr(gp_obj.lengthscales, 'tolist') else float(gp_obj.lengthscales),
-                        'outputscale': float(gp_obj.outputscale)
-                    }
-                    if hasattr(gp_obj, 'tausq'):
-                        gp_hyperparams['tausq'] = float(gp_obj.tausq)
+                gp_obj = self.gp           
+
+                lengthscales = gp_obj.lengthscales
+                outputscale = gp_obj.outputscale
+                gp_hyperparams = {
+                    'lengthscales': lengthscales.tolist() if hasattr(lengthscales, 'tolist') else float(lengthscales),
+                    'outputscale': float(outputscale)
+                }
+                lengthscales_list = gp_hyperparams['lengthscales'] if isinstance(gp_hyperparams['lengthscales'], list) else [gp_hyperparams['lengthscales']]
+                self.results_manager.update_gp_hyperparams(ii, lengthscales_list, gp_hyperparams['outputscale'])
+                log.info(f"Saved GP hyperparameters: {gp_hyperparams}")
+        
+                # if hasattr(gp_obj, 'lengthscales') and hasattr(gp_obj, 'outputscale'):
+                #     gp_hyperparams = {
+                #         'lengthscales': gp_obj.lengthscales.tolist() if hasattr(gp_obj.lengthscales, 'tolist') else float(gp_obj.lengthscales),
+                #         'outputscale': float(gp_obj.outputscale)
+                #     }
+                #     if hasattr(gp_obj, 'tausq'):
+                #         gp_hyperparams['tausq'] = float(gp_obj.tausq)
                     
-                    # Track GP hyperparameters evolution
-                    lengthscales_list = gp_hyperparams['lengthscales'] if isinstance(gp_hyperparams['lengthscales'], list) else [gp_hyperparams['lengthscales']]
-                    self.results_manager.update_gp_hyperparams(ii, lengthscales_list, gp_hyperparams['outputscale'])
-                else:
-                    gp_hyperparams = None
+                #     # Track GP hyperparameters evolution
+                #     lengthscales_list = gp_hyperparams['lengthscales'] if isinstance(gp_hyperparams['lengthscales'], list) else [gp_hyperparams['lengthscales']]
+                #     self.results_manager.update_gp_hyperparams(ii, lengthscales_list, gp_hyperparams['outputscale'])
+                #     log.info(f"Saved GP hyperparameters: {gp_hyperparams}")
+                # else:
+                #     gp_hyperparams = None
+                #     log.info("GP hyperparameters not available or not in expected format.")
             except:
                 gp_hyperparams = None
+                log.info("Error extracting GP hyperparameters, they may not be available in this GP implementation.")
 
             # Update results manager with iteration info (simplified)
             self.results_manager.update_iteration(iteration=ii)
@@ -476,17 +489,8 @@ class BOBE:
                     self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1,equal_weights=False
                 )
                 self.results_manager.end_timing('Nested Sampling')
-                # now get equally weighted samples
-                equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], ns_samples['weights'])
-                self.mc_samples = {
-                    'x': equal_samples,
-                    'logl': equal_logl,
-                    'weights': np.ones(equal_samples.shape[0]),
-                    'method': 'NS',
-                    'best': ns_samples['best']
-                }
 
-                log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
+                log.info(f" NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
                 # now get equally weighted samples
                 equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], ns_samples['weights'])
                 self.mc_samples = {
@@ -496,9 +500,8 @@ class BOBE:
                     'method': 'NS',
                     'best': ns_samples['best']
                 }
-                self.converged = self.check_convergence(ii, logz_dict, threshold=self.logz_threshold,ndim=self.ndim)
+                self.converged = self.check_convergence(ii, logz_dict, threshold=self.logz_threshold)
                 if ns_success and self.converged:
-                    self.converged = True
                     self.termination_reason = "LogZ converged"
                     results_dict['logz'] = logz_dict
                     results_dict['termination_reason'] = self.termination_reason

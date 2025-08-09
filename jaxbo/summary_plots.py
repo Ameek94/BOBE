@@ -546,7 +546,7 @@ class BOBESummaryPlotter:
         self.plot_timing_breakdown(timing_data=timing_data, ax=ax6)
         
         # Add overall title
-        fig.suptitle(f'BOBE Summary Dashboard: {self.output_file}', 
+        fig.suptitle(f'BOBE Summary: {self.output_file}', 
                     fontsize=16*self.figsize_scale, y=0.95)
         
         if save_path:

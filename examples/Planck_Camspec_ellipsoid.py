@@ -9,18 +9,18 @@ likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999
         minus_inf=-1e5, noise_std=0.0,name='Planck_Camspec_ellipsoid')
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init = 128, 
-        miniters=0, maxiters=2500,max_gp_size=1500,
+sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
+        miniters=0, maxiters=2500, max_gp_size=1500,
         loglikelihood=likelihood,
-        resume=True,
+        resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step = 40, update_mc_step = 5, ns_step = 50,
-        num_hmc_warmup = 512,num_hmc_samples = 1024, mc_points_size = 64,
+        fit_step=40, update_mc_step=5, ns_step=50,
+        num_hmc_warmup=512, num_hmc_samples=2048, mc_points_size=64,
         lengthscale_priors='DSLP',
-        use_clf=True,clf_type="ellipsoid",clf_use_size=100,clf_update_step=5,
+        use_clf=True, clf_type="nn", clf_use_size=50, clf_update_step=5,
         clf_threshold=500, gp_threshold=5000,
-        minus_inf=-1e5,logz_threshold=5.)
+        minus_inf=-1e5, logz_threshold=10.)
 
 results = sampler.run()
 gp = results['gp']

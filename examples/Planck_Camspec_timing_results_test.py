@@ -2,17 +2,17 @@ from jaxbo.bo import BOBE
 from jaxbo.utils import plot_final_samples
 from jaxbo.loglike import CobayaLikelihood
 from jaxbo.summary_plots import BOBESummaryPlotter
-import time
 import matplotlib.pyplot as plt
+import time
 
-# Set up the cosmological likelihood
-cobaya_input_file = './cosmo_input/LCDM_6D.yaml'
+cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0, name='Planck_lite_clf_timing_test')
+        minus_inf=-1e5, noise_std=0.0,name='Planck_Camspec_ellipsoid')
+
 
 print("="*60)
-print("PLANCK LITE CLF TIMING TEST")
+print("PLANCK CAMSPEC CLF TEST")
 print("="*60)
 print(f"Likelihood: {likelihood.name}")
 print(f"Parameters: {likelihood.param_list}")
@@ -20,30 +20,18 @@ print(f"Dimensions: {len(likelihood.param_list)}")
 print("="*60)
 
 start = time.time()
-sampler = BOBE(
-    n_cobaya_init=4, 
-    n_sobol_init=16, 
-    miniters=25, 
-    maxiters=150,
-    max_gp_size=200,
-    loglikelihood=likelihood,
-    fit_step=5, 
-    update_mc_step=5, 
-    ns_step=10,
-    num_hmc_warmup=512,
-    num_hmc_samples=512, 
-    mc_points_size=64,
-    lengthscale_priors='DSLP', 
-    use_clf=True,
-    clf_use_size=25,
-    clf_threshold=350,
-    clf_update_step=1,  # SVM update step
-    clf_type='svm',  # Using SVM for classification
-    minus_inf=-1e5,
-    logz_threshold=2.,
-    seed=42,  # For reproducibility
-    do_final_ns=False,
-)
+sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
+        miniters=600, maxiters=2500, max_gp_size=1500,
+        loglikelihood=likelihood,
+        resume=False,
+        resume_file=f'{likelihood.name}.npz',
+        save=True,
+        fit_step=40, update_mc_step=5, ns_step=50,
+        num_hmc_warmup=512, num_hmc_samples=2048, mc_points_size=96,
+        lengthscale_priors='DSLP',
+        use_clf=True, clf_type="nn", clf_use_size=50, clf_update_step=5,
+        clf_threshold=500, gp_threshold=5000,
+        minus_inf=-1e5, logz_threshold=10.)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
@@ -56,6 +44,7 @@ print("\n" + "="*60)
 print("RUN COMPLETED")
 print("="*60)
 print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
+
 
 # Extract components for backward compatibility
 gp = results['gp']
@@ -156,6 +145,9 @@ else:  # Dictionary format
     sample_array = samples['x']
     weights_array = samples['weights']
 
+
+
+param_list_LCDM = ['omch2','logA','ns','H0','ombh2','tau']
 plot_final_samples(
     gp, 
     {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
@@ -163,10 +155,10 @@ plot_final_samples(
     param_bounds=likelihood.param_bounds,
     param_labels=likelihood.param_labels,
     output_file=likelihood.name,
-    reference_file='./cosmo_input/chains/Planck_lite_LCDM',
-    reference_ignore_rows=0.3,
-    reference_label='MCMC',
-    scatter_points=False
+    reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
+    reference_ignore_rows=0.0,
+    reference_label='PolyChord',
+    scatter_points=False,
 )
 
 # Save comprehensive results
@@ -183,26 +175,19 @@ print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
 print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
 print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
 
-# Create timing comparison with previous runs (if comments in original file are accurate)
-print("\n" + "="*60)
-print("PERFORMANCE COMPARISON")
-print("="*60)
 
-# Previous timing from comments in original file
-previous_times = {
-    "Fast updates": 292.68,
-    "Older code": 387.66
-}
+# 2025-04-21 18:27:42,039 INFO:[BO]:  Final LogZ: upper=-5527.4084, mean=-5529.4980, lower=-5530.0967, dlogz sampler=0.1720
+# PolyChord result: # log-evidence
+# logZ: -5529.65218118231
+# logZstd: 0.447056743748251
 
-current_time = timing_data['total_runtime']
-print(f"Current run: {current_time:.2f} seconds")
+# 2025-07-26 05:39:58,814 INFO:[BO]:  Final LogZ: mean=-5529.6915, dlogz sampler=0.1793, upper=-5509.8101, lower=-5530.1042
+# Total time taken = 9495.8532 seconds
 
-for version, prev_time in previous_times.items():
-    speedup = prev_time / current_time
-    improvement = ((prev_time - current_time) / prev_time) * 100
-    print(f"vs {version}: {speedup:.2f}x speedup ({improvement:+.1f}%)")
-
-print("\n" + "="*60)
-print("ANALYSIS COMPLETE")
-print("="*60)
-print("Check the generated plots and saved files for detailed analysis.")
+# Ellipsoid classifier used for Planck Camspec data
+# INFO:[bo]: LogZ info: mean=-5529.5996, dlogz sampler=0.2407, upper=-5529.2020, lower=-5529.9512
+# INFO:[bo]: Convergence check: delta = 0.7493, step = 350
+# INFO:[bo]: Converged
+# INFO:[bo]: Sampling stopped: LogZ converged
+# INFO:[bo]: Final GP training set size: 1251, max size: 1500
+# INFO:[bo]: Number of iterations: 350, max iterations: 2500

@@ -42,3 +42,4 @@ test_methods/
 *.json
 *.paramnames
 *.ranges
+*.pkl
