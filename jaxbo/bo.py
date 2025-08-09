@@ -486,13 +486,13 @@ class BOBE:
                 log.info(" Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1,equal_weights=False
+                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.05,equal_weights=False
                 )
                 self.results_manager.end_timing('Nested Sampling')
 
                 log.info(f" NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
                 # now get equally weighted samples
-                equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], ns_samples['weights'])
+                equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
                 self.mc_samples = {
                     'x': equal_samples,
                     'logl': equal_logl,

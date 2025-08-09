@@ -49,10 +49,13 @@ def renormalise_log_weights(log_weights):
     normalized_weights = np.exp(log_weights - log_total)
     return normalized_weights
 
-def resample_equal(samples, aux, logwts):
+def resample_equal(samples, aux, weights=None, logwts=None):
     rstate = get_numpy_rng()
     # Resample samples to obtain equal weights. Taken from jaxns
-    wts = renormalise_log_weights(logwts)
+    if logwts is not None:
+        wts = renormalise_log_weights(logwts)
+    else:
+        wts = weights
     weights = wts / wts.sum()
     cumulative_sum = np.cumsum(weights)
     cumulative_sum /= cumulative_sum[-1]

@@ -16,6 +16,84 @@ from .seed_utils import get_numpy_rng, get_new_jax_key
 log = get_logger("[clf]")
 
 # -----------------------------------------------------------------------------
+# Scikit-learn SVM Classifier using JAX for prediction.
+# -----------------------------------------------------------------------------
+
+@jax.jit
+def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
+    """
+    Compute the decision function for SVM with RBF kernel.
+    
+    Arguments:
+      x: Input data point, shape (n_features,)
+      support_vectors: JAX array of support vectors, shape (n_sv, n_features)
+      dual_coef: JAX array of dual coefficients, shape (n_sv,)
+      intercept: Scalar bias term.
+      gamma: RBF kernel gamma parameter.
+      
+    Returns:
+      Decision function value (scalar). Sign of this value gives the predicted class.
+    """
+    # Compute squared Euclidean distances between x and each support vector.
+    diff = support_vectors - x  # shape (n_sv, n_features)
+    norm_sq = jnp.sum(diff ** 2, axis=1)  # shape (n_sv,)
+    # Compute RBF kernel values.
+    kernel_vals = jnp.exp(-gamma * norm_sq)  # shape (n_sv,)
+    # Compute the decision function.
+    decision = jnp.sum(dual_coef * kernel_vals) + intercept
+    return decision
+
+def svm_predict_proba(x, support_vectors, dual_coef, intercept, gamma):
+    decision = svm_predict(x, support_vectors, dual_coef, intercept, gamma)
+    return jnp.where(decision >= 0, 1.0, 0.0)  # Binary classification: 1 if decision >= 0, else 0
+
+def svm_predict_batch(x, support_vectors, dual_coef, intercept, gamma,batch_size=200):
+    """
+    Compute the decision function for SVM with RBF kernel for a batch of inputs.    
+    """
+    batched_predict = lambda x: svm_predict(x, support_vectors, dual_coef, intercept, gamma)
+    return jax.lax.map(batched_predict, x, batch_size=batch_size)
+
+def train_svm(x,y, svm_settings = {} ,gamma="scale",C=1e7, init_params=None, **kwargs):
+    """
+    Train the SVM on the data.
+    """
+
+    gamma = svm_settings.get('gamma', "scale")
+    C = svm_settings.get('C', 1e7)
+    kernel = svm_settings.get('kernel', 'rbf')
+
+
+    # Currently missing method to handle case where data has only 1 label
+
+    clf = SVC(kernel=kernel, gamma=gamma, C=C)
+    clf.fit(x, y) 
+    support_vectors = clf.support_vectors_
+    dual_coef = clf.dual_coef_[0]  # convert to 1D array
+    intercept = float(clf.intercept_[0])
+    gamma_eff = float(clf._gamma) # note: this is the effective gamma value used by scikit-learn
+    
+    # convert to jax arrays
+    support_vectors = jnp.array(support_vectors)
+    dual_coef = jnp.array(dual_coef)
+    metrics = {
+        'n_support_vectors': len(support_vectors),
+        'gamma': f"{gamma_eff:.2e}",
+        'C': f"{C:.2e}",
+        'intercept': f"{intercept:.2e}",
+    }
+    predict_fn = jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, dual_coef=dual_coef, intercept=intercept, gamma=gamma_eff))
+    params = {
+        'support_vectors': support_vectors,
+        'dual_coef': dual_coef,
+        'intercept': intercept,
+        'gamma_eff': gamma_eff
+    }
+    return predict_fn, params, metrics
+
+
+# The methods below are currently in development
+# -----------------------------------------------------------------------------
 # Neural Network Classifier with train/validation split
 # -----------------------------------------------------------------------------
 
@@ -368,80 +446,3 @@ def ellipsoid_predict_proba(x: jnp.ndarray, params: Dict, apply_fn: Callable) ->
     """Predict probabilities for single or batch input"""
     logits = ellipsoid_predict(x, params, apply_fn)
     return jax.nn.sigmoid(logits)
-
-
-# -----------------------------------------------------------------------------
-# Scikit-learn SVM Classifier using JAX for prediction.
-# -----------------------------------------------------------------------------
-
-@jax.jit
-def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
-    """
-    Compute the decision function for SVM with RBF kernel.
-    
-    Arguments:
-      x: Input data point, shape (n_features,)
-      support_vectors: JAX array of support vectors, shape (n_sv, n_features)
-      dual_coef: JAX array of dual coefficients, shape (n_sv,)
-      intercept: Scalar bias term.
-      gamma: RBF kernel gamma parameter.
-      
-    Returns:
-      Decision function value (scalar). Sign of this value gives the predicted class.
-    """
-    # Compute squared Euclidean distances between x and each support vector.
-    diff = support_vectors - x  # shape (n_sv, n_features)
-    norm_sq = jnp.sum(diff ** 2, axis=1)  # shape (n_sv,)
-    # Compute RBF kernel values.
-    kernel_vals = jnp.exp(-gamma * norm_sq)  # shape (n_sv,)
-    # Compute the decision function.
-    decision = jnp.sum(dual_coef * kernel_vals) + intercept
-    return decision
-
-def svm_predict_proba(x, support_vectors, dual_coef, intercept, gamma):
-    decision = svm_predict(x, support_vectors, dual_coef, intercept, gamma)
-    return jnp.where(decision >= 0, 1.0, 0.0)  # Binary classification: 1 if decision >= 0, else 0
-
-def svm_predict_batch(x, support_vectors, dual_coef, intercept, gamma,batch_size=200):
-    """
-    Compute the decision function for SVM with RBF kernel for a batch of inputs.    
-    """
-    batched_predict = lambda x: svm_predict(x, support_vectors, dual_coef, intercept, gamma)
-    return jax.lax.map(batched_predict, x, batch_size=batch_size)
-
-def train_svm(x,y, svm_settings = {} ,gamma="scale",C=1e7, init_params=None, **kwargs):
-    """
-    Train the SVM on the data.
-    """
-
-    gamma = svm_settings.get('gamma', "scale")
-    C = svm_settings.get('C', 1e7)
-    kernel = svm_settings.get('kernel', 'rbf')
-
-
-    # Currently missing method to handle case where data has only 1 label
-
-    clf = SVC(kernel=kernel, gamma=gamma, C=C)
-    clf.fit(x, y) 
-    support_vectors = clf.support_vectors_
-    dual_coef = clf.dual_coef_[0]  # convert to 1D array
-    intercept = float(clf.intercept_[0])
-    gamma_eff = float(clf._gamma) # note: this is the effective gamma value used by scikit-learn
-    
-    # convert to jax arrays
-    support_vectors = jnp.array(support_vectors)
-    dual_coef = jnp.array(dual_coef)
-    metrics = {
-        'n_support_vectors': len(support_vectors),
-        'gamma': f"{gamma_eff:.2e}",
-        'C': f"{C:.2e}",
-        'intercept': f"{intercept:.2e}",
-    }
-    predict_fn = jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, dual_coef=dual_coef, intercept=intercept, gamma=gamma_eff))
-    params = {
-        'support_vectors': support_vectors,
-        'dual_coef': dual_coef,
-        'intercept': intercept,
-        'gamma_eff': gamma_eff
-    }
-    return predict_fn, params, metrics

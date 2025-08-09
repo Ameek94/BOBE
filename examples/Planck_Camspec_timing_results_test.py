@@ -33,12 +33,12 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
         resume=True,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step=25, update_mc_step=5, ns_step=50,
+        fit_step=10, update_mc_step=5, ns_step=10,
         num_hmc_warmup=512, num_hmc_samples=2048, mc_points_size=96,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
         clf_threshold=500, gp_threshold=5000,
-        minus_inf=-1e5, logz_threshold=2.)
+        minus_inf=-1e5, logz_threshold=1.)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")

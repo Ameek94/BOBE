@@ -81,7 +81,7 @@ def demonstrate_settings_system():
         lengthscale_priors='DSLP',  # This is in BOBESettings
         num_hmc_warmup=256,  # HMC settings are also in BOBESettings
         num_hmc_samples=256,
-        mc_points_size=48
+        mc_points_size=48,
     )
     
     gp_settings = GPSettings(
@@ -140,7 +140,7 @@ def run_bobe_with_settings_and_results(likelihood, settings, output_file="banana
         num_hmc_warmup=bobe_settings.num_hmc_warmup,
         num_hmc_samples=bobe_settings.num_hmc_samples,
         mc_points_size=bobe_settings.mc_points_size,
-        
+        logz_threshold=bobe_settings.logz_threshold,
         # Likelihood and other parameters
         loglikelihood=likelihood,
         fit_step=2,

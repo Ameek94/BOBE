@@ -54,6 +54,7 @@ def optimize(
     maxiter: int = 200,
     n_restarts: int = 4,
     verbose: bool = True,
+    early_stop_patience: int = 50,
     split_vmap_batch_size: int = 4,
 ) -> Tuple[jnp.ndarray, float]:
     """
@@ -136,6 +137,11 @@ def optimize(
         if current_best_val < best_f:
             best_f = current_best_val
             best_params_unit = next_params[current_best_idx]
+        else:
+            early_stop_patience -= 1
+            if early_stop_patience == 0:
+                log.info(f"Early stopping at iteration {iter_idx}")
+                break
 
         progress_bar.set_postfix({"best_value": float(best_f)})
 
