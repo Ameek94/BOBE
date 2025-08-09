@@ -27,37 +27,6 @@ from .results import BOBEResults
 
 log = get_logger("[bo]")
 
-# # 1) Filter class: only allow exactly INFO
-# class InfoFilter(logging.Filter):
-#     """
-#     """
-#     def filter(self, record):
-#         """
-#         """
-#         return record.levelno == logging.INFO
-
-# # 2) Create and configure the stdout handler
-# stdout_handler = logging.StreamHandler(sys.stdout)
-# stdout_handler.setLevel(logging.INFO)       # accept INFO and above...
-# stdout_handler.addFilter(InfoFilter())      # ...but filter down to only INFO
-# stdout_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
-# stdout_handler.setFormatter(stdout_fmt)
-
-# # 3) Create and configure the stderr handler
-# stderr_handler = logging.StreamHandler(sys.stderr)
-# stderr_handler.setLevel(logging.WARNING)    # accept WARNING and above
-# stderr_fmt = logging.Formatter('%(asctime)s %(levelname)s:%(name)s: %(message)s')
-# stderr_handler.setFormatter(stderr_fmt)
-
-# # 4) Get your logger, clear defaults, add both handlers
-# log = logging.getLogger(name="[BO]")
-# # stop this logger “bubbling” messages up to root
-# log.propagate = False  
-# log.handlers.clear()
-# log.setLevel(logging.INFO)               # ensure INFO+ get processed
-# log.addHandler(stdout_handler)
-# log.addHandler(stderr_handler)
-
 def WIPV(x, gp, mc_points=None):
     """
     Computes the Weighted Integrated Posterior Variance acquisition function.
@@ -72,64 +41,6 @@ def WIPV(x, gp, mc_points=None):
     """
     var = gp.fantasy_var(x, mc_points=mc_points)
     return jnp.mean(var)
-
-# # Acquisition optimizer
-# def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_optimizer=4):
-    
-#     f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
-
-#     @jax.jit
-#     def acq_val_grad(x):
-#         return jax.value_and_grad(f)(x)
-
-#     if x0 is None:
-#         x0 = np.random.uniform(size=(n_restarts_optimizer, mc_points.shape[1]))
-#     else:
-#         x0 = jnp.atleast_2d(x0)  # Ensure x0 is at least 2D
-#         # print(f"x0 shape: {x0.shape}, expected shape: {(n_restarts_optimizer, mc_points.shape[1])}")
-#         n_x0 = x0.shape[0]
-#         if n_x0 < n_restarts_optimizer:
-#             needed_x0 = n_restarts_optimizer - n_x0
-#             added_x0 = np.random.uniform(size=(needed_x0, mc_points.shape[1]))
-#             x0 = jnp.concatenate([x0, added_x0], axis=0)
-#     # print(f"x0 shape after processing: {x0.shape}, expected shape: {(n_restarts_optimizer, mc_points.shape[1])}")
-
-#     # params = jnp.array(np.random.uniform(0, 1, size=mc_points.shape[1])) if x0 is None else x0
-#     optimizer = adam(learning_rate=lr)
-
-#     @jax.jit
-#     def step(carry):
-#         params, opt_state = carry
-#         (val, grad) = acq_val_grad(params)
-#         updates, opt_state = optimizer.update(grad, opt_state)
-#         params = apply_updates(params, updates)
-#         return (jnp.clip(params, 0., 1.), opt_state), val
-
-#     best_f, best_params = jnp.inf, None
-#     r = jnp.arange(maxiter)
-#     for n in range(n_restarts_optimizer):
-#         params = x0[n]
-#         opt_state = optimizer.init(x0[n])
-#         progress_bar = tqdm.tqdm(r,desc=f'ACQ Optimization restart {n+1}')
-#         for i in progress_bar:
-#             (params, opt_state), fval = step((params, opt_state))
-#             progress_bar.set_postfix({"fval": float(fval)})
-#             if fval < best_f:
-#                 best_f, best_params = fval, params
-#         # Perturb for next restart
-#         # params = jnp.clip(best_params + 0.5 * jnp.array(np.random.normal(size=params.shape)), 0., 1.)
-
-#     # print(f"Best params: {best_params}, fval: {best_f}")
-#     return jnp.atleast_2d(best_params), best_f
-
-# Utility functions
-
-# def get_point_with_large_value(train_x,train_y, n_points=1):
-#     """
-#     Get a point with large value from the training data
-#     """
-#     idx = jnp.argsort(train_y.flatten())[-n_points:]
-#     return train_x[idx].flatten()
 
 def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",init_params=None):
     if method=='NUTS':

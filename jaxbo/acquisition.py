@@ -159,11 +159,14 @@ class LogEI(EI):
 
     def fun(self, x):
         mu, var = self.gp.predict(x)
+        # if jnp.any(var <= 0):
+        #     log.warning(f"Non-positive variance detected: {var}")
+        var = jnp.clip(var, min=1e-8)  # Avoid division by zero
         sigma = jnp.sqrt(var)
         best_f = self.gp.train_y.max() - self.zeta
 
         # Compute scaled improvement
-        u = _scaled_improvement(mu, sigma, best_f, self.maximize)
+        u = _scaled_improvement(mu, sigma, best_f)
         
         # Compute log EI
         log_ei = _log_ei_helper(u) + jnp.log(sigma)
@@ -252,3 +255,14 @@ class MaxVar(MonteCarloAcquisition):
         var = gp.fantasy_var(x, mc_points=mc_points)
 
         return jnp.max(var)
+    
+def get_acquisition_function(name: str, gp, **kwargs) -> AcquisitionFunction:
+    """Factory function to get an acquisition function by name."""
+    if name == "EI":
+        return EI(gp, **kwargs)
+    elif name == "LogEI":
+        return LogEI(gp, **kwargs)
+    elif name == "WIPV":
+        return WIPV(gp, **kwargs)
+    else:
+        raise ValueError(f"Unknown acquisition function: {name}")

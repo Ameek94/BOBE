@@ -80,11 +80,11 @@ def get_mean_from_cho(k12,alphas):
     return mean
 
 @jax.jit
-def gp_predict(train_y,k11_cho,k12,k22):
+def gp_predict(k11_cho,alphas,k12,k22):
     """
     Predicts the GP mean and variance at x
     """
-    mean = get_mean_from_cho(k11_cho,k12,train_y)
+    mean = get_mean_from_cho(k12,alphas)
     var = get_var_from_cho(k11_cho,k12,k22)
     return mean, var
 
@@ -290,7 +290,7 @@ class GP(ABC):
         x = jnp.atleast_2d(x)
         k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
         k22 = self.kernel(x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-        mean, var = gp_predict(self.train_y,self.cholesky,k12,k22)
+        mean, var = gp_predict(self.cholesky,self.alphas,k12,k22)
         return mean, var
 
     def update(self,new_x,new_y,refit=True,lr=1e-2,maxiter=150,n_restarts=2,step=0):
@@ -437,7 +437,7 @@ class GP(ABC):
         return gp
     
     def sample_GP_NUTS(self, warmup_steps=512, num_samples=512, progress_bar=True, thinning=8, verbose=True,
-                       init_params=None, temp=1.):
+                       init_params=None, temp=1., rng_key=None):
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
         Optionally restarts MCMC if all logp values are the same.
@@ -464,7 +464,7 @@ class GP(ABC):
             Temperature parameter for the logprob, default 1.0
         """
 
-        rng_key = get_new_jax_key()
+        rng_key = get_new_jax_key() if rng_key is None else rng_key
 
         def model():
             x = numpyro.sample('x', dist.Uniform(
