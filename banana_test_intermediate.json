@@ -1,0 +1,50 @@
+{
+  "convergence_history": [],
+  "logz_evolution": [],
+  "start_time": 1754655877.6874082,
+  "param_names": [
+    "x1",
+    "x2"
+  ],
+  "param_labels": [
+    "$x_1$",
+    "$x_2$"
+  ],
+  "param_bounds": [
+    [
+      -1,
+      -1
+    ],
+    [
+      1,
+      2
+    ]
+  ],
+  "settings": {
+    "n_cobaya_init": 4,
+    "n_sobol_init": 16,
+    "miniters": 60,
+    "maxiters": 150,
+    "max_gp_size": 250,
+    "fit_step": 2,
+    "update_mc_step": 2,
+    "ns_step": 10,
+    "num_hmc_warmup": 256,
+    "num_hmc_samples": 256,
+    "mc_points_size": 48,
+    "mc_points_method": "NUTS",
+    "lengthscale_priors": "DSLP",
+    "acq": "WIPV",
+    "use_clf": false,
+    "clf_type": "svm",
+    "clf_use_size": 300,
+    "clf_update_step": 5,
+    "clf_threshold": 250,
+    "gp_threshold": 5000,
+    "logz_threshold": 0.05,
+    "minus_inf": -100000.0,
+    "do_final_ns": true,
+    "return_getdist_samples": false,
+    "seed": null
+  }
+}

@@ -107,9 +107,8 @@ class ClassifierGP:
             self.gp = SAAS_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
                               outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
 
-        self.train_x = self.gp.train_x
-        self.train_y = self.gp.train_y
-        self.noise = self.gp.noise
+        # The train_x, train_y, and noise are now accessed via properties
+        # No need to set them directly as they point to the underlying GP
 
         # Initialize Classifier
         self.use_clf = (self.clf_data_size >= self.clf_use_size) and self.clf_flag
@@ -122,6 +121,46 @@ class ClassifierGP:
              raise ValueError(f"Classifier type '{self.clf_type}' not supported. Available: {list(available_classifiers.keys())}")
         else:
              log.info(f"Not enough data ({self.clf_data_size}) to use classifier (need {self.clf_use_size} points), or classifier type not set.")
+
+    @property
+    def lengthscales(self):
+        """Access the underlying GP's lengthscales."""
+        return self.gp.lengthscales
+    
+    @property
+    def outputscale(self):
+        """Access the underlying GP's outputscale."""
+        return self.gp.outputscale
+    
+    @property
+    def tausq(self):
+        """Access the underlying GP's tausq if available."""
+        return getattr(self.gp, 'tausq', None)
+    
+    @property
+    def train_x(self):
+        """Access the underlying GP's training inputs."""
+        return self.gp.train_x
+    
+    @property
+    def train_y(self):
+        """Access the underlying GP's training outputs."""
+        return self.gp.train_y
+    
+    @property
+    def y_mean(self):
+        """Access the underlying GP's y_mean."""
+        return self.gp.y_mean
+    
+    @property
+    def y_std(self):
+        """Access the underlying GP's y_std."""
+        return self.gp.y_std
+    
+    @property
+    def noise(self):
+        """Access the underlying GP's noise parameter."""
+        return self.gp.noise
 
 
     def _train_classifier(self):
@@ -223,10 +262,8 @@ class ClassifierGP:
             # Update GP data if within threshold
             gp_not_updated = False
             if new_y.flatten()[0] > (self.train_y_clf.max() - self.gp_threshold):
-                # Update GP
+                # Update GP - properties will automatically reflect the updated GP
                 self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
-                self.train_x = self.gp.train_x
-                self.train_y = self.gp.train_y
             else:
                 log.info("Point not within GP threshold, not updating GP.")
                 if refit:
