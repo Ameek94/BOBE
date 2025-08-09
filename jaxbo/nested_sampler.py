@@ -141,13 +141,14 @@ def nested_sampling_Dy(gp: GP
             log.warning("All logl values are the same, this may indicate a problem with the model or the data. Retrying with the dynamic nested sampler.")
             sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
                                        sample=sample_method,nlive=nlive)
-            sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)        
+            sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)     
     res = sampler.results
     mean = res['logz'][-1]
     logz_err = res['logzerr'][-1]
     logz_dict = {'mean': mean}
     logz_dict['dlogz sampler'] = logz_err
     logl = res['logl']
+    success = np.all(logl == logl[0])
     log.info(f" Nested Sampling took {time.time() - start:.2f}s")
     log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
     log.info(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
