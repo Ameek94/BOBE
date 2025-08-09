@@ -42,10 +42,10 @@ def train_nn(x: jnp.ndarray,
              dropout_rate=0.1,
              lr=1e-3,
              weight_decay=1e-4,
-             n_epochs=1000,
+             n_epochs=2000,
              batch_size=128,
              val_frac=0.2,
-             early_stop_patience=100,
+             early_stop_patience=250,
              init_params = None,
              seed=0,
              **kwargs: Any) -> Tuple[Callable, Dict, Dict]:
@@ -224,12 +224,12 @@ def train_ellipsoid(
     y: Optional[jnp.ndarray] = None,  # Labels for supervised training
     lr: float = 1e-2,
     weight_decay: float = 1e-4,
-    n_epochs: int = 1000,
+    n_epochs: int = 2000,
     batch_size: int = 32,
     seed: int = 0,
     init_params: Optional[Dict] = None,
     val_frac: float = 0.2,
-    patience: int = 500,
+    patience: int = 250,
     verbose: bool = False,
     **kwargs: Any
 ):

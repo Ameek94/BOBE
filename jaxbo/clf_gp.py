@@ -348,12 +348,13 @@ class ClassifierGP:
 
         # temps = np.arange(1, num_chains+1, 1)
 
-        max_temp = 25.
-        max_size = 2000
-        high_temp = max(4, 25 * self.train_x.shape[1] / max_size) # Adjust high_temp based on dimensionality and max size
+        # max_temp = 25. # approx makes 1\sigma -> 5\sigma
+        # max_size = 2000
+        #max(4, max_temp * self.train_x.shape[0] / max_size) # Adjust high_temp based on current size and max size
         rng_mcmc = get_numpy_rng()
+        high_temp = rng_mcmc.uniform(2, 5) ** 2
         prob = rng_mcmc.uniform(0, 1)
-        temp = np.where(prob < 0.5, 1., high_temp) # Randomly choose temperature between 1 and 4
+        temp = np.where(prob < 0.6, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         log.info(f"Running MCMC chains with temperature {temp:.2f}")
         for i in range(num_chains):
             if i== 0:

@@ -420,7 +420,7 @@ class BOBE:
                 }
                 lengthscales_list = gp_hyperparams['lengthscales'] if isinstance(gp_hyperparams['lengthscales'], list) else [gp_hyperparams['lengthscales']]
                 self.results_manager.update_gp_hyperparams(ii, lengthscales_list, gp_hyperparams['outputscale'])
-                log.info(f"Saved GP hyperparameters: {gp_hyperparams}")
+                log.debug(f"Saved GP hyperparameters: {gp_hyperparams}")
         
                 # if hasattr(gp_obj, 'lengthscales') and hasattr(gp_obj, 'outputscale'):
                 #     gp_hyperparams = {
@@ -439,7 +439,7 @@ class BOBE:
                 #     log.info("GP hyperparameters not available or not in expected format.")
             except:
                 gp_hyperparams = None
-                log.info("Error extracting GP hyperparameters, they may not be available in this GP implementation.")
+                log.error("Error extracting GP hyperparameters, they may not be available in this GP implementation.")
 
             # Update results manager with iteration info (simplified)
             self.results_manager.update_iteration(iteration=ii)

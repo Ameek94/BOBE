@@ -4,11 +4,16 @@ from jaxbo.loglike import CobayaLikelihood
 from jaxbo.summary_plots import BOBESummaryPlotter
 import matplotlib.pyplot as plt
 import time
+import sys
 
 cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
 
+
+clf = str(sys.argv[1]) if len(sys.argv) > 1 else 'nn'
+clf_update_step = 1 if clf == 'svm' else 2
+
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name='Planck_Camspec_ellipsoid')
+        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_{clf}')
 
 
 print("="*60)
@@ -19,19 +24,21 @@ print(f"Parameters: {likelihood.param_list}")
 print(f"Dimensions: {len(likelihood.param_list)}")
 print("="*60)
 
+
+
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
-        miniters=600, maxiters=2500, max_gp_size=1500,
+        miniters=0, maxiters=2500, max_gp_size=1500,
         loglikelihood=likelihood,
-        resume=False,
+        resume=True,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step=40, update_mc_step=5, ns_step=50,
+        fit_step=25, update_mc_step=5, ns_step=50,
         num_hmc_warmup=512, num_hmc_samples=2048, mc_points_size=96,
         lengthscale_priors='DSLP',
-        use_clf=True, clf_type="nn", clf_use_size=50, clf_update_step=5,
+        use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
         clf_threshold=500, gp_threshold=5000,
-        minus_inf=-1e5, logz_threshold=10.)
+        minus_inf=-1e5, logz_threshold=2.)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
