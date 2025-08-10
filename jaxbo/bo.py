@@ -14,7 +14,7 @@ import time
 # from .acquisition import WIPV, EI #, logEI
 from .gp import DSLP_GP, SAAS_GP #, sample_GP_NUTS
 from .svm_gp import SVM_GP
-from .clf_gp import ClassifierGP
+from .clf_gp import GPwithClassifier
 from .loglike import ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model

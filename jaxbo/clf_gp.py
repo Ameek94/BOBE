@@ -3,7 +3,7 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-from .gp import GP, DSLP_GP, SAAS_GP
+from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
 from .clf import train_svm, svm_predict_proba, train_nn, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
 from .seed_utils import get_new_jax_key, get_numpy_rng
 from .logging_utils import get_logger
@@ -30,7 +30,7 @@ available_classifiers = {
     # ... maybe add other classifiers
 }
 
-class ClassifierGP:
+class GPwithClassifier:
     def __init__(self, train_x=None, train_y=None, clf_flag=True,
                  clf_type='svm', clf_settings={},
                  clf_use_size=400, clf_update_step=5,
@@ -122,6 +122,9 @@ class ClassifierGP:
         else:
              log.info(f"Not enough data ({self.clf_data_size}) to use classifier (need {self.clf_use_size} points), or classifier type not set.")
 
+        self.create_jitted_single_predict()
+
+
     @property
     def lengthscales(self):
         """Access the underlying GP's lengthscales."""
@@ -161,6 +164,10 @@ class ClassifierGP:
     def noise(self):
         """Access the underlying GP's noise parameter."""
         return self.gp.noise
+    
+    @property
+    def hyperparams(self): 
+        return self.gp.hyperparams
 
 
     def _train_classifier(self):
@@ -177,6 +184,11 @@ class ClassifierGP:
         log.info(f" Number of labels 0: {np.sum(labels == 0)}, 1: {np.sum(labels == 1)}")
 
         # Add method to handle if only class is present
+        if np.all(labels == labels[0]):
+            # If all labels are the same, we make sure not to use the classifier
+            log.info("All labels are identical. Not using classifier for the moment")
+            self.use_clf = False
+            return 
 
         # Get training function and parameters
         train_func = available_classifiers[self.clf_type]['train']
@@ -200,6 +212,28 @@ class ClassifierGP:
     def fit(self, lr=1e-2, maxiter=150, n_restarts=4):
         """Fits the GP hyperparameters."""
         self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts)
+
+
+    def create_jitted_single_predict(self):
+
+        @jax.jit
+        def predict_one_mean(x):
+            gp_mean = self.gp.jitted_single_predict_mean(x)
+            if self.use_clf:
+                clf_probs = self._clf_predict_func(x)
+                return jnp.where(clf_probs >= self.probability_threshold, gp_mean, self.minus_inf)
+            return gp_mean
+
+        @jax.jit
+        def predict_one_var(x):
+            var = self.gp.jitted_single_predict_var(x)
+            if self.use_clf:
+                clf_probs = self._clf_predict_func(x)
+                return jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
+            return var
+
+        self.jitted_single_predict_mean = predict_one_mean
+        self.jitted_single_predict_var = predict_one_var
 
     def predict_mean(self, x):
         """
@@ -242,7 +276,6 @@ class ClassifierGP:
         new_x = jnp.atleast_2d(new_x)
         new_y = jnp.atleast_2d(new_y)
 
-        # can we not add point to GP if it is below threshold and correctly classified, only add to classifier data in that case?
 
         if not self.clf_flag:
             gp_not_updated = self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
@@ -252,6 +285,13 @@ class ClassifierGP:
             if is_duplicate:
                 log.info(f"Point already exists in the classifier training set, not updating.")
                 return True 
+            
+            # # can we not add point to GP if it is below threshold and correctly classified, only add to classifier data in that case?
+            # if self.use_clf:
+            #     correct_classification = (self.predict_mean(new_x) >= self.train_y_clf.max() - self.clf_threshold)
+            #     predicted_classification = (self._clf_predict_func(new_x) >= self.probability_threshold)
+            #     correctly_classified = correct_classification==predicted_classification
+
 
             # Update classifier data
             self.train_x_clf = jnp.concatenate([self.train_x_clf, new_x], axis=0)
@@ -279,6 +319,8 @@ class ClassifierGP:
             # Retrain classifier if conditions are met
             if self.use_clf and (step % self.clf_update_step == 0):
                 self._train_classifier()
+
+        self.create_jitted_single_predict()
 
         # Return whether GP was updated, classifier is always updated
         return gp_not_updated
@@ -345,17 +387,38 @@ class ClassifierGP:
 
         samples_x = []
         samples_logp = []
-
+        
         # temps = np.arange(1, num_chains+1, 1)
 
         # max_temp = 25. # approx makes 1\sigma -> 5\sigma
         # max_size = 2000
         #max(4, max_temp * self.train_x.shape[0] / max_size) # Adjust high_temp based on current size and max size
         rng_mcmc = get_numpy_rng()
-        high_temp = rng_mcmc.uniform(2, 5) ** 2
+        # high_temp = rng_mcmc.uniform(np.sqrt(2), ) ** 2
         prob = rng_mcmc.uniform(0, 1)
-        temp = np.where(prob < 0.6, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        log.info(f"Running MCMC chains with temperature {temp:.2f}")
+        # temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        high_temp = rng_mcmc.uniform(1., 3.) ** 2
+        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        log.info(f"Running MCMC chains with temperature {temp:.4f}")
+
+        # @jax.jit
+        # def logprob(x):
+        #     """JIT-compiled log probability function for numpyro."""
+        #     mean = self.predict_mean(x)
+        #     return mean
+        
+        def model():
+            x = numpyro.sample('x', dist.Uniform(
+                low=jnp.zeros(self.train_x_clf.shape[1]),
+                high=jnp.ones(self.train_x_clf.shape[1])
+            ))
+
+            mean = self.jitted_single_predict_mean(x)
+            numpyro.factor('y', mean/temp)
+            numpyro.deterministic('logp', mean)
+
+        rng_key = get_new_jax_key()
+
         for i in range(num_chains):
             if i== 0:
                 init_params = self.train_x_clf[jnp.argmax(self.train_y_clf)]
@@ -366,28 +429,14 @@ class ClassifierGP:
                 init_strategy = init_to_value(values={'x': init_params})
             else:
                 init_strategy = init_to_sample()
-
-
-        # try:
-        #     kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
-        #     mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples= num_samples,
-        #                     num_chains=num_chains, progress_bar=False, thinning=thinning,
-        #                     chain_method='sequential')
-        #     mcmc.run(rng_key)
-        # except Exception as e:
-        #     if verbose:
-        #         log.error(f"SA kernel also failed with error: {e}")
-        #     raise e
-
-            rng_key = get_new_jax_key()
         
         # First attempt with NUTS
             try:
-                kernel = NUTS(self.gp_numpyro_model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
+                kernel = NUTS(model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
                 mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
                         num_chains=1, progress_bar=progress_bar, thinning=thinning)
-                mcmc.run(rng_key,temp)
-            
+                mcmc.run(rng_key)
+
                 # Check if HMC ran successfully
                 mc_samples = mcmc.get_samples()
                 logp_vals = mc_samples['logp']
@@ -395,7 +444,7 @@ class ClassifierGP:
             
             except Exception as e:
                 if verbose:
-                    log.info(f"HMC failed with error: {e}. Falling back to SA kernel.")
+                    log.error(f"HMC failed with error: {e}. Falling back to SA kernel.")
                 hmc_success = False
                 logp_vals = None
 
@@ -405,12 +454,12 @@ class ClassifierGP:
             if not hmc_success:
                 should_restart = True
                 if verbose:
-                    log.info("HMC failed. Restarting with SA kernel and best point as initial point.")
+                    log.error("HMC failed. Restarting with SA kernel and best point as initial point.")
             elif restart_on_flat_logp and (jnp.any(logp_vals == self.minus_inf) or 
                                        jnp.allclose(logp_vals, logp_vals[0])):
                 should_restart = True
                 if verbose:
-                    log.info("All logp values are the same or contain invalid values. Restarting MCMC from best training point.")
+                    log.error("All logp values are the same or contain invalid values. Restarting MCMC from best training point.")
 
             # Restart with SA if needed
             if should_restart:
@@ -420,10 +469,10 @@ class ClassifierGP:
                     best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
                     init_strategy = init_to_value(values={'x': best_pt})
                     log.info(f"Reinitializing MCMC with {num_chains} chains using SA kernel.")
-                    kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
+                    kernel = SA(model, init_strategy=init_strategy)
                     mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=2 * num_samples,
                             num_chains=num_chains, progress_bar=False, thinning=thinning)
-                    mcmc.run(rng_key,temp)
+                    mcmc.run(rng_key,)
                 except Exception as e:
                     if verbose:
                         log.error(f"SA kernel also failed with error: {e}")

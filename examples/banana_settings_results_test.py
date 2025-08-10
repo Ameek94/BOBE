@@ -133,7 +133,6 @@ def run_bobe_with_settings_and_results(likelihood, settings, output_file="banana
         miniters=bobe_settings.miniters,
         maxiters=bobe_settings.maxiters,
         max_gp_size=bobe_settings.max_gp_size,
-        logz_threshold=bobe_settings.logz_threshold,
         use_clf=bobe_settings.use_clf,
         minus_inf=bobe_settings.minus_inf,
         lengthscale_priors=bobe_settings.lengthscale_priors,

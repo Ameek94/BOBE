@@ -28,16 +28,16 @@ print("="*60)
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
-        miniters=0, maxiters=2500, max_gp_size=1500,
+        miniters=750, maxiters=2500, max_gp_size=1500,
         loglikelihood=likelihood,
-        resume=True,
+        resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step=10, update_mc_step=5, ns_step=10,
+        fit_step=25, update_mc_step=5, ns_step=25,
         num_hmc_warmup=512, num_hmc_samples=2048, mc_points_size=96,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
-        clf_threshold=500, gp_threshold=5000,
+        clf_threshold=500, gp_threshold=2500,
         minus_inf=-1e5, logz_threshold=1.)
 
 # Run BOBE with automatic timing collection
@@ -122,7 +122,7 @@ fig_dashboard = plotter.create_summary_dashboard(
     timing_data=timing_data,
     save_path=f"{likelihood.name}_dashboard.png"
 )
-plt.show()
+# plt.show()
 
 # Create individual timing plot
 print("Creating detailed timing plot...")
@@ -131,7 +131,7 @@ plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
 ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
 plt.tight_layout()
 plt.savefig(f"{likelihood.name}_timing_detailed.png", dpi=300, bbox_inches='tight')
-plt.show()
+# plt.show()
 
 # Create evidence evolution plot if available
 if comprehensive_results.get('logz_history'):
@@ -141,7 +141,7 @@ if comprehensive_results.get('logz_history'):
     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
     plt.tight_layout()
     plt.savefig(f"{likelihood.name}_evidence.png", dpi=300, bbox_inches='tight')
-    plt.show()
+    # plt.show()
 
 # Create parameter samples plot
 print("Creating parameter samples plot...")

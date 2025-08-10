@@ -1,6 +1,9 @@
 # This module manages the nested samplers used to compute the Bayesian evidence with the GP model as a surrogate for the objective function
 # The module contains two functions, one for the Dynesty sampler and the other for the JaxNS sampler (preferred)
 
+import os
+print(f"Setting XLA flags for JAX: {os.cpu_count()} CPU cores")
+os.environ['XLA_FLAGS'] = f'--xla_force_host_platform_device_count={os.cpu_count()}'
 import time
 from typing import Any, List, Optional, Dict, Union
 import jax.numpy as jnp
@@ -114,6 +117,8 @@ def nested_sampling_Dy(gp: GP
         # mu = mu 
         return jnp.reshape(mu,()) #, jnp.reshape(std,()) 
 
+    # loglike = gp.jitted_single_predict_mean
+
     start = time.time()
 
     success = True
@@ -172,7 +177,7 @@ def nested_sampling_Dy(gp: GP
     weights = renormalise_log_weights(res['logwt'])
     samples_dict['weights'] = weights    
     samples_dict['logl'] = logl
-    return samples_dict, logz_dict, success
+    return (samples_dict, logz_dict, success)
 
 #-------------JAXNS functions---------------------
 
@@ -183,7 +188,7 @@ def nested_sampling_jaxns(gp
                           ,logz_std: bool = True
                           ,maxcall: int = 1e6 # type: ignore
                           ,boost_maxcall: int = 1
-                          ,batch_size = 50 # what is the optimal size?
+                          ,batch_size = 100 # what is the optimal size?
                           ,parameter_estimation = False
                           ,difficult_model = False
                         ,equal_weights: bool = False):
@@ -219,10 +224,11 @@ def nested_sampling_jaxns(gp
         Dictionary containing the mean, upper and lower bounds on logZ and the logZ error from the nested sampler
     """
 
+    success = True
+
     @jax.jit
     def log_likelihood(x):
-        mu = gp.predict_mean(x) 
-        return mu
+        return  gp.predict_mean(x) 
         
     def prior_model():
         x = yield Prior(tfpd.Uniform(low=jnp.zeros(ndim), high= jnp.ones(ndim)), name='x') # type: ignore
@@ -255,7 +261,7 @@ def nested_sampling_jaxns(gp
     logvol = results.log_X_mean
 
     # variance needs to be computed in batches
-    f = jit(lambda x: (gp.predict_var(x),))
+    f = jax.jit(lambda x: (gp.predict_var(x),))
     # num_inputs = len(results.samples['x'])
     # log.info(f" Computing upper and lower logZ using {num_inputs} points")
     # # batch_size = batch_size
@@ -268,11 +274,15 @@ def nested_sampling_jaxns(gp
     # logl_var = tuple(np.concatenate([x[i] for x in res]) for i in range(nres))[0]
     
     # can we use map instead?
-    logl_var = jax.lax.map(f,results.samples['x'],batch_size=batch_size) # type: ignore
+    logl_var = jax.lax.map(gp.predict_var,results.samples['x'],batch_size=100)
+     #jax.lax.map(f,results.samples['x'],batch_size=batch_size) # type: ignore
+    logl_std = np.sqrt(logl_var.squeeze(-1))
 
-    logl_upper = results.log_L_samples + np.sqrt(logl_var)
-    logl_lower = results.log_L_samples - np.sqrt(logl_var)
-    
+    logl_upper = results.log_L_samples + logl_std
+    logl_lower = results.log_L_samples - logl_std
+
+    print(f"shapes logvol {logvol.shape}, logvar {logl_var.shape}, logl_upper {logl_upper.shape}, logl_lower {logl_lower.shape}")
+
     upper =  compute_integrals(logl=logl_upper, logvol=logvol)[-1]
     lower = compute_integrals(logl=logl_lower, logvol=logvol)[-1]
     
@@ -299,4 +309,4 @@ def nested_sampling_jaxns(gp
     ns_samples['x'] = samples
     ns_samples['weights'] = weights
 
-    return ns_samples, logz_dict
+    return (ns_samples, logz_dict, success)

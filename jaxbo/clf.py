@@ -142,7 +142,11 @@ def train_nn(x: jnp.ndarray,
     """
     N, d = x.shape
     # Split train/validation
-    rng_opt = get_numpy_rng()
+    try:
+        rng_opt = get_numpy_rng()
+    except Exception as e:
+        log.error(f"{e} - using fallback permutation")
+        rng_opt = np.random.default_rng()
     perm = rng_opt.permutation(N)
     split = int(N * (1 - val_frac))
     train_idx, val_idx = perm[:split], perm[split:]

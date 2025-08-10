@@ -24,6 +24,8 @@ import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from .seed_utils import get_new_jax_key
 
+safe_noise_floor = 1e-10
+
 # todo
 # 
 sqrt2 = sqrt(2.)
@@ -37,12 +39,18 @@ def dist_sq(x, y):
     """
     return jnp.sum(jnp.square(x[:,None,:] - y[None,:,:]),axis=-1) 
 
+@partial(jax.jit, static_argnames='include_noise')
+def kernel_diag(x, outputscale, noise, include_noise=True):
+    """
+    Computes only the diagonal of the kernel matrix K(x,x).
+    """
+    diag = outputscale * jnp.ones(x.shape[0]) # The diagonal is just the outputscale
+    if include_noise:
+        diag += noise
+    return diag
+
 @partial(jax.jit,static_argnames='include_noise')
-def rbf_kernel(xa,
-               xb,
-               lengthscales,
-               outputscale,
-               noise,include_noise=True): 
+def rbf_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True): 
     """
     The RBF kernel
     """
@@ -167,16 +175,11 @@ class GP(ABC):
         log.info(f"GP training size = {self.train_x.shape[0]}")
 
         self.ndim = train_x.shape[1]
-        self.npoints = train_x.shape[0]
         self.y_mean = jnp.mean(train_y,axis=0)
         self.y_std = jnp.std(train_y,axis=0)
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
         self.noise = noise
         self.fitted = False
-        self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
-        self.outputscale = outputscale if outputscale is not None else 1.0
-        self.cholesky = None
-        self.alphas = None
 
         self.train_y = (train_y - self.y_mean) / self.y_std
         self.lengthscales = jnp.ones(self.ndim) if lengthscales is None else jnp.array(lengthscales)
@@ -186,9 +189,30 @@ class GP(ABC):
         self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.outputscale_bounds]
         log.info(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
 
+        self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True))
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
+
+        self.create_jitted_single_predict()
+
+    @property
+    def hyperparams(self):
+        """
+        Returns the current hyperparameters of the GP.
+        """
+        return {
+            "lengthscales": self.lengthscales,
+            "outputscale": self.outputscale
+        }
+    
+    @property
+    def npoints(self):
+        """
+        Returns the number of training points.
+        """
+        return self.train_x.shape[0]
 
     def fit(self,lr=1e-2,maxiter=150,n_restarts=2):
-        """
+        """ 
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
         Arguments
@@ -263,6 +287,8 @@ class GP(ABC):
         self.cholesky = jnp.linalg.cholesky(self.K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
         self.fitted = True
+        self.create_jitted_single_predict()
+
 
     def predict_mean(self,x):
         """
@@ -280,8 +306,39 @@ class GP(ABC):
         x = jnp.atleast_2d(x)
         k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
         k22 = self.kernel(x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-        var = get_var_from_cho(self.cholesky,k12,k22)
+        var = jnp.clip(get_var_from_cho(self.cholesky,k12,k22), safe_noise_floor, None)
         return var*self.y_std**2
+
+    def create_jitted_single_predict(self):
+        """Precompute constants and JIT-compile a fast single-point GP mean and variance."""
+        scaled_train_x = self.train_x / self.lengthscales
+        alphas = self.alphas
+        y_std, y_mean = self.y_std, self.y_mean
+        outputscale = self.outputscale
+
+        @jax.jit
+        def predict_one_mean(x):
+            x = jnp.atleast_1d(x)
+            scaled_x = x / self.lengthscales
+            sq_dist = jnp.sum((scaled_train_x - scaled_x) ** 2, axis=-1)
+            k12 = outputscale * jnp.exp(-0.5 * sq_dist)
+            mean = jnp.dot(k12, alphas).squeeze()
+            return mean * y_std + y_mean
+        
+        @jax.jit
+        def predict_one_var(x):
+            x = jnp.atleast_1d(x)
+            scaled_x = x / self.lengthscales
+            sq_dist = jnp.sum((scaled_train_x - scaled_x) ** 2, axis=-1)
+            k12 = outputscale * jnp.exp(-0.5 * sq_dist)
+            k22 = outputscale + self.noise
+            vv = solve_triangular(self.cholesky,k12,lower=True)
+            var = k22 - jnp.sum(vv * vv, axis=0)  # This is the variance
+            var = jnp.clip(var, safe_noise_floor, None)
+            return var * y_std ** 2
+
+        self.jitted_single_predict_mean = predict_one_mean
+        self.jitted_single_predict_var = predict_one_var
 
     def predict(self,x):
         """
@@ -331,6 +388,7 @@ class GP(ABC):
                 self.cholesky = fast_update_cholesky(self.cholesky,k,k_self)
                 # self.cholesky = jnp.linalg.cholesky(self.K)
                 self.alphas = cho_solve((self.cholesky, True), self.train_y)
+            self.create_jitted_single_predict()
             return False
 
     def add(self,new_x,new_y):
@@ -343,7 +401,7 @@ class GP(ABC):
         self.y_mean = jnp.mean(self.train_y,axis=0)
         self.y_std = jnp.std(self.train_y,axis=0)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
-        self.npoints = self.train_x.shape[0]
+        # self.npoints = self.train_x.shape[0]
         log.info("Updated GP with new point.")
         log.info(f" GP training size = {self.npoints}")
 
@@ -573,7 +631,7 @@ class DSLP_GP(GP):
         obj.outputscale = outputscale
         return obj
 
-    def fit(self,lr=1e-2,maxiter=150,n_restarts=2):
+    def fit(self,lr=1e-2,maxiter=150,n_restarts=2,early_stop_patience=20):
         """
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
@@ -627,11 +685,18 @@ class DSLP_GP(GP):
         best_f = jnp.inf
         best_params = None
 
-        u_params = scale_to_unit(init_params,bounds.T)
+        init_params = jnp.atleast_2d(scale_to_unit(init_params,bounds.T))
+        if n_restarts > 1:
+            addn_restart_params = np.random.uniform(0, 1, size=(n_restarts-1,init_params.shape[1]))
+            init_params = jnp.vstack([init_params, addn_restart_params]) if n_restarts > 1 else init_params
 
         # display with progress bar
         r = jnp.arange(maxiter)
         for n in range(n_restarts):
+            local_best_f = jnp.inf
+            local_best_params = None
+            local_early_stopping = early_stop_patience
+            u_params = init_params[n]
             opt_state = optimizer.init(u_params)
             progress_bar = tqdm.tqdm(r,desc=f'Training GP')
             with logging_redirect_tqdm():
@@ -641,7 +706,15 @@ class DSLP_GP(GP):
                     if fval < best_f:
                         best_f = fval
                         best_params = u_params
-            u_params = jnp.clip(u_params + 0.25*np.random.normal(size=init_params.shape),0,1)
+                    if fval < local_best_f:
+                        local_best_f = fval
+                        local_best_params = u_params
+                    else:
+                        local_early_stopping -= 1
+                        if local_early_stopping <= 0:
+                            log.info(f"Early stopping at iteration {i} with best fval {best_f}")
+                            break
+            # u_params = jnp.clip(u_params + 0.25*np.random.normal(size=init_params.shape),0,1)
         params = scale_from_unit(best_params,bounds.T)
         hyperparams = 10 ** params
         self.lengthscales = hyperparams[0:-1]
@@ -651,6 +724,7 @@ class DSLP_GP(GP):
         self.cholesky = jnp.linalg.cholesky(self.K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
         self.fitted = True
+        self.create_jitted_single_predict()
 
     # def fit(self,lr=1e-2,maxiter=150,n_restarts=2,optimizer_name="adam"):
     #     """
