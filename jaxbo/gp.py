@@ -631,7 +631,11 @@ class DSLP_GP(GP):
         obj.outputscale = outputscale
         return obj
 
-    def fit(self,lr=1e-2,maxiter=150,n_restarts=2,early_stop_patience=20):
+    def fit(self,
+            lr: float = 1e-2,
+            maxiter: int = 150,
+            n_restarts: int = 2,
+            early_stop_patience: int = 20):
         """
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
@@ -688,7 +692,7 @@ class DSLP_GP(GP):
         init_params = jnp.atleast_2d(scale_to_unit(init_params,bounds.T))
         if n_restarts > 1:
             addn_restart_params = np.random.uniform(0, 1, size=(n_restarts-1,init_params.shape[1]))
-            init_params = jnp.vstack([init_params, addn_restart_params]) if n_restarts > 1 else init_params
+            init_params = jnp.vstack([init_params, addn_restart_params])
 
         # display with progress bar
         r = jnp.arange(maxiter)

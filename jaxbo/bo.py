@@ -244,7 +244,7 @@ class BOBE:
 
         # GP setup
         if use_clf:
-            self.gp = ClassifierGP(
+            self.gp = GPwithClassifier(
                 train_x=self.train_x, train_y=self.train_y,
                 minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
                 clf_type=clf_type, clf_use_size=clf_use_size, clf_update_step=clf_update_step,
@@ -455,6 +455,8 @@ class BOBE:
             if (pt_exists_or_below_threshold and self.mc_points_method == 'NUTS') and (self.mc_samples['method'] == 'MCMC'):
                 update_mc = True
             if update_mc:
+                if not refit:
+                    self.gp.fit(maxiter=75,n_restarts=1)
                 x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
                 self.results_manager.start_timing('MCMC Sampling')
                 self.mc_samples = get_mc_samples(

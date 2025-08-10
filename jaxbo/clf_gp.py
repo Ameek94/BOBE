@@ -4,7 +4,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
-from .clf import train_svm, svm_predict_proba, train_nn, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
+from .clf import train_svm, svm_predict_proba, train_nn, train_nn_multiple_restarts, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
 from .seed_utils import get_new_jax_key, get_numpy_rng
 from .logging_utils import get_logger
 import numpyro
@@ -22,7 +22,7 @@ available_classifiers = {
         'train': train_svm,
     },
     'nn': {
-        'train': train_nn,
+        'train': train_nn_multiple_restarts,
     },
     'ellipsoid': {
         'train': train_ellipsoid,
@@ -397,7 +397,7 @@ class GPwithClassifier:
         # high_temp = rng_mcmc.uniform(np.sqrt(2), ) ** 2
         prob = rng_mcmc.uniform(0, 1)
         # temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        high_temp = rng_mcmc.uniform(1., 3.) ** 2
+        high_temp = rng_mcmc.uniform(1., 2.) ** 2
         temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 

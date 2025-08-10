@@ -1,9 +1,9 @@
 # This module manages the nested samplers used to compute the Bayesian evidence with the GP model as a surrogate for the objective function
-# The module contains two functions, one for the Dynesty sampler and the other for the JaxNS sampler (preferred)
+# The module contains two functions, one for the Dynesty sampler (preferred) and the other for the JaxNS sampler 
 
 import os
-print(f"Setting XLA flags for JAX: {os.cpu_count()} CPU cores")
-os.environ['XLA_FLAGS'] = f'--xla_force_host_platform_device_count={os.cpu_count()}'
+# print(f"Setting XLA flags for JAX: {os.cpu_count()} CPU cores")
+# os.environ['XLA_FLAGS'] = f'--xla_force_host_platform_device_count={os.cpu_count()}'
 import time
 from typing import Any, List, Optional, Dict, Union
 import jax.numpy as jnp
