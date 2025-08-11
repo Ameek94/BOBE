@@ -139,7 +139,7 @@ def nested_sampling_Dy(gp: GP
         if np.all(logl == logl[0]):
             success = False
             log.warning("All logl values are the same, this may indicate a problem with the model or the data. Retrying with the dynamic nested sampler.")
-            sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=True,
+            sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
                                        sample=sample_method,nlive=nlive)
             sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)     
         

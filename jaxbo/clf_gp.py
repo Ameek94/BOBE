@@ -326,7 +326,7 @@ class GPwithClassifier:
         return gp_not_updated
 
     def get_random_point(self):
-        pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold/2.
+        pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold
         if not jnp.any(pts_idx):
             log.info("No points above threshold")
             return self.train_x_clf[jnp.argmax(self.train_y_clf)]

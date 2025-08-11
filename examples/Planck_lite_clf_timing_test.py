@@ -35,13 +35,13 @@ sampler = BOBE(
     mc_points_size=64,
     lengthscale_priors='DSLP', 
     use_clf=True,
-    clf_use_size=25,
+    clf_use_size=50,
     clf_threshold=350,
     clf_update_step=1,  # SVM update step
     clf_type='svm',  # Using SVM for classification
     minus_inf=-1e5,
     logz_threshold=0.5,
-    seed=42,  # For reproducibility
+    seed=10,  # For reproducibility
     do_final_ns=False,
 )
 

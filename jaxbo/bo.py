@@ -352,6 +352,8 @@ class BOBE:
         ns_samples = None
         logz_dict = None
 
+        ns_success=False
+
         best_pt_iteration = 0
 
         ii = 0
@@ -502,12 +504,13 @@ class BOBE:
                     'method': 'NS',
                     'best': ns_samples['best']
                 }
-                self.converged = self.check_convergence(ii, logz_dict, threshold=self.logz_threshold)
-                if ns_success and self.converged:
-                    self.termination_reason = "LogZ converged"
-                    results_dict['logz'] = logz_dict
-                    results_dict['termination_reason'] = self.termination_reason
-                    break
+                if ns_success:
+                    self.converged = self.check_convergence(ii, logz_dict, threshold=self.logz_threshold)
+                    if self.converged:
+                        self.termination_reason = "LogZ converged"
+                        results_dict['logz'] = logz_dict
+                        results_dict['termination_reason'] = self.termination_reason
+                        break
 
             self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
@@ -546,7 +549,7 @@ class BOBE:
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
 
 
-        if ns_samples is None:
+        if not ns_success:
         # if not self.do_final_ns:
             log.info("No nested sampling results found, MC samples from HMC/MCMC will be used instead.")
             self.results_manager.start_timing('MCMC Sampling')

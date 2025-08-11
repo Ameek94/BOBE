@@ -203,7 +203,7 @@ def train_nn(
     weight_decay=1e-4,
     n_epochs=2000,
     batch_size=128,
-    early_stop_patience=500,
+    early_stop_patience=100,
     seed=0,
     init_params=None,  # Add this parameter
     **kwargs
@@ -279,6 +279,27 @@ def train_nn(
 def train_nn_multiple_restarts(x: jnp.ndarray, y: jnp.ndarray, **kwargs):
     """Wrapper for NN training with restarts"""
     return train_with_restarts(train_nn, x, y, **kwargs)
+
+# Prediction functions
+
+def nn_predict(x: jnp.ndarray, apply_fn):
+    """
+    Single-point prediction: returns logit.
+    """
+    logit = apply_fn(x[None, :]).squeeze()
+    return logit
+
+def nn_predict_batch(x: jnp.ndarray, apply_fn):
+    """
+    Batch prediction: returns logits for all x.
+    """
+    return apply_fn(x).squeeze(-1)
+
+def nn_predict_proba(x,  apply_fn):
+    return jax.nn.sigmoid(nn_predict(x,  apply_fn))
+
+def nn_predict_proba_batch(x, apply_fn):
+    return jax.nn.sigmoid(nn_predict_batch(x,  apply_fn))
 
 # Ellipsoid Classifier
 class EllipsoidClassifier(nn.Module):
@@ -388,3 +409,12 @@ def train_ellipsoid(
 def train_ellipsoid_multiple_restarts(x: jnp.ndarray, y: jnp.ndarray, **kwargs):
     """Wrapper for ellipsoid training with restarts"""
     return train_with_restarts(train_ellipsoid, x, y, **kwargs)
+
+def ellipsoid_predict(x: jnp.ndarray, params: Dict, apply_fn: Callable) -> jnp.ndarray:
+    """Predict logits for single or batch input"""
+    return apply_fn(params, x if x.ndim > 1 else x[None, :]).squeeze()
+
+def ellipsoid_predict_proba(x: jnp.ndarray, params: Dict, apply_fn: Callable) -> jnp.ndarray:
+    """Predict probabilities for single or batch input"""
+    logits = ellipsoid_predict(x, params, apply_fn)
+    return jax.nn.sigmoid(logits)

@@ -54,7 +54,7 @@ def optimize(
     maxiter: int = 200,
     n_restarts: int = 4,
     verbose: bool = True,
-    early_stop_patience: int = 50,
+    early_stop_patience: int = 100,
     split_vmap_batch_size: int = 4,
 ) -> Tuple[jnp.ndarray, float]:
     """
