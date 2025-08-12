@@ -334,7 +334,7 @@ def train_ellipsoid(
     x_val: jnp.ndarray, y_val: jnp.ndarray,
     lr: float = 1e-2,
     weight_decay: float = 1e-4,
-    n_epochs: int = 2000,
+    n_epochs: int = 1000,
     batch_size: int = 32,
     seed: int = 0,
     patience: int = 250,

@@ -1,3 +1,7 @@
+import os
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+    os.cpu_count()
+)
 from jaxbo.bo import BOBE
 from jaxbo.utils import plot_final_samples
 from jaxbo.loglike import CobayaLikelihood
@@ -10,7 +14,7 @@ cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
 
 
 clf = str(sys.argv[1]) if len(sys.argv) > 1 else 'nn'
-clf_update_step = 1 if clf == 'svm' else 2
+clf_update_step = 1 if clf == 'svm' else 5
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
         minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_{clf}')
@@ -37,7 +41,7 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
         num_hmc_warmup=512, num_hmc_samples=2048, mc_points_size=96,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
-        clf_threshold=500, gp_threshold=2500,
+        clf_threshold=300, gp_threshold=500,
         minus_inf=-1e5, logz_threshold=1.)
 
 # Run BOBE with automatic timing collection

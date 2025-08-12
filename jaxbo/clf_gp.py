@@ -313,7 +313,7 @@ class GPwithClassifier:
                 )
         
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
-                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=6):
+                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
@@ -323,7 +323,7 @@ class GPwithClassifier:
         rng_mcmc = get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
         high_temp = rng_mcmc.uniform(1., 2.) ** 2
-        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
