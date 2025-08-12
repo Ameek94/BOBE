@@ -11,8 +11,8 @@ from flax.core import freeze
 import optax
 from typing import Callable, Dict, Any, Union, List, Optional, Tuple
 from functools import partial
-from .logging_utils import get_logger 
-from .seed_utils import get_numpy_rng, get_new_jax_key
+from .utils.logging_utils import get_logger 
+from .utils.seed_utils import get_numpy_rng, get_new_jax_key
 log = get_logger("[clf]")
 
 # -----------------------------------------------------------------------------

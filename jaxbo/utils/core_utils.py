@@ -4,8 +4,8 @@ import numpy as np
 import jax.numpy as jnp
 from jax import vmap
 from scipy.special import logsumexp
-from .utils.logging_utils import get_logger
-from .utils.seed_utils import get_numpy_rng
+from .logging_utils import get_logger
+from .seed_utils import get_numpy_rng
 log = get_logger("[utils]")
 
 # use this to suppress unecessary output, https://stackoverflow.com/questions/2125702/how-to-suppress-console-output-in-python

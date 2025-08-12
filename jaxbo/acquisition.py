@@ -9,8 +9,8 @@ from jax import config
 from jax.scipy.special import erfc, logsumexp
 import logging
 from .optim import optimize
-from .logging_utils import get_logger
-from .seed_utils import get_numpy_rng
+from .utils.logging_utils import get_logger
+from .utils.seed_utils import get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
 config.update("jax_enable_x64", True)
 log = get_logger("[acq]")

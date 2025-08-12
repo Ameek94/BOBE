@@ -64,7 +64,7 @@ def example_timing_usage():
     
     # The timing data is also saved automatically to files
     print(f"\n✓ Timing data saved to: {likelihood.name}_timing.json")
-    print(f"✓ Full results saved to: {likelihood.name}_results.npz")
+    print(f"✓ Full results saved to: {likelihood.name}_results.pkl")
     print(f"✓ Comprehensive results available in results['comprehensive']")
     
     return results

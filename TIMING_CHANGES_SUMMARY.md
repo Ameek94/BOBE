@@ -20,7 +20,7 @@
 - ✅ Automatic timing summary logged at end of BOBE runs
 - ✅ Timing data saved in multiple formats:
   - `{output}_timing.json`: Standalone timing data
-  - `{output}_results.npz`: Comprehensive results with timing
+  - `{output}_results.pkl`: Comprehensive results with timing
   - `{output}_results.pkl`: Full Python object preservation
 
 ### 4. **Plotting Compatibility**

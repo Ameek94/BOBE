@@ -44,15 +44,15 @@ y    -3    3
 
 The BOBE results system creates a complete GetDist-compatible file set:
 
-1. **`{output}.txt`** - Main chain file in GetDist format
-2. **`{output}.paramnames`** - Parameter names and LaTeX labels
-3. **`{output}.ranges`** - Parameter bounds
-4. **`{output}_1.txt`** - CosmoMC format (for compatibility)
+1. **`{output}.txt`** - Main chain file in GetDist format (created using MCSamples.saveAsText)
+2. **`{output}.paramnames`** - Parameter names and LaTeX labels (created using MCSamples.saveAsText)
+3. **`{output}.ranges`** - Parameter bounds (automatically created by MCSamples.saveAsText)
 
 ## Verification
 
 ✅ **Tested with GetDist:** Files successfully load with `getdist.loadMCSamples()`  
 ✅ **Correct column order:** `weight like param1 param2 ...`  
+✅ **Uses MCSamples.saveAsText:** Leverages GetDist's native saving method for consistency  
 ✅ **Proper headers:** Column names match GetDist expectations  
 ✅ **Parameter metadata:** Names, labels, and ranges properly formatted  
 ✅ **Full compatibility:** Works with GetDist analysis and plotting functions

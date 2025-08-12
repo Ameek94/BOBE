@@ -60,7 +60,7 @@ timing_data = {
 Timing data is automatically saved to:
 
 - `{output_file}_timing.json`: Standalone timing data in JSON format
-- `{output_file}_results.npz`: Comprehensive results including timing
+- `{output_file}_results.pkl`: Comprehensive results including timing
 - `{output_file}_results.pkl`: Full Python objects including timing
 
 ## Terminal Output

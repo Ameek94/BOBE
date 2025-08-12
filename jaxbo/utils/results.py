@@ -23,9 +23,8 @@ except ImportError:
     HAS_GETDIST = False
     warnings.warn("GetDist not available. Some functionality will be limited.")
 
-from .utils.seed_utils import SeedManager
-from .utils.timing import Timer
-from .utils.logging_utils import get_logger
+from .timing import BOBETimingCollector  
+from .logging_utils import get_logger
 
 log = get_logger("[results]")
 

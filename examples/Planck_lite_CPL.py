@@ -1,8 +1,8 @@
 from jaxbo.bo import BOBE
 import numpy as np
 # from jaxbo.bo_utils import plot_final_samples
-from jaxbo.loglike import CobayaLikelihood
-from jaxbo.utils import scale_to_unit, scale_from_unit
+from jaxbo.loglike import CobayaLikelihood, cobaya_loglike
+from jaxbo.utils.core_utils import scale_to_unit, scale_from_unit
 from getdist import plots, MCSamples, loadMCSamples
 import time
 
@@ -73,7 +73,7 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
 
     if param_bounds is None:
         param_bounds = np.array([[0,1]]*len(param_list)).T
-    samples = input_unstandardize(samples,param_bounds)
+    samples = scale_from_unit(samples,param_bounds)
     weights = samples_dict['weights']
     gd_samples = MCSamples(samples=samples, names=param_list, labels=param_labels, 
                            ranges=ranges, weights=weights)
@@ -109,7 +109,7 @@ def plot_final_samples(gp,samples_dict,param_list,param_labels,plot_params=None,
     ax.axvline(x=-1.,ls='--',color='black',lw=1)
     ax.axhline(y=0.,ls='--',color='black',lw=1)
     if scatter_points:
-        points = input_unstandardize(gp.train_x,param_bounds)
+        points = scale_from_unit(gp.train_x,param_bounds)
         for i in range(ndim):
             # ax = g.subplots[i,i]
             for j in range(i+1,ndim):

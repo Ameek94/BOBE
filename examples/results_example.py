@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 # Import the results system
-from jaxbo.results import BOBEResults, load_bobe_results
+from jaxbo.utils.results import BOBEResults, load_bobe_results
 from jaxbo.bo import BOBE
 from jaxbo.loglike import ExternalLikelihood
 
@@ -120,14 +120,11 @@ def demonstrate_simplified_file_formats():
     # List files that would be created
     output_file = "demo_results"
     expected_files = [
-        f"{output_file}_results.npz",      # Main compressed results
-        f"{output_file}_results.pkl",      # Full Python object
+        f"{output_file}_results.pkl",      # Main results (Python object)
         f"{output_file}.txt",              # GetDist format chain
         f"{output_file}.paramnames",       # GetDist parameter names
         f"{output_file}.ranges",           # GetDist parameter ranges
-        f"{output_file}_1.txt",            # CosmoMC format chain
-        f"{output_file}_stats.json",       # Summary statistics
-        f"{output_file}_convergence.npz",  # Convergence diagnostics only
+        f"{output_file}_stats.json",       # Summary statistics (includes convergence data)
         f"{output_file}_intermediate.json" # Intermediate results
     ]
     
@@ -230,14 +227,11 @@ if __name__ == "__main__":
     # Clean up demo files
     import os
     demo_files = [
-        "demo_results_results.npz",
         "demo_results_results.pkl",
         "demo_results.txt",
         "demo_results.paramnames",
         "demo_results.ranges",
-        "demo_results_1.txt",
         "demo_results_stats.json",
-        "demo_results_convergence.npz",
         "demo_results_intermediate.json"
     ]
     

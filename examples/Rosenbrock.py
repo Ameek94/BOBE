@@ -1,5 +1,5 @@
 from jaxbo.bo import BOBE
-from jaxbo.utils import plot_final_samples
+from jaxbo.utils.summary_plots import plot_final_samples
 from jaxbo.loglike import ExternalLikelihood,CobayaLikelihood
 from jaxbo.nested_sampler import renormalise_log_weights
 from getdist import MCSamples

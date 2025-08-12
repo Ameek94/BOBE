@@ -7,7 +7,7 @@ import jaxbo
 import numpy as np
 import jax
 import jax.numpy as jnp
-from jaxbo.logging_utils import get_logger
+from jaxbo.utils.logging_utils import get_logger
 
 log = get_logger("[Seed Example]")
 

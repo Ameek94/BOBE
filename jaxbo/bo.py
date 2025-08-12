@@ -18,12 +18,12 @@ from .clf_gp import GPwithClassifier
 from .loglike import ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
-from .utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal
-from .seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
+from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal
+from .utils.seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from .optim import optimize
-from .logging_utils import get_logger
-from .results import BOBEResults
+from .utils.logging_utils import get_logger
+from .utils.results import BOBEResults
 
 log = get_logger("[bo]")
 log.info(f'JAX using {jax.device_count()} devices.')
@@ -574,6 +574,28 @@ class BOBE:
             'logl': loglikes
         }
 
+        # Extract GP and classifier information
+        gp_info = {
+            'gp_training_set_size': int(self.gp.train_x.shape[0]),
+            'gp_final_best_loglike': float(self.best_f),  # Best value in true physical space
+        }
+        
+        # Add classifier info if using GPwithClassifier
+        if hasattr(self.gp, 'clf_flag'):
+            gp_info.update({
+                'classifier_used': bool(self.gp.clf_flag and self.gp.use_clf),
+                'classifier_type': str(self.gp.clf_type) if self.gp.clf_flag else None,
+                'classifier_training_set_size': int(self.gp.clf_data_size) if self.gp.clf_flag else 0,
+                'classifier_use_threshold': int(self.gp.clf_use_size) if self.gp.clf_flag else None,
+                'classifier_probability_threshold': float(self.gp.probability_threshold) if self.gp.clf_flag else None
+            })
+        else:
+            gp_info.update({
+                'classifier_used': False,
+                'classifier_type': None,
+                'classifier_training_set_size': 0
+            })
+
         # Finalize results with comprehensive data
         self.results_manager.finalize(
             samples=samples,
@@ -581,7 +603,8 @@ class BOBE:
             loglikes=loglikes,
             logz_dict=logz_dict,
             converged=self.converged,
-            termination_reason=self.termination_reason
+            termination_reason=self.termination_reason,
+            gp_info=gp_info
         )
 
         # Print timing summary

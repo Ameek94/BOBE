@@ -1,5 +1,5 @@
 from jaxbo.bo import BOBE
-from jaxbo.utils import plot_final_samples
+from jaxbo.utils.summary_plots import plot_final_samples
 from jaxbo.loglike import CobayaLikelihood
 from jaxbo.summary_plots import BOBESummaryPlotter
 import time
@@ -205,7 +205,7 @@ print("SAVING RESULTS")
 print("="*60)
 
 # Results are automatically saved by BOBE, but let's summarize what was saved
-print(f"✓ Main results: {likelihood.name}_results.npz")
+print(f"✓ Main results: {likelihood.name}_results.pkl")
 print(f"✓ Timing data: {likelihood.name}_timing.json")
 print(f"✓ Legacy samples: {likelihood.name}_samples.npz")
 print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")

@@ -24,15 +24,17 @@ The BOBE results system has been simplified to store only essential data while m
 
 The simplified system creates these files:
 
-1. **`{output_file}_results.npz`** - Main compressed results
-2. **`{output_file}_results.pkl`** - Full Python object
-3. **`{output_file}.txt`** - GetDist format chain
-4. **`{output_file}_1.txt`** - CosmoMC format chain  
-5. **`{output_file}_stats.json`** - Summary statistics
-6. **`{output_file}_convergence.npz`** - Convergence diagnostics
-7. **`{output_file}_intermediate.json`** - Intermediate results
+1. **`{output_file}_results.pkl`** - Main results (Python object with full data preservation, includes convergence data)
+2. **`{output_file}.txt`** - GetDist format chain (created using MCSamples.saveAsText)
+3. **`{output_file}.paramnames`** - Parameter names and labels (created by MCSamples.saveAsText)
+4. **`{output_file}.ranges`** - Parameter bounds (automatically created by MCSamples.saveAsText)
+5. **`{output_file}_stats.json`** - Summary statistics (includes GP/classifier info and convergence data)
+6. **`{output_file}_intermediate.json`** - Intermediate results
 
 **No longer created:**
+- **`{output_file}_1.txt`** - CosmoMC format chain (removed duplicate)
+- **`{output_file}_results.npz`** - Numpy compressed file (redundant with .pkl)
+- **`{output_file}_convergence.npz`** - Convergence diagnostics (now in .pkl and .json files)
 - `{output_file}_gp_evolution.npz` (GP diagnostics)
 
 ## Code Changes

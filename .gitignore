@@ -43,3 +43,5 @@ test_methods/
 *.paramnames
 *.ranges
 *.pkl
+*.ini
+*.png

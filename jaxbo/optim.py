@@ -4,9 +4,9 @@ import jax.numpy as jnp
 import numpy as np
 import tqdm
 import optax
-from .utils import scale_to_unit, scale_from_unit, split_vmap 
-from .logging_utils import get_logger
-from .seed_utils import get_new_jax_key, get_global_seed
+from .utils.core_utils import scale_to_unit, scale_from_unit, split_vmap 
+from .utils.logging_utils import get_logger
+from .utils.seed_utils import get_new_jax_key, get_global_seed
 
 log = get_logger("[optim]")
 

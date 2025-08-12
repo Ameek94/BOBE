@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import jax
 from jax.scipy.linalg import cho_solve, solve_triangular
-from .utils import scale_to_unit, scale_from_unit
+from .utils.core_utils import scale_to_unit, scale_from_unit
 jax.config.update("jax_enable_x64", True)
 import numpyro
 from numpyro.infer import MCMC, NUTS
@@ -14,13 +14,13 @@ from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
-from .logging_utils import get_logger
+from .utils.logging_utils import get_logger
 log = get_logger("[gp]")
 from optax import adam, apply_updates
 from .optim import optimize
 import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from .seed_utils import get_new_jax_key, get_numpy_rng
+from .utils.seed_utils import get_new_jax_key, get_numpy_rng
 
 safe_noise_floor = 1e-12
 

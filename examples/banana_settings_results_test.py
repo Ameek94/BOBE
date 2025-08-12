@@ -7,9 +7,14 @@ using the classic 2D Banana function. It shows how to:
 1. Use the centralized settings system
 2. Store and analyze comprehensive results
 3. Compare with reference nested sampler (Dynesty)
-4. Generate GetDist-compatible output files
-
-The Banana function is a classic 2D test case for sampling algorithms.
+4. Generate GetDist-compatible output files            cleanup_files = [
+                f"{output_file}_results.pkl", 
+                f"{output_file}.txt",
+                f"{output_file}.paramnames",
+                f"{output_file}.ranges",
+                f"{output_file}_stats.json",
+                f"{output_file}_intermediate.json"
+            ]na function is a classic 2D test case for sampling algorithms.
 """
 
 import numpy as np
@@ -25,7 +30,7 @@ from jaxbo.settings import (
     NestedSamplingSettings,
     get_fast_settings
 )
-from jaxbo.results import load_bobe_results
+from jaxbo.utils.results import load_bobe_results
 
 # Import analysis tools
 try:
@@ -325,14 +330,11 @@ def demonstrate_file_outputs(output_file="banana_test"):
     print(f"\n=== Generated Output Files ===")
     
     expected_files = [
-        f"{output_file}_results.npz",      # Main results
-        f"{output_file}_results.pkl",      # Python object
+        f"{output_file}_results.pkl",      # Main results
         f"{output_file}.txt",              # GetDist chain
         f"{output_file}.paramnames",       # GetDist param names
         f"{output_file}.ranges",           # GetDist param ranges
-        f"{output_file}_1.txt",            # CosmoMC chain
-        f"{output_file}_stats.json",       # Summary stats
-        f"{output_file}_convergence.npz",  # Convergence data
+        f"{output_file}_stats.json",       # Summary stats (includes convergence data)
     ]
     
     print("Files created by the results system:")
@@ -397,12 +399,11 @@ def main():
         if cleanup == 'y':
             import os
             files_to_remove = [
-                f"{output_file}_results.npz",
+                f"{output_file}_results.pkl",
                 f"{output_file}_results.pkl", 
                 f"{output_file}.txt",
                 f"{output_file}.paramnames",
                 f"{output_file}.ranges",
-                f"{output_file}_1.txt",
                 f"{output_file}_stats.json",
                 f"{output_file}_convergence.npz",
                 f"{output_file}_intermediate.json"

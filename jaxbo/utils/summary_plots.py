@@ -30,7 +30,7 @@ except ImportError:
     warnings.warn("GetDist not available. Triangle plots will be limited.")
 
 from .results import BOBEResults, load_bobe_results
-from .utils.logging_utils import get_logger
+from .logging_utils import get_logger
 
 log = get_logger("[plots]")
 

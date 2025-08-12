@@ -12,9 +12,9 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 from .gp import GP
-from .logging_utils import get_logger
-from .seed_utils import get_numpy_rng
-from .utils import renormalise_log_weights, resample_equal
+from .utils.logging_utils import get_logger
+from .utils.seed_utils import get_numpy_rng
+from .utils.core_utils import renormalise_log_weights, resample_equal
 from scipy.special import logsumexp
 log = get_logger("[ns]")
 
