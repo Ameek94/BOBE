@@ -4,7 +4,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
-from .clf import train_svm, svm_predict_proba, train_nn, train_nn_multiple_restarts, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
+from .clf import train_svm, svm_predict_proba, train_nn, train_nn_multiple_restarts,train_ellipsoid_multiple_restarts, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
 from .seed_utils import get_new_jax_key, get_numpy_rng
 from .logging_utils import get_logger
 import numpyro
@@ -24,7 +24,7 @@ available_classifiers = {
         'train': train_nn_multiple_restarts,
     },
     'ellipsoid': {
-        'train': train_ellipsoid,
+        'train': train_ellipsoid_multiple_restarts,
      },
     # ... maybe add other classifiers
 }
