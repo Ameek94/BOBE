@@ -123,7 +123,7 @@ def nested_sampling_Dy(gp: GP
 
     success = True
 
-    nlive = 500
+    nlive = 500 if ndim <= 20 else 750
 
     if dynamic:
         sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,

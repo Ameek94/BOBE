@@ -91,7 +91,6 @@ def get_numpy_rng() -> np.random.Generator:
         raise RuntimeError("No global seed has been set. Call set_global_seed() first.")
     return _np_rng
 
-
 def ensure_reproducibility(seed: int | None = None) -> int:
     """Ensure reproducibility by setting seeds and JAX configurations.
 

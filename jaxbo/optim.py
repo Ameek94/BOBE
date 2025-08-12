@@ -40,7 +40,6 @@ def _setup_bounds(bounds: Optional[Union[List, Tuple, jnp.ndarray]], ndim: int) 
         raise ValueError(f"Bounds shape {bounds.shape} incompatible with {ndim} dimensions")
     return bounds
 
-# Main optimize function without JAX control flow
 def optimize(
     func: Callable,
     fun_args: Optional[Tuple] = (),
@@ -54,12 +53,12 @@ def optimize(
     maxiter: int = 200,
     n_restarts: int = 4,
     verbose: bool = True,
-    early_stop_patience: int = 100,
+    early_stop_patience: int = 25,
     split_vmap_batch_size: int = 4,
 ) -> Tuple[jnp.ndarray, float]:
     """
     Standalone method to minimize a function using JAX and optax.
-    Uses only Python for loops (no jax.lax control flow).
+    Runs multiple restarts sequentially with early stopping per restart.
     """
     bounds_arr = _setup_bounds(bounds, ndim)
     
@@ -69,7 +68,7 @@ def optimize(
     # Get optimizer
     optimizer = _get_optimizer(optimizer_name, lr, optimizer_kwargs)
 
-    # JIT the step function for performance (still allowed, not control flow)
+    # JIT the step function for performance
     @jax.jit
     def step(u_params, opt_state):
         val, grad = jax.value_and_grad(scaled_func)(u_params)
@@ -89,79 +88,189 @@ def optimize(
             x0 = jnp.concatenate([x0, added_x0], axis=0)
 
     init_params_unit = jnp.array(x0)
-
     
-    opt_states = [optimizer.init(init_params_unit[i]) for i in range(n_restarts)]
-
-    # Evaluate initial step to set best_f and best_params
-    params_list = []
-    values_list = []
-    new_opt_states = []
-
-    for i in range(n_restarts):
-        p, os, v = step(init_params_unit[i], opt_states[i])
-        params_list.append(p)
-        new_opt_states.append(os)
-        values_list.append(v)
-
-    current_params = params_list  # List of arrays of shape (ndim,)
-    current_opt_states = new_opt_states
-    values = jnp.array(values_list)
-
-    # Initialize best
-    best_idx = jnp.argmin(values)
-    best_f = values[best_idx]
-    best_params_unit = current_params[best_idx]
-
-    # --- Optimization loop over maxiter ---
-    r = np.arange(maxiter)
-    progress_bar = tqdm.tqdm(r,desc=f'Optimizing')
-
-    for iter_idx in progress_bar:
-        next_params = []
-        next_opt_states = []
-        step_values = []
-
-        # Step each restart independently
-        for i in range(n_restarts):
-            p_next, os_next, v_next = step(current_params[i], current_opt_states[i])
-            next_params.append(p_next)
-            next_opt_states.append(os_next)
-            step_values.append(v_next)
-
-        step_values = jnp.array(step_values)
-        current_best_idx = jnp.argmin(step_values)
-        current_best_val = step_values[current_best_idx]
-
-        # Update global best if improved
-        if current_best_val < best_f:
-            best_f = current_best_val
-            best_params_unit = next_params[current_best_idx]
-        else:
-            early_stop_patience -= 1
-            if early_stop_patience == 0:
-                log.info(f"Early stopping at iteration {iter_idx}")
-                break
-
-        progress_bar.set_postfix({"best_value": float(best_f)})
-
-        # Update current params and states
-        current_params = next_params
-        current_opt_states = next_opt_states
-
-        # Optional verbose logging during loop
-        # if verbose and (iter_idx % 50 == 0 or iter_idx == maxiter - 1):
-        #     log.info(f"Step {iter_idx}: current best_f = {float(best_f):.6f}")
-
+    # Global best across all restarts
+    global_best_f = np.inf
+    global_best_params_unit = None
+    
+    # Run each restart independently with its own early stopping
+    for restart_idx in range(n_restarts):
+        log.debug(f"Starting restart {restart_idx + 1}/{n_restarts}")
+            
+        # Initialize this restart
+        current_params = init_params_unit[restart_idx]
+        opt_state = optimizer.init(current_params)
+        
+        # Initialize early stopping for this restart
+        best_f_for_restart = float('inf')
+        patience_counter = early_stop_patience
+        
+        # Initial evaluation
+        current_params, opt_state, current_value = step(current_params, opt_state)
+        
+        if current_value < best_f_for_restart:
+            best_f_for_restart = current_value
+            
+        # Local optimization loop for this restart
+        restart_progress = tqdm.tqdm(range(maxiter), desc=f'Restart {restart_idx + 1}', leave=False)
+        
+        for iter_idx in restart_progress:
+            # Take optimization step
+            current_params, opt_state, current_value = step(current_params, opt_state)
+            
+            # Check for improvement in this restart
+            if current_value < best_f_for_restart:
+                best_f_for_restart = current_value
+                patience_counter = early_stop_patience  # Reset patience
+            else:
+                patience_counter -= 1
+                if patience_counter == 0:
+                    if verbose:
+                        log.info(f"Early stopping for restart {restart_idx + 1} at iteration {iter_idx}")
+                    break
+            
+            restart_progress.set_postfix({"best_value": float(best_f_for_restart)})
+        
+        # Update global best if this restart found a better solution
+        if best_f_for_restart < global_best_f:
+            global_best_f = best_f_for_restart
+            global_best_params_unit = current_params
+            
+        if verbose:
+            log.info(f"Restart {restart_idx + 1} completed. Best value: {float(best_f_for_restart):.6f}")
+    
     # Final best in original space
-    best_params_original = scale_from_unit(best_params_unit, bounds_arr)
-    best_f_original = best_f
+    best_params_original = scale_from_unit(global_best_params_unit, bounds_arr)
+    best_f_original = global_best_f
 
     if verbose:
-        desc = f'Completed {maxiter} steps ({optimizer_name}) with {n_restarts} restarts'
+        desc = f'Completed optimization with {n_restarts} restarts ({optimizer_name})'
         log.info(f"{desc}: Final best_f = {float(best_f_original):.6f}")
 
     return best_params_original, float(best_f_original)
+
+# # Main optimize function without JAX control flow
+# def optimize(
+#     func: Callable,
+#     fun_args: Optional[Tuple] = (),
+#     fun_kwargs: Optional[dict] = {},
+#     ndim: int = 1,
+#     bounds: Optional[Union[List, Tuple, jnp.ndarray]] = None,
+#     x0: Optional[jnp.ndarray] = None,
+#     optimizer_name: str = "adam",
+#     lr: float = 1e-3,
+#     optimizer_kwargs: Optional[dict] = {},
+#     maxiter: int = 200,
+#     n_restarts: int = 4,
+#     verbose: bool = True,
+#     early_stop_patience: int = 100,
+#     split_vmap_batch_size: int = 4,
+# ) -> Tuple[jnp.ndarray, float]:
+#     """
+#     Standalone method to minimize a function using JAX and optax.
+#     Uses only Python for loops (no jax.lax control flow).
+#     """
+#     bounds_arr = _setup_bounds(bounds, ndim)
+    
+#     # Scaled function: operates in unit space [0,1], then maps to real bounds
+#     scaled_func = lambda x: func(scale_from_unit(x, bounds_arr), *fun_args, **fun_kwargs)
+
+#     # Get optimizer
+#     optimizer = _get_optimizer(optimizer_name, lr, optimizer_kwargs)
+
+#     # JIT the step function for performance (still allowed, not control flow)
+#     @jax.jit
+#     def step(u_params, opt_state):
+#         val, grad = jax.value_and_grad(scaled_func)(u_params)
+#         updates, opt_state = optimizer.update(grad, opt_state)
+#         u_params = optax.apply_updates(u_params, updates)
+#         u_params = jnp.clip(u_params, 0.0, 1.0)  # Stay in unit cube
+#         return u_params, opt_state, val
+    
+#     if x0 is None:
+#         x0 = np.random.uniform(size=(n_restarts, ndim))
+#     else:
+#         x0 = jnp.atleast_2d(x0)  # Ensure x0 is at least 2D
+#         n_x0 = x0.shape[0]
+#         if n_x0 < n_restarts:
+#             needed_x0 = n_restarts - n_x0
+#             added_x0 = np.random.uniform(size=(needed_x0, ndim))
+#             x0 = jnp.concatenate([x0, added_x0], axis=0)
+
+#     init_params_unit = jnp.array(x0)
+
+    
+#     opt_states = [optimizer.init(init_params_unit[i]) for i in range(n_restarts)]
+
+#     # Evaluate initial step to set best_f and best_params
+#     params_list = []
+#     values_list = []
+#     new_opt_states = []
+
+#     for i in range(n_restarts):
+#         p, os, v = step(init_params_unit[i], opt_states[i])
+#         params_list.append(p)
+#         new_opt_states.append(os)
+#         values_list.append(v)
+
+#     current_params = params_list  # List of arrays of shape (ndim,)
+#     current_opt_states = new_opt_states
+#     values = jnp.array(values_list)
+
+#     # Initialize best
+#     best_idx = jnp.argmin(values)
+#     best_f = values[best_idx]
+#     best_params_unit = current_params[best_idx]
+
+#     # --- Optimization loop over maxiter ---
+#     r = np.arange(maxiter)
+#     progress_bar = tqdm.tqdm(r,desc=f'Optimizing')
+
+#     for iter_idx in progress_bar:
+#         next_params = []
+#         next_opt_states = []
+#         step_values = []
+
+#         # Step each restart independently
+#         for i in range(n_restarts):
+#             p_next, os_next, v_next = step(current_params[i], current_opt_states[i])
+#             next_params.append(p_next)
+#             next_opt_states.append(os_next)
+#             step_values.append(v_next)
+
+#         step_values = jnp.array(step_values)
+#         current_best_idx = jnp.argmin(step_values)
+#         current_best_val = step_values[current_best_idx]
+
+#         # Update global best if improved
+#         if current_best_val < best_f:
+#             best_f = current_best_val
+#             best_params_unit = next_params[current_best_idx]
+#         else:
+#             early_stop_patience -= 1
+#             if early_stop_patience == 0:
+#                 log.info(f"Early stopping at iteration {iter_idx}")
+#                 break
+
+#         progress_bar.set_postfix({"best_value": float(best_f)})
+
+#         # Update current params and states
+#         current_params = next_params
+#         current_opt_states = next_opt_states
+
+#         # Optional verbose logging during loop
+#         # if verbose and (iter_idx % 50 == 0 or iter_idx == maxiter - 1):
+#         #     log.info(f"Step {iter_idx}: current best_f = {float(best_f):.6f}")
+
+#     # Final best in original space
+#     best_params_original = scale_from_unit(best_params_unit, bounds_arr)
+#     best_f_original = best_f
+
+#     if verbose:
+#         desc = f'Completed {maxiter} steps ({optimizer_name}) with {n_restarts} restarts'
+#         log.info(f"{desc}: Final best_f = {float(best_f_original):.6f}")
+
+#     return best_params_original, float(best_f_original)
 
 
     # # --- Handle initial points ---

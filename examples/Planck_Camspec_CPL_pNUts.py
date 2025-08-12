@@ -13,22 +13,22 @@ import matplotlib.pyplot as plt
 # Configure matplotlib for better LaTeX rendering
 plt.rcParams['font.size'] = 12
 plt.rcParams['axes.labelsize'] = 14
-plt.rcParams['legend.fontsize'] = 12
-plt.rcParams['xtick.labelsize'] = 12
-plt.rcParams['ytick.labelsize'] = 12    
+plt.rcParams['legend.fontsize'] = 11
+plt.rcParams['xtick.labelsize'] = 11
+plt.rcParams['ytick.labelsize'] = 11
 
 # Get classifier type from command line argument
-clf = sys.argv[1] if len(sys.argv) > 1 else 'ellipsoid'
+clf = sys.argv[1] if len(sys.argv) > 1 else 'svm'
 
 # Set up the cosmological likelihood
-cobaya_input_file = './cosmo_input/LCDM_new_CMB.yaml'
+cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_CPL.yaml'
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e6, noise_std=0.0, name=f'Planck_Hpop_{clf}')
+        minus_inf=-1e5, noise_std=0.0, name=f'Planck_Camspec_CPL_pNUTS_{clf}')
 
 # Print detailed setup information
 print("="*60)
-print(f"PLANCK HPOP ANALYSIS - {clf.upper()} CLASSIFIER")
+print(f"PLANCK CAMSPEC CPL ANALYSIS - {clf.upper()} CLASSIFIER")
 print("="*60)
 print(f"Likelihood: {likelihood.name}")
 print(f"Parameters: {likelihood.param_list}")
@@ -40,7 +40,7 @@ print("="*60)
 if clf == 'svm':
     clf_update_step = 1
 else:
-    clf_update_step = 5
+    clf_update_step = 2
 
 # Record start time
 start = time.time()
@@ -49,28 +49,28 @@ start = time.time()
 sampler = BOBE(
     n_cobaya_init=32, 
     n_sobol_init=32, 
-    miniters=1000, 
-    maxiters=5000,
-    max_gp_size=2000,
+    miniters=750, 
+    maxiters=4000,
+    max_gp_size=1800,
     loglikelihood=likelihood,
     resume=False,
     resume_file=f'{likelihood.name}.npz',
     save=True,
-    fit_step=50, 
+    fit_step=25, 
     update_mc_step=5, 
     ns_step=50,
     num_hmc_warmup=512,
     num_hmc_samples=4096, 
     mc_points_size=128,
     lengthscale_priors='DSLP',
-    logz_threshold=10.,
-    clf_threshold=300,
-    gp_threshold=400,
+    logz_threshold=5.,
+    clf_threshold=400,
+    gp_threshold=500,
     use_clf=True,
     clf_type=clf,
     clf_use_size=50,
     clf_update_step=clf_update_step,
-    minus_inf=-1e6,
+    minus_inf=-1e5,
     seed=42,  # For reproducibility
 )
 
@@ -186,20 +186,20 @@ else:  # Dictionary format
     sample_array = samples['x']
     weights_array = samples['weights']
 
-# Define specific parameters for LCDM cosmology (Hpop specific)
-param_list_LCDM = ['omch2','ombh2','logA','ns','H0','tau']
+# Define specific parameters for CPL cosmology
+plot_params = ['w','wa','omch2','ombh2','logA','ns','H0','tau'] #'omk'
 
 plot_final_samples(
     gp, 
     samples,
     param_list=likelihood.param_list,
     param_bounds=likelihood.param_bounds,
-    plot_params=param_list_LCDM,
+    plot_params=plot_params,
     param_labels=likelihood.param_labels,
     output_file=likelihood.name,
-    reference_file='./cosmo_input/chains/Hpop',
-    reference_ignore_rows=0.3,
-    reference_label='MCMC',
+    reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
+    reference_ignore_rows=0.,
+    reference_label='Polychord',
     scatter_points=False
 )
 
@@ -247,11 +247,11 @@ print("="*60)
 print("Check the generated plots and saved files for detailed analysis.")
 print(f"Final LogZ comparison with reference:")
 print(f"BOBE result: LogZ = {logz_dict.get('mean', 'N/A'):.4f}")
-print("PolyChord reference: LogZ = -5529.65 ± 0.45")
+print("PolyChord reference: LogZ = -6231")
 
 # Calculate deviation from reference if we have a result
 if 'mean' in logz_dict:
-    reference_logz = -5529.65
+    reference_logz = -6231
     deviation = abs(logz_dict['mean'] - reference_logz)
     print(f"Deviation from reference: {deviation:.4f}")
     
@@ -259,18 +259,3 @@ if 'mean' in logz_dict:
         uncertainty = (logz_dict['upper'] - logz_dict['lower']) / 2
         sigma_deviation = deviation / uncertainty if uncertainty > 0 else float('inf')
         print(f"Deviation in σ: {sigma_deviation:.2f}")
-
-# Final summary statistics
-print("\n" + "="*60)
-print("HPOP ANALYSIS SUMMARY")
-print("="*60)
-print(f"Cosmological model: ΛCDM")
-print(f"Data: Planck High-ℓ polarization")
-print(f"Dimensions: {len(likelihood.param_list)}")
-print(f"Parameters: {', '.join(param_list_LCDM)}")
-print(f"Classifier: {clf}")
-print(f"Final GP size: {gp.train_x.shape[0]}")
-print(f"Runtime: {current_time/60:.2f} minutes")
-if 'mean' in logz_dict:
-    print(f"Evidence: LogZ = {logz_dict['mean']:.4f}")
-print("="*60)

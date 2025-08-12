@@ -1,3 +1,7 @@
+import os
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+    os.cpu_count()
+)
 from jaxbo.bo import BOBE
 from jaxbo.utils import plot_final_samples
 from jaxbo.loglike import CobayaLikelihood
@@ -22,7 +26,7 @@ print("="*60)
 start = time.time()
 sampler = BOBE(
     n_cobaya_init=4, 
-    n_sobol_init=16, 
+    n_sobol_init=4, 
     miniters=25, 
     maxiters=150,
     max_gp_size=200,

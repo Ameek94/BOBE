@@ -26,6 +26,7 @@ from .logging_utils import get_logger
 from .results import BOBEResults
 
 log = get_logger("[bo]")
+log.info(f'JAX using {jax.device_count()} devices.')
 
 def WIPV(x, gp, mc_points=None):
     """
@@ -119,7 +120,7 @@ class BOBE:
         miniters : int
             Minimum number of iterations before checking convergence.
         maxiters : int
-            Maximum number of iterations.
+            Maximum number of iterations. # Instead change to MAX_EVAL_BUDGET
         max_gp_size : int
             Maximum number of points used to train the GP. 
             If using SVM, this is not the same as the number of points used to train the SVM.
@@ -457,8 +458,8 @@ class BOBE:
             if (pt_exists_or_below_threshold and self.mc_points_method == 'NUTS') and (self.mc_samples['method'] == 'MCMC'):
                 update_mc = True
             if update_mc:
-                if not refit:
-                    self.gp.fit(maxiter=75,n_restarts=1)
+                # if not refit:
+                #     self.gp.fit(maxiter=75,n_restarts=1)
                 x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
                 self.results_manager.start_timing('MCMC Sampling')
                 self.mc_samples = get_mc_samples(
