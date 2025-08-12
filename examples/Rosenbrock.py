@@ -1,5 +1,5 @@
 from jaxbo.bo import BOBE
-from jaxbo.utils import plot_final_samples
+from jaxbo.utils.summary_plots import plot_final_samples
 from jaxbo.loglike import ExternalLikelihood,CobayaLikelihood
 from jaxbo.nested_sampler import renormalise_log_weights
 from getdist import MCSamples
@@ -45,17 +45,17 @@ likelihood = ExternalLikelihood(loglikelihood=loglike,ndim=ndim,param_list=param
 start = time.time()
 sampler = BOBE(n_cobaya_init=4, n_sobol_init = 16, 
         miniters=50, maxiters=200,max_gp_size=200,
-        loglikelihood=likelihood,
-        fit_step = 2, update_mc_step = 2, ns_step = 25,
+        loglikelihood=likelihood,mc_points_method='NS',
+        fit_step = 2, update_mc_step = 5, ns_step = 10,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 32,
         logz_threshold=0.5,
-        lengthscale_priors='DSLP', use_svm=False,minus_inf=-1e10,)
+        lengthscale_priors='DSLP', use_clf=False,minus_inf=-1e10,)
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()
 print(f"Total time taken = {end-start:.4f} seconds")
 print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
 
-plot_final_samples(gp, ns_samples,param_list=sampler.param_list,param_bounds=sampler.param_bounds,
-                   param_labels=sampler.param_labels,output_file=likelihood.name,reference_samples=reference_samples,
+plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
+                   param_labels=likelihood.param_labels,output_file=likelihood.name,reference_samples=reference_samples,
                    reference_file=None,scatter_points=True,reference_label='Dynesty')

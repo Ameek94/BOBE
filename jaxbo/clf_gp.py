@@ -3,17 +3,17 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-from .gp import GP, DSLP_GP, SAAS_GP
-from .clf import train_svm, svm_predict_proba, train_nn, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
+from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
+from .clf import train_svm, svm_predict_proba, train_nn, train_nn_multiple_restarts,train_ellipsoid_multiple_restarts, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
+from .utils.seed_utils import get_new_jax_key, get_numpy_rng
+from .utils.logging_utils import get_logger
 import numpyro
-# numpyro.set_host_device_count(4) ?
 from numpyro.infer import MCMC, NUTS, SA, AIES
 import numpyro.distributions as dist
 from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
-import logging
-log = logging.getLogger(__name__)
+log = get_logger("[clf_gp]")
 
 
 available_classifiers = {
@@ -21,15 +21,15 @@ available_classifiers = {
         'train': train_svm,
     },
     'nn': {
-        'train': train_nn,
+        'train': train_nn_multiple_restarts,
     },
     'ellipsoid': {
-        'train': train_ellipsoid,
+        'train': train_ellipsoid_multiple_restarts,
      },
     # ... maybe add other classifiers
 }
 
-class ClassifierGP:
+class GPwithClassifier:
     def __init__(self, train_x=None, train_y=None, clf_flag=True,
                  clf_type='svm', clf_settings={},
                  clf_use_size=400, clf_update_step=5,
@@ -73,7 +73,7 @@ class ClassifierGP:
         # Store Data and Classifier Settings
         self.train_x_clf = jnp.array(train_x)
         self.train_y_clf = jnp.array(train_y).reshape(-1, 1) # Ensure 2D
-        self.clf_data_size = self.train_x_clf.shape[0]
+        # self.clf_data_size = self.train_x_clf.shape[0]
         self.clf_use_size = clf_use_size
         self.clf_update_step = clf_update_step
         self.clf_type = clf_type.lower()
@@ -96,18 +96,17 @@ class ClassifierGP:
 
         # Initialize GP 
         self.ndim = train_x_gp.shape[1] 
-        if lengthscale_priors not in ['DSLP', 'SAAS']:
-            raise ValueError("lengthscale_priors must be either 'DSLP' or 'SAAS'")
+
         if lengthscale_priors == 'DSLP':
             self.gp = DSLP_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
                               outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
-        else:
+        elif lengthscale_priors == 'SAAS':
             self.gp = SAAS_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
                               outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
-
-        self.train_x = self.gp.train_x
-        self.train_y = self.gp.train_y
-        self.noise = self.gp.noise
+        else:
+            log.warning(f"Not using DSLP or SAAS priors, using default GP")
+            self.gp = GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
+                          outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
 
         # Initialize Classifier
         self.use_clf = (self.clf_data_size >= self.clf_use_size) and self.clf_flag
@@ -121,7 +120,6 @@ class ClassifierGP:
         else:
              log.info(f"Not enough data ({self.clf_data_size}) to use classifier (need {self.clf_use_size} points), or classifier type not set.")
 
-
     def _train_classifier(self):
         """Trains the classifier based on clf_type."""
 
@@ -133,7 +131,14 @@ class ClassifierGP:
             0, 1
         )
 
+        log.info(f" Number of labels 0: {np.sum(labels == 0)}, 1: {np.sum(labels == 1)}")
+
         # Add method to handle if only class is present
+        if np.all(labels == labels[0]):
+            # If all labels are the same, we make sure not to use the classifier
+            log.info("All labels are identical. Not using classifier for the moment")
+            self.use_clf = False
+            return 
 
         # Get training function and parameters
         train_func = available_classifiers[self.clf_type]['train']
@@ -141,7 +146,6 @@ class ClassifierGP:
         # Call the specific training function
         # Training functions return (predict_func, model_params, metrics_dict)
 
-        
         best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
         kwargs = {
             'best_pt': best_pt,
@@ -154,9 +158,33 @@ class ClassifierGP:
         log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
         log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
 
-    def fit(self, lr=1e-2, maxiter=150, n_restarts=4):
+    def fit(self, lr=5e-3, maxiter=300, n_restarts=4):
         """Fits the GP hyperparameters."""
         self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts)
+
+    def predict_mean_single(self,x):
+        gp_mean = self.gp.predict_mean_single(x)
+        if not self.use_clf or self._clf_predict_func is None:
+            return gp_mean
+
+        clf_probs = self._clf_predict_func(x)
+        return jnp.where(clf_probs >= self.probability_threshold, gp_mean, self.minus_inf)
+
+    def predict_var_single(self,x):
+        var  = self.gp.predict_var_single(x)
+        if not self.use_clf or self._clf_predict_func is None:
+            return var
+
+        clf_probs = self._clf_predict_func(x)
+        return jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
+
+    def predict_mean_batched(self,x):
+        x = jnp.atleast_2d(x)
+        return jax.vmap(self.predict_mean_single)(x)
+
+    def predict_var_batched(self,x):
+        x = jnp.atleast_2d(x)
+        return jax.vmap(self.predict_var_single)(x)
 
     def predict_mean(self, x):
         """
@@ -171,6 +199,10 @@ class ClassifierGP:
         res = jnp.where(clf_probs >= self.probability_threshold, gp_mean, self.minus_inf)
         return res
     
+    # def batched_predict_mean(self,x):
+    #     x = jnp.atleast_2d(x)
+    #     return jax.vmap(self.predict_mean)(x)
+
     def predict_var(self, x):
         """
         Predicts the GP variance, adjusted by the classifier.
@@ -184,6 +216,10 @@ class ClassifierGP:
         res = jnp.where(clf_probs >= self.probability_threshold, var, 0.0)
         return res
 
+    # def batched_predict_var(self,x):
+    #     x = jnp.atleast_2d(x)
+    #     return jax.vmap(self.predict_var)(x)
+
     def fantasy_var(self, x_new, mc_points):
         """
         Computes the fantasy variance, see gp.py for more details.
@@ -191,7 +227,7 @@ class ClassifierGP:
         """
         return self.gp.fantasy_var(x_new, mc_points)
 
-    def update(self, new_x, new_y, refit=True, lr=1e-2, maxiter=150, n_restarts=2, step=0):
+    def update(self, new_x, new_y, refit=True, lr=5e-3, maxiter=300, n_restarts=4, step=0):
         """
         Updates the classifier and GP training sets.
         Retrains classifier/GP based on thresholds and steps.
@@ -207,20 +243,23 @@ class ClassifierGP:
             if is_duplicate:
                 log.info(f"Point already exists in the classifier training set, not updating.")
                 return True 
+            
+            # # can we not add point to GP if it is below threshold and correctly classified, only add to classifier data in that case?
+            # if self.use_clf:
+            #     correct_classification = (self.predict_mean(new_x) >= self.train_y_clf.max() - self.clf_threshold)
+            #     predicted_classification = (self._clf_predict_func(new_x) >= self.probability_threshold)
+            #     correctly_classified = correct_classification==predicted_classification
 
             # Update classifier data
             self.train_x_clf = jnp.concatenate([self.train_x_clf, new_x], axis=0)
             self.train_y_clf = jnp.concatenate([self.train_y_clf, new_y], axis=0)
-            self.clf_data_size += 1
             log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
 
             # Update GP data if within threshold
             gp_not_updated = False
             if new_y.flatten()[0] > (self.train_y_clf.max() - self.gp_threshold):
-                # Update GP
+                # Update GP - properties will automatically reflect the updated GP
                 self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
-                self.train_x = self.gp.train_x
-                self.train_y = self.gp.train_y
             else:
                 log.info("Point not within GP threshold, not updating GP.")
                 if refit:
@@ -241,10 +280,11 @@ class ClassifierGP:
         return gp_not_updated
 
     def get_random_point(self):
-        pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold/2.
-        if not jnp.any(pts_idx):
-            log.info("No points above threshold")
-            return self.train_x_clf[jnp.argmax(self.train_y_clf)]
+        pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold
+    
+        # if not jnp.any(pts_idx):
+        #     log.info("No points above threshold")
+        #     return self.train_x_clf[jnp.argmax(self.train_y_clf)]
 
         # Sample a random point from the filtered points
         valid_indices = jnp.where(pts_idx)[0]
@@ -272,120 +312,306 @@ class ClassifierGP:
                 lengthscales=self.gp.lengthscales,outputscale=self.gp.outputscale
                 )
         
-    def gp_numpyro_model(self):
+    def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
+                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4):
+        
         """
-        Returns a numpyro model for the GP.
-        This is used for sampling using GP surrogate using the mean as the target for NUTS or SA.
-        """
-        x = numpyro.sample('x', dist.Uniform(
+        Obtain samples from the posterior represented by the GP mean as the logprob.
+        Optionally restarts MCMC if all logp values are the same or if HMC fails. (RESTART LOGIC TO BE IMPLEMENTED)
+        """        
+
+        rng_mcmc = get_numpy_rng()
+        prob = rng_mcmc.uniform(0, 1)
+        high_temp = rng_mcmc.uniform(1., 2.) ** 2
+        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        seed_int = rng_mcmc.integers(0, 2**31 - 1)
+        log.info(f"Running MCMC chains with temperature {temp:.4f}")
+
+        def model():
+            x = numpyro.sample('x', dist.Uniform(
                 low=jnp.zeros(self.train_x_clf.shape[1]),
                 high=jnp.ones(self.train_x_clf.shape[1])
             ))
-            
-        mean = self.predict_mean(x)
-        numpyro.factor('y', mean)
-        numpyro.deterministic('logp', mean)
 
-    def sample_GP_NUTS(self, rng_key, warmup_steps=512, num_samples=512, progress_bar=True, thinning=8, verbose=True,
-                       init_params=None, temp=1., restart_on_flat_logp=True):
-        """
-        Obtain samples from the posterior represented by the GP mean as the logprob.
-        Optionally restarts MCMC if all logp values are the same or if HMC fails.
-        """
+            mean = self.predict_mean_batched(x)
+            numpyro.factor('y', mean/temp)
+            numpyro.deterministic('logp', mean)
 
-        num_chains = 1
-        # # init_params = jnp.array([self.get_random_point() for _ in range(num_chains-1)])#  if init_params is None else init_params
-        # best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
-        # # init_params = jnp.concatenate([init_params, best_pt.reshape(1, -1)], axis=0) #if init_params is not None else None
-        # init_strategy = init_to_value(values = {'x': self.get_random_point()}) #values=[{'x': init_params[i]} for i in range(num_chains)]
-
-
-        init_params = self.get_random_point() if init_params is None else init_params
-        
-        if self.use_clf and init_params is not None:
-            init_strategy = init_to_value(values={'x': init_params})
-        else:
-            init_strategy = init_to_sample()
-
-        start = time.time()
-        
-        # try:
-        #     kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
-        #     mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples= num_samples,
-        #                     num_chains=num_chains, progress_bar=False, thinning=thinning,
-        #                     chain_method='sequential')
-        #     mcmc.run(rng_key)
-        # except Exception as e:
-        #     if verbose:
-        #         log.error(f"SA kernel also failed with error: {e}")
-        #     raise e
-        
-        # First attempt with NUTS
-        try:
-            kernel = NUTS(self.gp_numpyro_model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
-            mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
-                        num_chains=1, progress_bar=progress_bar, thinning=thinning)
-            mcmc.run(rng_key)
-            
-            # Check if HMC ran successfully
-            mc_samples = mcmc.get_samples()
-            logp_vals = mc_samples['logp']
-            hmc_success = True
-            
-        except Exception as e:
-            if verbose:
-                log.info(f"HMC failed with error: {e}. Falling back to SA kernel.")
-            hmc_success = False
-            logp_vals = None
-
-        # Check if we need to restart due to flat logp or HMC failure
-        should_restart = False
-        
-        if not hmc_success:
-            should_restart = True
-            if verbose:
-                log.info("HMC failed. Restarting with SA kernel and best point as initial point.")
-        elif restart_on_flat_logp and (jnp.any(logp_vals == self.minus_inf) or 
-                                       jnp.allclose(logp_vals, logp_vals[0])):
-            should_restart = True
-            if verbose:
-                log.info("All logp values are the same or contain invalid values. Restarting MCMC from best training point.")
-
-        # Restart with SA if needed
-        if should_restart:
-            try:
-                num_chains = 1
-                best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
-                init_strategy = init_to_value(values={'x': best_pt})
-                log.info(f"Reinitializing MCMC with {num_chains} chains using SA kernel.")
-                kernel = SA(self.gp_numpyro_model, init_strategy=init_strategy)
-                mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=2 * num_samples,
-                            num_chains=num_chains, progress_bar=False, thinning=thinning)
+        @jax.jit
+        def run_single_chain(rng_key,init_x):
+                init_strategy = init_to_value(values={'x': init_x})
+                kernel = NUTS(model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
+                mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
+                        num_chains=1, progress_bar=False, thinning=thinning)
                 mcmc.run(rng_key)
-            except Exception as e:
-                if verbose:
-                    log.error(f"SA kernel also failed with error: {e}")
-                raise e
-
-        if verbose:
-            mcmc.print_summary(exclude_deterministic=False)
-        log.info(f"Sampled parameters MCMC took {time.time() - start:.4f} s")
-
-        mc_samples = mcmc.get_samples()
-        samples = {
-            'x': mc_samples['x'],
-            'logp': mc_samples['logp'],
-            'best': mc_samples['x'][jnp.argmax(mc_samples['logp'])]
-        }
-
-        print(f"shape of samples: {samples['x'].shape}")
-
-        return samples
+                samples_x = mcmc.get_samples()['x']
+                logps = mcmc.get_samples()['logp']
+                return samples_x,logps
     
 
-    def prune(self):
+        num_devices = jax.device_count()
+        rng_keys = jax.random.split(jax.random.PRNGKey(seed_int), num_chains) # handle properly the keys [get_new_jax_key() for _ in range(num_chains)] #
+        if num_chains == 1: 
+            inits = jnp.array([self.get_random_point()])
+        else:
+            inits = jnp.vstack([self.get_random_point() for _ in range(num_chains-1)])
+            inits = jnp.vstack([inits, self.train_x_clf[jnp.argmax(self.train_y_clf)]])
+
+        log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
+
+        if (num_devices >= num_chains) and num_chains > 1:
+            # if devices present run with pmap
+            pmapped = jax.pmap(run_single_chain, in_axes=(0,0),out_axes=(0,0))
+            samples_x, logps = pmapped(rng_keys,inits)
+            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
+            # reshape to get proper shapes
+            samples_x = jnp.concatenate(samples_x, axis=0)
+            logps = jnp.reshape(logps, (samples_x.shape[0],))
+            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
+        else:
+            # if devices not available run sequentially
+            samples_x = []
+            logps = []
+            for i in range(num_chains):
+                samples_x_i, logps_i = run_single_chain(rng_keys[i], inits[i])
+                samples_x.append(samples_x_i)
+                logps.append(logps_i)
+
+            samples_x = jnp.concatenate(samples_x)
+            logps = jnp.concatenate(logps)
+
+        samples_dict = {
+            'x': samples_x,
+            'logp': logps,
+            'best': samples_x[jnp.argmax(logps)]
+        }
+
+        log.info(f"Max logl found = {np.max(logps):.4f}")
+
+        return samples_dict
+
+
+    def reset_threshold_points(self):
         """
-        Every time a new maximum is found, we discard points from the GP which do now lie outside the threshold. 
-        TO BE IMPLEMENTED
+        Every 100 steps or so we discard points from the GP which do now lie outside the threshold. 
         """
-        pass
+        full_size = self.train_x_clf.shape[0]
+        if full_size % 100 == 0:
+            mask = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
+            train_x_gp = self.train_x_clf[mask]
+            train_y_gp = self.train_y_clf[mask] * self.y_std + self.y_mean  # Rescale to original scale
+            hyperparams_dict = self.gp.hyperparams
+            self.gp.reset_train_data(train_x = train_x_gp, train_y = train_y_gp,)
+
+    @property
+    def lengthscales(self):
+        """Access the underlying GP's lengthscales."""
+        return self.gp.lengthscales
+    
+    @property
+    def outputscale(self):
+        """Access the underlying GP's outputscale."""
+        return self.gp.outputscale
+    
+    @property
+    def tausq(self):
+        """Access the underlying GP's tausq if available."""
+        return getattr(self.gp, 'tausq', None)
+    
+    @property
+    def train_x(self):
+        """Access the underlying GP's training inputs."""
+        return self.gp.train_x
+    
+    @property
+    def train_y(self):
+        """Access the underlying GP's training outputs."""
+        return self.gp.train_y
+    
+    @property
+    def y_mean(self):
+        """Access the underlying GP's y_mean."""
+        return self.gp.y_mean
+    
+    @property
+    def y_std(self):
+        """Access the underlying GP's y_std."""
+        return self.gp.y_std
+    
+    @property
+    def noise(self):
+        """Access the underlying GP's noise parameter."""
+        return self.gp.noise
+    
+    @property
+    def hyperparams(self): 
+        return self.gp.hyperparams
+
+    @property
+    def clf_data_size(self):
+        """Size of the classifier's training inputs."""
+        return self.train_x_clf.shape[0]
+
+
+    # def create_jitted_single_predict(self):
+
+    #     @jax.jit
+    #     def predict_one_mean(x):
+    #         gp_mean = self.gp.jitted_single_predict_mean(x)
+    #         if self.use_clf:
+    #             clf_probs = self._clf_predict_func(x)
+    #             return jnp.where(clf_probs >= self.probability_threshold, gp_mean, self.minus_inf)
+    #         return gp_mean
+
+    #     @jax.jit
+    #     def predict_one_var(x):
+    #         var = self.gp.jitted_single_predict_var(x)
+    #         if self.use_clf:
+    #             clf_probs = self._clf_predict_func(x)
+    #             return jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
+    #         return var
+
+    #     self.jitted_single_predict_mean = predict_one_mean
+    #     self.jitted_single_predict_var = predict_one_var
+
+    # def gp_numpyro_model(self,temp=1.):
+    #     """
+    #     Returns a numpyro model for the GP.
+    #     This is used for sampling using GP surrogate using the mean as the target for NUTS or SA.
+    #     """
+    #     x = numpyro.sample('x', dist.Uniform(
+    #             low=jnp.zeros(self.train_x_clf.shape[1]),
+    #             high=jnp.ones(self.train_x_clf.shape[1])
+    #         ))
+            
+    #     mean = self.predict_mean(x)
+    #     numpyro.factor('y', mean/temp)
+    #     numpyro.deterministic('logp', mean)
+
+    # def sample_GP_NUTS_old(self, warmup_steps=512, num_samples=512, progress_bar=True, thinning=8, verbose=True,
+    #                    init_params=None, temp=4., restart_on_flat_logp=True):
+    #     """
+    #     Obtain samples from the posterior represented by the GP mean as the logprob.
+    #     Optionally restarts MCMC if all logp values are the same or if HMC fails.
+    #     """
+    #     start = time.time()
+
+    #     rng_mcmc = get_numpy_rng()
+    #     # high_temp = rng_mcmc.uniform(np.sqrt(2), ) ** 2
+    #     prob = rng_mcmc.uniform(0, 1)
+    #     # temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+    #     high_temp = rng_mcmc.uniform(1., 2.) ** 2
+    #     temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+    #     log.info(f"Running MCMC chains with temperature {temp:.4f}")
+        
+    #     num_chains = 4
+
+    #     samples_x = []
+    #     samples_logp = []
+        
+    #     # temps = np.arange(1, num_chains+1, 1)
+
+    #     rng_mcmc = get_numpy_rng()
+    #     prob = rng_mcmc.uniform(0, 1)
+    #     # temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+    #     high_temp = rng_mcmc.uniform(1., 2.) ** 2
+    #     temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+    #     log.info(f"Running MCMC chains with temperature {temp:.4f}")
+        
+    #     def model():
+    #         x = numpyro.sample('x', dist.Uniform(
+    #             low=jnp.zeros(self.train_x_clf.shape[1]),
+    #             high=jnp.ones(self.train_x_clf.shape[1])
+    #         ))
+
+    #         mean = self.jitted_single_predict_mean(x)
+    #         numpyro.factor('y', mean/temp)
+    #         numpyro.deterministic('logp', mean)
+
+    #     rng_key = get_new_jax_key()
+
+    #     for i in range(num_chains):
+    #         if i== 0:
+    #             init_params = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+    #         else:
+    #             init_params = self.get_random_point() #if init_params is None else init_params
+        
+    #         if self.use_clf and init_params is not None:
+    #             init_strategy = init_to_value(values={'x': init_params})
+    #         else:
+    #             init_strategy = init_to_sample()
+        
+    #     # First attempt with NUTS
+    #         try:
+    #             kernel = NUTS(model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
+    #             mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
+    #                     num_chains=1, progress_bar=progress_bar, thinning=thinning)
+    #             mcmc.run(rng_key)
+
+    #             # Check if HMC ran successfully
+    #             mc_samples = mcmc.get_samples()
+    #             logp_vals = mc_samples['logp']
+    #             hmc_success = True
+            
+    #         except Exception as e:
+    #             if verbose:
+    #                 log.error(f"HMC failed with error: {e}. Falling back to SA kernel.")
+    #             hmc_success = False
+    #             logp_vals = None
+
+    #         # Check if we need to restart due to flat logp or HMC failure
+    #         should_restart = False
+        
+    #         if not hmc_success:
+    #             should_restart = True
+    #             if verbose:
+    #                 log.error("HMC failed. Restarting with SA kernel and best point as initial point.")
+    #         elif restart_on_flat_logp and (jnp.any(logp_vals == self.minus_inf) or 
+    #                                    jnp.allclose(logp_vals, logp_vals[0])):
+    #             should_restart = True
+    #             if verbose:
+    #                 log.error("All logp values are the same or contain invalid values. Restarting MCMC from best training point.")
+
+    #         # Restart with SA if needed
+    #         if should_restart:
+    #             try:
+    #                 rng_key = get_new_jax_key()
+    #                 num_chains = 1
+    #                 best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+    #                 init_strategy = init_to_value(values={'x': best_pt})
+    #                 log.info(f"Reinitializing MCMC with {num_chains} chains using SA kernel.")
+    #                 kernel = SA(model, init_strategy=init_strategy)
+    #                 mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=2 * num_samples,
+    #                         num_chains=num_chains, progress_bar=False, thinning=thinning)
+    #                 mcmc.run(rng_key,)
+    #             except Exception as e:
+    #                 if verbose:
+    #                     log.error(f"SA kernel also failed with error: {e}")
+    #                 raise e
+                
+    #         samples = mcmc.get_samples()
+    #         logp_vals = samples['logp']
+    #         samples_x.append(samples['x'])
+    #         samples_logp.append(logp_vals)
+
+    #         if verbose:
+    #             mcmc.print_summary(exclude_deterministic=False)
+    
+    #     log.info(f"Sampled parameters MCMC took {time.time() - start:.4f} s")
+
+    #     samples_x = jnp.concatenate(samples_x, axis=0)
+    #     samples_logp = jnp.concatenate(samples_logp, axis=0)
+
+    #     samples = {'x': samples_x, 'logp': samples_logp, 'best': samples_x[jnp.argmax(samples_logp)]}
+
+    #     print(f"shape of samples: {samples['x'].shape}")
+
+    #     return samples
+    
+
+    # def prune(self):
+    #     """
+    #     Every time a new maximum is found, we discard points from the GP which do now lie outside the threshold. 
+    #     TO BE IMPLEMENTED
+    #     """
+    #     pass

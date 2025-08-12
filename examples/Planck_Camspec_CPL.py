@@ -9,7 +9,7 @@ likelihood = cobaya_loglike(cobaya_input_file, confidence_for_unbounded=0.999999
         minus_inf=-1e5, noise_std=0.0,name='Planck_Camspec_CPL')
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init = 128, 
+sampler = BOBE(n_cobaya_init=32, n_sobol_init = 128, 
         miniters=200, maxiters=1500,max_gp_size=1400,
         loglikelihood=likelihood,
         resume=False,
@@ -18,7 +18,7 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init = 128,
         fit_step = 32, update_mc_step = 10, ns_step = 150,
         num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 64,
         lengthscale_priors='DSLP',logz_threshold=20.,svm_threshold=300,svm_gp_threshold=10000,
-        use_svm=True,svm_use_size=500,svm_update_step=5,minus_inf=-1e5,)
+        use_svm=True,svm_use_size=200,svm_update_step=5,minus_inf=-1e5,)
 
 gp, ns_samples, logz_dict = sampler.run()
 end = time.time()

@@ -1,13 +1,14 @@
 # Class for implementing external loglikelihoods
-from .utils import scale_to_unit, scale_from_unit
+from .utils.core_utils import scale_to_unit, scale_from_unit
 from typing import Any, Callable, List,Optional, Tuple, Union, Dict
 import numpy as np
 import tqdm
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from scipy.stats import qmc
+from .utils.logging_utils import get_logger
 import logging
-log = logging.getLogger("[Loglike]")
+log = get_logger("[loglike]")
 
 
 class ExternalLikelihood:

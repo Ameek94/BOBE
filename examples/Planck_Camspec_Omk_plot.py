@@ -1,5 +1,5 @@
 from jaxbo.bo import BOBE
-from jaxbo.utils import plot_final_samples
+from jaxbo.summary_plots import plot_final_samples
 from jaxbo.loglike import CobayaLikelihood
 import time
 from getdist import MCSamples, loadMCSamples, plots
@@ -24,7 +24,7 @@ ranges_dict = dict(zip(param_list,bounds.T))
 gp_samples = MCSamples(samples=samples, names=param_list, labels=likelihood.param_labels, ranges=ranges_dict, weights=weights,sampler='nested')
 
 
-reference_file = './cosmo_input/chains/PPlus_curved_LCDM'
+reference_file = './cosmo_input/chains/Planck_DESI_LCDM_omk' #PPlus_curved_LCDM'
 ref_samples = loadMCSamples(reference_file,settings={'ignore_rows': 0.3})
 
 g = plots.get_subplot_plotter(subplot_size=2.5,subplot_size_ratio=1)

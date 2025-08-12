@@ -41,7 +41,7 @@ test_methods/
 *.log
 *.json
 *.paramnames
-*ranges
+*.ranges
 *.pkl
 *.ini
 *.png

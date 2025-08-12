@@ -1,5 +1,5 @@
 from jaxbo.bo import BOBE
-from jaxbo.utils import plot_final_samples
+from jaxbo.summary_plots import plot_final_samples
 from jaxbo.loglike import cobaya_loglike
 import time
 import sys
