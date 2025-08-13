@@ -433,6 +433,78 @@ class BOBESummaryPlotter:
         
         return ax
     
+    def plot_acquisition_evolution(self, acquisition_data: Optional[Dict] = None,
+                                  ax: Optional[plt.Axes] = None) -> plt.Axes:
+        """
+        Plot the evolution of acquisition function values throughout iterations.
+        
+        Args:
+            acquisition_data: Dictionary with acquisition data (gets from results if None)
+            ax: Matplotlib axes to plot on (creates new if None)
+            
+        Returns:
+            The matplotlib axes object
+        """
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(10*self.figsize_scale, 6*self.figsize_scale))
+        
+        # Get acquisition data
+        if acquisition_data is None:
+            acquisition_data = self.results.get_acquisition_data()
+        
+        if not acquisition_data or 'iterations' not in acquisition_data:
+            ax.text(0.5, 0.5, 'No acquisition function data available', 
+                   transform=ax.transAxes, ha='center', va='center')
+            return ax
+        
+        iterations = np.array(acquisition_data['iterations'])
+        values = np.array(acquisition_data['values'])
+        functions = acquisition_data['functions']
+        
+        if len(iterations) == 0:
+            ax.text(0.5, 0.5, 'No acquisition function data available', 
+                   transform=ax.transAxes, ha='center', va='center')
+            return ax
+        
+        # Create color map for different acquisition functions
+        unique_functions = list(set(functions))
+        colors = plt.cm.tab10(np.linspace(0, 1, len(unique_functions)))
+        color_map = dict(zip(unique_functions, colors))
+        
+        # Plot values colored by function type
+        for func_name in unique_functions:
+            func_mask = np.array(functions) == func_name
+            func_iterations = iterations[func_mask]
+            func_values = values[func_mask]
+            
+            ax.scatter(func_iterations, func_values, 
+                      color=color_map[func_name], 
+                      label=f'{func_name} acquisition',
+                      alpha=0.7, s=20)
+            
+            # Connect points with lines for each function
+            if len(func_iterations) > 1:
+                ax.plot(func_iterations, func_values, 
+                       color=color_map[func_name], alpha=0.3, linewidth=1)
+        
+        # Add switches between acquisition functions
+        if len(unique_functions) > 1:
+            switch_points = []
+            for i in range(1, len(functions)):
+                if functions[i] != functions[i-1]:
+                    switch_points.append(iterations[i])
+            
+            for switch_iter in switch_points:
+                ax.axvline(switch_iter, color='red', linestyle='--', alpha=0.5,
+                          label='Function switch' if switch_iter == switch_points[0] else '')
+        
+        ax.set_xlabel('Iteration')
+        ax.set_ylabel('Acquisition Function Value')
+        ax.set_title('Acquisition Function Evolution')
+        ax.set_yscale('log')  # Log scale often useful for acquisition values
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
     def plot_timing_breakdown(self, timing_data: Optional[Dict] = None,
                              ax: Optional[plt.Axes] = None) -> plt.Axes:
         """
@@ -601,8 +673,8 @@ class BOBESummaryPlotter:
     def create_summary_dashboard(self, 
                                 gp_data: Optional[Dict] = None,
                                 best_loglike_data: Optional[Dict] = None,
+                                acquisition_data: Optional[Dict] = None,
                                 timing_data: Optional[Dict] = None,
-                                param_evolution_data: Optional[Dict] = None,
                                 save_path: Optional[str] = None) -> plt.Figure:
         """
         Create a comprehensive summary dashboard with all diagnostic plots.
@@ -610,6 +682,7 @@ class BOBESummaryPlotter:
         Args:
             gp_data: GP hyperparameter evolution data
             best_loglike_data: Best log-likelihood evolution data
+            acquisition_data: Acquisition function evolution data
             timing_data: Timing breakdown data
             param_evolution_data: Parameter evolution data (deprecated - not used)
             save_path: Path to save the figure (optional)
@@ -618,7 +691,7 @@ class BOBESummaryPlotter:
             The matplotlib figure object
         """
         # Create figure with subplots (2x3 grid)
-        fig = plt.figure(figsize=(18*self.figsize_scale, 12*self.figsize_scale))
+        fig = plt.figure(figsize=(18*self.figsize_scale, 14*self.figsize_scale))
         gs = GridSpec(2, 3, figure=fig, hspace=0.3, wspace=0.3)
         
         # Evidence evolution (top left)
@@ -632,18 +705,22 @@ class BOBESummaryPlotter:
         # GP outputscale (top right)
         ax3 = fig.add_subplot(gs[0, 2])
         self.plot_gp_outputscale(gp_data=gp_data, ax=ax3)
-        
-        # Best log-likelihood (bottom left)
+
+        # Convergence diagnostics (middle left)
         ax4 = fig.add_subplot(gs[1, 0])
-        self.plot_best_loglike_evolution(best_loglike_data=best_loglike_data, ax=ax4)
-        
-        # Convergence diagnostics (bottom middle)
+        self.plot_convergence_diagnostics(ax=ax4)
+
+        # Best log-likelihood (middle left)
         ax5 = fig.add_subplot(gs[1, 1])
-        self.plot_convergence_diagnostics(ax=ax5)
-        
-        # Timing breakdown (bottom right)
+        self.plot_best_loglike_evolution(best_loglike_data=best_loglike_data, ax=ax5)
+
+        # Acquisition function evolution (middle right)
         ax6 = fig.add_subplot(gs[1, 2])
-        self.plot_timing_breakdown(timing_data=timing_data, ax=ax6)
+        self.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax6)
+        
+        # # Timing breakdown (bottom left)
+        # ax7 = fig.add_subplot(gs[2, 0])
+        # self.plot_timing_breakdown(timing_data=timing_data, ax=ax7)
         
         # Add overall title
         fig.suptitle(f'BOBE Summary: {self.output_file}', 

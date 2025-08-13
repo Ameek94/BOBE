@@ -116,6 +116,11 @@ class BOBEResults:
         # Best loglikelihood tracking 
         self.best_loglike_iterations = []
         self.best_loglike_values = []
+
+        # Acquisition function tracking
+        self.acquisition_iterations = []
+        self.acquisition_values = []
+        self.acquisition_functions = []
         
         # Final results
         self.final_samples = None
@@ -139,7 +144,20 @@ class BOBEResults:
         # Save intermediate results periodically
         if iteration % 50 == 0:
             self.save_intermediate()
-    
+
+    def update_acquisition(self, iteration: int, acquisition_value: float, acquisition_function: str):
+        """
+        Track acquisition function values throughout iterations.
+        
+        Args:
+            iteration: Current iteration number
+            acquisition_value: Value of the acquisition function at the selected point
+            acquisition_function: String name of the acquisition function used
+        """
+        self.acquisition_iterations.append(iteration)
+        self.acquisition_values.append(float(acquisition_value))
+        self.acquisition_functions.append(acquisition_function)
+
     def update_gp_hyperparams(self, iteration: int, lengthscales: list, outputscale: float):
         """
         Track GP hyperparameters evolution.
@@ -250,6 +268,19 @@ class BOBEResults:
             'outputscales': self.gp_outputscales
         }
     
+    def get_acquisition_data(self) -> Dict[str, list]:
+        """
+        Get acquisition function evolution data for plotting.
+        
+        Returns:
+            Dictionary with 'iterations', 'values', and 'functions' keys
+        """
+        return {
+            'iterations': self.acquisition_iterations,
+            'values': self.acquisition_values,
+            'functions': self.acquisition_functions
+        }
+    
     def get_best_loglike_data(self) -> Dict[str, list]:
         """
         Get best loglikelihood evolution data for plotting.
@@ -351,7 +382,14 @@ class BOBEResults:
             
             # === GP AND CLASSIFIER INFORMATION ===
             'gp_info': self.gp_info,
-            
+
+            # === ACQUISITION FUNCTION TRACKING ===
+            'acquisition_data': {
+                'iterations': self.acquisition_iterations,
+                'values': self.acquisition_values,
+                'functions': self.acquisition_functions
+            },
+
             # === TIMING INFORMATION ===
             'timing': self.get_timing_summary(),
             
@@ -472,6 +510,11 @@ class BOBEResults:
                 "termination_reason": str(self.termination_reason)
             },
             "gp_info": self.gp_info,
+            "acquisition_function": {
+                "iterations": [int(x) for x in self.acquisition_iterations],
+                "values": [float(x) for x in self.acquisition_values],
+                "functions": self.acquisition_functions
+            },
             "convergence": {
                 "iterations": [int(conv.iteration) for conv in self.convergence_history],
                 "logz_values": [float(conv.logz_dict.get('mean', np.nan)) for conv in self.convergence_history],

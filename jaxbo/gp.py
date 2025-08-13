@@ -242,7 +242,7 @@ class GP:
         x = jnp.atleast_2d(x)
         k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
         k22 = kernel_diag(x,self.outputscale,self.noise,include_noise=True)
-        mean = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean 
+        mean = jnp.einsum('ij,ji', k12.T, self.alphas)
         vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
         var = k22 - jnp.sum(vv*vv,axis=0) 
         var = jnp.clip(var, safe_noise_floor, None)
@@ -322,7 +322,7 @@ class GP:
         # k22 = self.kernel(mc_points,mc_points,self.lengthscales,
         #                   self.outputscale,noise=self.noise,include_noise=True) # precompute k22 instead
         # var = get_var_from_cho(k11_cho,k12,k22)
-        return var
+        return var * self.y_std**2 # return to physical scale for better interpretability
         
     def get_phys_points(self,x_bounds):
         """
@@ -419,6 +419,15 @@ class GP:
         """
         np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=self.train_y,noise=self.noise,
          y_mean=self.y_mean,y_std=self.y_std,lengthscales=self.lengthscales,outputscale=self.outputscale)
+
+    def get_random_point(self):
+
+        chosen_index = np.random.choice(self.npoints, size=1)
+    
+        result = self.train_x_clf[chosen_index]
+        log.info(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
+    
+        return result
 
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
                        init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=2):

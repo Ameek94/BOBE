@@ -13,7 +13,6 @@ import tqdm
 import time
 # from .acquisition import WIPV, EI #, logEI
 from .gp import DSLP_GP, SAAS_GP #, sample_GP_NUTS
-from .svm_gp import SVM_GP
 from .clf_gp import GPwithClassifier
 from .loglike import ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
@@ -24,53 +23,12 @@ from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from .optim import optimize
 from .utils.logging_utils import get_logger
 from .utils.results import BOBEResults
+from .acquisition import *
 
 log = get_logger("[bo]")
 log.info(f'JAX using {jax.device_count()} devices.')
 
-def WIPV(x, gp, mc_points=None):
-    """
-    Computes the Weighted Integrated Posterior Variance acquisition function.
-    
-    Args:
-        x: Input points (shape: [n, ndim])
-        gp: Gaussian process model
-        mc_points: Optional Monte Carlo points for fantasy variance computation
-    
-    Returns:
-        Mean of the posterior variance at the input points.
-    """
-    var = gp.fantasy_var(x, mc_points=mc_points)
-    return jnp.mean(var)
-
-def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",init_params=None):
-    if method=='NUTS':
-        try:
-            mc_samples = gp.sample_GP_NUTS(warmup_steps=warmup_steps,
-            num_samples=num_samples, thinning=thinning
-            )
-        except Exception as e:
-            log.error(f"Error in sampling GP NUTS: {e}")
-            mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.5,equal_weights=True,
-            )
-    elif method=='NS':
-        mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.5,equal_weights=True,
-        )
-    elif method=='uniform':
-        mc_samples = {}
-        points = qmc.Sobol(gp.ndim, scramble=True).random(num_samples)
-        mc_samples['x'] = points
-    else:
-        raise ValueError(f"Unknown method {method} for sampling GP")
-    return mc_samples
-
-
-def get_mc_points(mc_samples, mc_points_size=64):
-    mc_size = max(mc_samples['x'].shape[0], mc_points_size)
-    idxs = np.random.choice(mc_size, size=mc_points_size, replace=False)
-    return mc_samples['x'][idxs]
+_acq_funcs = {"wipv": WIPV, "ei": EI, "logei": LogEI}
 
 
 class BOBE:
@@ -360,40 +318,62 @@ class BOBE:
         ii = 0
         x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
 
+        acqf = WIPV
+        acq_str = "WIPV"
+
         for i in range(self.maxiters):
 
 
             # ideally, we want to decide whether to do the mc_update depending on the results of the previous steps
             #  e.g. if using ns_samples we can stay on it for a bit longer since it explores the space better
             ii = i + 1
+            # Change acquisition function if no improvement in 100 iterations.
+            # if (ii - best_pt_iteration > 40)  and acqf == LogEI:
+            #     log.info(f" No improvement in 100 iterations, changing acquisition function from {acq_str} to WIPV")
+            #     acq_str = "WIPV"
+            #     acqf = WIPV
+            #     update_mc = True
+
             refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and ii >= self.miniters
             update_mc = (ii % self.update_mc_step == 0) and not ns_flag
 
             print("\n")
-            log.info(f" Iteration {ii}/{self.maxiters}, refit={refit}, update_mc={update_mc}, ns={ns_flag}")
-            
-            # start acq from mc_point with max var or max value 
-            # mc_points_var = jax.lax.map(self.gp.predict_var,self.mc_points)
-            # x0_acq = self.mc_points[jnp.argmax(mc_points_var)]
+            log.info(f" Iteration {ii}/{self.maxiters}, refit={refit}, update_mc={update_mc}, ns={ns_flag}, acq={acq_str}")
 
-            x0_acq1 = self.mc_samples['best']
-            vars = jax.lax.map(self.gp.predict_var,self.mc_points,batch_size=10)
-            x0_acq2 = self.mc_points[jnp.argmax(vars)]
-            x0_acq3 = self.gp.train_x[jnp.argmax(self.gp.train_y)]
-            x0_acq = jnp.vstack([x0_acq1, x0_acq2, x0_acq3])
-            # print(f"x0_acq shape: {x0_acq.shape}, expected shape: (2, ndim)")
-            # new_pt_u, acq_val = optimize_acq(
-            #     self.gp, WIPV, self.mc_points, x0=x0_acq)
+
+            if acqf == LogEI:
+                acq_str = "LogEI"
+                n_restarts = 8
+                maxiter = 500
+                early_stop_patience = 100
+                acq_kwargs = {'zeta': 0.05}
+                x0_acq = jnp.vstack([self.gp.get_random_point() for _ in range(n_restarts)])
+            elif acqf == WIPV: 
+                acq_str = "WIPV"
+                n_restarts = 4  
+                maxiter = 200
+                early_stop_patience = 50
+                acq_kwargs = {'mc_points': self.mc_points}
+                if self.mc_samples is not None:
+                    x0_acq1 = self.mc_samples['best']
+                    vars = jax.lax.map(self.gp.predict_var,self.mc_points,batch_size=10)
+                    x0_acq2 = self.mc_points[jnp.argmax(vars)]
+                    x0_acq3 = self.gp.train_x[jnp.argmax(self.gp.train_y)]
+                    x0_acq = jnp.vstack([x0_acq1, x0_acq2, x0_acq3])
+                else:
+                    x0_acq = jnp.vstack([self.gp.get_random_point() for _ in range(n_restarts)])
+
 
             self.results_manager.start_timing('Acquisition Optimization')
-            new_pt_u, acq_val = optimize(WIPV, 
+            new_pt_u, acq_val = optimize(acqf, 
                                          fun_args = (self.gp,), 
-                                         fun_kwargs = {'mc_points': self.mc_points},
+                                         fun_kwargs = acq_kwargs,
                                          ndim = self.ndim,
                                          x0 = x0_acq,
-                                         n_restarts=4,
-                                         maxiter=200,
+                                         n_restarts=n_restarts,
+                                         maxiter=maxiter,
+                                         early_stop_patience=early_stop_patience,
                                          verbose=True,)
             self.results_manager.end_timing('Acquisition Optimization')
             new_pt_u = jnp.atleast_2d(new_pt_u)  # Ensure new_pt_u is at least 2D
@@ -401,6 +381,8 @@ class BOBE:
             new_pt = scale_from_unit(new_pt_u, self.loglikelihood.param_bounds) #.flatten()
 
             log.info(f" Acquisition value {acq_val:.4e} at new point")
+            self.results_manager.update_acquisition(ii, acq_val, acq_str)
+
             self.results_manager.start_timing('True Objective Evaluations')
             new_val = self.loglikelihood(
                 new_pt, logp_args=(), logp_kwargs={}
@@ -479,6 +461,8 @@ class BOBE:
             self.results_manager.update_best_loglike(ii, self.best_f)
             
             log.info(f" Current best point {self.best} with value = {self.best_f:.4f}, found at iteration {best_pt_iteration}")
+
+
 
             if i % 4 == 0 and i > 0:
                 jax.clear_caches()

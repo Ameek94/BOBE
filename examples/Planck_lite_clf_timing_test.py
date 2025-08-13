@@ -3,9 +3,8 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
 from jaxbo.bo import BOBE
-from jaxbo.summary_plots import plot_final_samples
+from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 from jaxbo.loglike import CobayaLikelihood
-from jaxbo.summary_plots import BOBESummaryPlotter
 import time
 import matplotlib.pyplot as plt
 
@@ -121,11 +120,13 @@ plotter = BOBESummaryPlotter(results['results_manager'])
 # Get GP and best loglike evolution data
 gp_data = results['results_manager'].get_gp_data()
 best_loglike_data = results['results_manager'].get_best_loglike_data()
+acquisition_data = results['results_manager'].get_acquisition_data()
 
 # Create summary dashboard with timing data
 print("Creating summary dashboard...")
 fig_dashboard = plotter.create_summary_dashboard(
     gp_data=gp_data,
+    acquisition_data=acquisition_data,
     best_loglike_data=best_loglike_data,
     timing_data=timing_data,
     save_path=f"{likelihood.name}_dashboard.png"
@@ -150,6 +151,19 @@ if comprehensive_results.get('logz_history'):
     plt.tight_layout()
     plt.savefig(f"{likelihood.name}_evidence.png", dpi=300, bbox_inches='tight')
     plt.show()
+
+# Create acquisition function evolution plot
+print("Creating acquisition function evolution plot...")
+acquisition_data = results['results_manager'].get_acquisition_data()
+if acquisition_data and acquisition_data.get('iterations'):
+    fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
+    plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
+    ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
+    plt.tight_layout()
+    plt.savefig(f"{likelihood.name}_acquisition_evolution.png", dpi=300, bbox_inches='tight')
+    plt.show()
+else:
+    print("No acquisition function data available for plotting.")
 
 # Create parameter samples plot
 print("Creating parameter samples plot...")
@@ -185,6 +199,7 @@ print(f"✓ Legacy samples: {likelihood.name}_samples.npz")
 print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
 print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
 print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
+print(f"✓ Acquisition evolution: {likelihood.name}_acquisition_evolution.png")
 print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
 
 # Create timing comparison with previous runs (if comments in original file are accurate)

@@ -1,7 +1,10 @@
+import os
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+    os.cpu_count()
+)
 from jaxbo.bo import BOBE
-from jaxbo.utils.summary_plots import plot_final_samples
 from jaxbo.loglike import CobayaLikelihood
-from jaxbo.summary_plots import BOBESummaryPlotter
+from jaxbo.utils.summary_plots import plot_final_samples,BOBESummaryPlotter 
 import matplotlib.pyplot as plt
 import time
 import sys
@@ -11,7 +14,7 @@ clf = sys.argv[1] if len(sys.argv) > 1 else 'svm'
 cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_CPL.yaml'
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_CPL_{clf}')
+        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_CPL_{clf}_256_mc')
 
 if clf == 'svm':
     clf_update_step = 1
@@ -20,17 +23,17 @@ else:
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=32, n_sobol_init=32,
-        miniters=0, maxiters=2500, max_gp_size=1600,
+        miniters=500, maxiters=2500, max_gp_size=2000,
         loglikelihood=likelihood,
-        resume=True,
+        resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step=25, update_mc_step=5, ns_step=50,
-        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=128,
+        fit_step=25, update_mc_step=5, ns_step=25,
+        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=256,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
-        clf_threshold=400, gp_threshold=500,
-        minus_inf=-1e5, logz_threshold=5.)
+        clf_threshold=350, gp_threshold=500,
+        minus_inf=-1e5, logz_threshold=10.)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
@@ -134,6 +137,19 @@ if comprehensive_results.get('logz_history'):
     plt.tight_layout()
     plt.savefig(f"{likelihood.name}_evidence.png", dpi=300, bbox_inches='tight')
     # plt.show()
+
+# Create acquisition function evolution plot
+print("Creating acquisition function evolution plot...")
+acquisition_data = results['results_manager'].get_acquisition_data()
+if acquisition_data and acquisition_data.get('iterations'):
+    fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
+    plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
+    ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
+    plt.tight_layout()
+    plt.savefig(f"{likelihood.name}_acquisition_evolution.png", dpi=300, bbox_inches='tight')
+    plt.show()
+else:
+    print("No acquisition function data available for plotting.")
 
 # Create parameter samples plot
 print("Creating parameter samples plot...")
