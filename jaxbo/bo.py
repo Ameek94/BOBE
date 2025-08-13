@@ -8,7 +8,7 @@ from numpyro.util import enable_x64
 enable_x64()
 from typing import Optional, Union, Tuple, Dict, Any
 from .acquisition import WIPV, EI #, logEI
-from .gp import DSLP_GP, SAAS_GP #, sample_GP_NUTS
+from .gp import DSLP_GP, SAAS_GP, Uniform_GP #, sample_GP_NUTS
 from .svm_gp import SVM_GP
 from .clf_gp import ClassifierGP
 from .loglike import ExternalLikelihood, CobayaLikelihood
@@ -17,7 +17,7 @@ from cobaya.model import get_model
 from .utils import scale_from_unit, scale_to_unit
 from .seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from optax import adam, apply_updates
-from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
+from .nested_sampler import nested_sampling_Dy#, nested_sampling_jaxns
 from getdist import plots, MCSamples, loadMCSamples
 import tqdm
 import time
@@ -57,10 +57,12 @@ log.addHandler(stdout_handler)
 log.addHandler(stderr_handler)
 
 # Acquisition optimizer
-def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_optimizer=4):
+def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=250, n_restarts_optimizer=8):
+    if mc_points is not None:
+        f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
+    else:
+        f = lambda x: acq(x=x, gp=gp)
     
-    f = lambda x: acq(x=x, gp=gp, mc_points=mc_points)
-
     @jax.jit
     def acq_val_grad(x):
         return jax.value_and_grad(f)(x)
@@ -78,19 +80,23 @@ def optimize_acq(gp, acq, mc_points, x0=None, lr=5e-3, maxiter=200, n_restarts_o
 
     best_f, best_params = jnp.inf, None
     r = jnp.arange(maxiter)
+    opt_path = []
     for n in range(n_restarts_optimizer):
+        curr_opt_path = []
         opt_state = optimizer.init(params)
         progress_bar = tqdm.tqdm(r,desc=f'ACQ Optimization restart {n+1}')
         for i in progress_bar:
+            curr_opt_path.append(params)
             (params, opt_state), fval = step((params, opt_state))
             progress_bar.set_postfix({"fval": float(fval)})
             if fval < best_f:
                 best_f, best_params = fval, params
         # Perturb for next restart
+        opt_path.append(curr_opt_path)
         params = jnp.clip(best_params + 0.5 * jnp.array(np.random.normal(size=params.shape)), 0., 1.)
 
-    # print(f"Best params: {best_params}, fval: {best_f}")
-    return jnp.atleast_2d(best_params), best_f
+    #print(f"Best params: {best_params}, fval: {best_f}")
+    return jnp.atleast_2d(best_params), best_f, opt_path
 
 # Utility functions
 
@@ -114,7 +120,7 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
             )
     elif method=='NS':
         mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.5,equal_weights=True,
+                                            , dynamic=False, dlogz=0.5,equal_weights=False,
         )
     elif method=='uniform':
         mc_samples = {}
@@ -128,7 +134,7 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
 def get_mc_points(mc_samples, mc_points_size=64):
     mc_size = max(mc_samples['x'].shape[0], mc_points_size)
     idxs = np.random.choice(mc_size, size=mc_points_size, replace=False)
-    return mc_samples['x'][idxs]
+    return {'x': mc_samples['x'][idxs], 'weights': mc_samples['weights'][idxs]}
 
 
 class BOBE:
@@ -143,6 +149,7 @@ class BOBE:
                  resume=False,
                  resume_file=None,
                  save=True,
+                 save_dir=None,
                  fit_step=10,
                  update_mc_step=10,
                  ns_step=10,
@@ -229,6 +236,18 @@ class BOBE:
         self.loglikelihood = loglikelihood
         self.ndim = len(self.loglikelihood.param_list)
 
+        ### Debug Plot Variables #######################################################################
+        self.timing = {'GP': [], 'MC': [], 'ACQ': [], 'NS': [], 'LH': [], 'Step': []}                  #
+        self.logz_data = []                                                                            #
+        self.hyperparameter_data = {'lengthscales': [], 'outputscale': [], 'mll': []}                  #
+        self.acq_data = {'xs': [], 'ys': [], 'mc_points': [], 'pt_and_val': [],  'opt_path': []}       #
+        self.sample_point_data = {'del_val': [], 'variance': []}                                       #
+        self.n_sobol_init = n_sobol_init                                                               #
+        self.mll_val = np.nan                                                                          #
+        self.acq_val = None                                                                            #
+        self.use_clf = use_clf                                                                         #   
+        ################################################################################################
+
         if resume and resume_file is not None:
             # assert resume_file is not None, "resume_file must be provided if resume is True"
             log.info(f" Resuming from file {resume_file}")
@@ -271,7 +290,8 @@ class BOBE:
         else:
             self.gp = {
                 'DSLP': DSLP_GP,
-                'SAAS': SAAS_GP
+                'SAAS': SAAS_GP,
+                'Uniform': Uniform_GP
             }[lengthscale_priors](
                 train_x=self.train_x, train_y=self.train_y,
                 noise=1e-8, kernel='rbf',lengthscales=lengthscales,outputscale=outputscale
@@ -296,7 +316,7 @@ class BOBE:
         self.num_hmc_samples = num_hmc_samples
         self.mc_points_size = mc_points_size
         self.minus_inf = minus_inf
-        self.output_file = self.loglikelihood.name
+        self.output_file = f"{save_dir}{self.loglikelihood.name}"
         self.mc_points_method = mc_points_method
         self.save = save
         self.return_getdist_samples = return_getdist_samples
@@ -353,42 +373,100 @@ class BOBE:
         best_pt_iteration = 0
 
         ii = 0
-        x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
 
         for i in range(self.maxiters):
 
             ii = i + 1
             refit = (ii % self.fit_step == 0)
-            ns_flag = (ii % self.ns_step == 0) and ii >= self.miniters
+            ns_flag = (ii % self.ns_step == 0) #and ii >= self.miniters
             update_mc = (ii % self.update_mc_step == 0) and not ns_flag
 
             print("\n")
             log.info(f" Iteration {ii}/{self.maxiters}, refit={refit}, update_mc={update_mc}, ns={ns_flag}")
             
-            # start acq from mc_point with max var or max value 
-            # mc_points_var = jax.lax.map(self.gp.predict_var,self.mc_points)
-            # x0_acq = self.mc_points[jnp.argmax(mc_points_var)]
-
-            x0_acq = self.mc_samples['best']
-            new_pt_u, acq_val = optimize_acq(
+            #start acq from mc_point with max var or max value
+           
+            
+            ### ACQ ###
+            #x0_acq = self.mc_samples['best']
+            start_acq = time.time()
+            if ii > self.n_sobol_init:
+                f = lambda x: WIPV(x=x, gp=self.gp, mc_points=self.mc_points)
+                mc_points_var = jax.vmap(self.gp.predict_var)(self.mc_points['x']) #jax.lax.map(self.gp.predict_var,self.mc_points['x'])
+                x0_acq = self.mc_points['x'][jnp.argmax(mc_points_var)]
+                new_pt_u, acq_val, opt_path = optimize_acq(
                 self.gp, WIPV, self.mc_points, x0=x0_acq)
+            else:
+                acq = EI(gp=self.gp, zeta=0.01)
+                f = lambda x: acq(x=x, gp=self.gp, mc_points=None)
+                x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
+                new_pt_u, acq_val, opt_path = optimize_acq(
+                self.gp, EI(gp=self.gp, zeta=0.01), None, x0=x0_acq)
+            
             
             new_pt = scale_from_unit(new_pt_u, self.loglikelihood.param_bounds) #.flatten()
+            end_acq = time.time()
+            self.timing['ACQ'].append(end_acq-start_acq)
+            ############
+
+            ### ACQ DEBUG ###
+            self.acq_data['opt_path'].append(opt_path)
+            if self.ndim == 1:
+                acq_plot_xs = np.linspace(0, 1, 100)
+                acq_plot_ys = [f(x) for x in acq_plot_xs]
+            if self.ndim == 2:
+                acq_plot_x1 = acq_plot_x2 = np.linspace(0, 1, 50)
+                acq_plot_X1, acq_plot_X2 = np.meshgrid(acq_plot_x1, acq_plot_x2)
+                acq_plot_xs = np.stack([acq_plot_X1.ravel(), acq_plot_X2.ravel()], axis=-1)
+                acq_plot_ys = [f(x) for x in acq_plot_xs]
+            if self.ndim == 1 or self.ndim == 2:
+                self.acq_data['xs'].append(acq_plot_xs)
+                self.acq_data['ys'].append(acq_plot_ys)
+                self.acq_data['mc_points'].append(self.mc_points)
+                acq_pt = new_pt_u.tolist()[0]
+                #log.info(f"{acq_pt}")
+                self.acq_data['pt_and_val'].append([*acq_pt, acq_val])
+            #################
 
             log.info(f" Acquisition value {acq_val:.4e} at new point")
+            ### LH ###
+            lh_start = time.time()
             new_val = self.loglikelihood(
                 new_pt, logp_args=(), logp_kwargs={}
             )
+            lh_end = time.time()
+            self.timing['LH'].append(lh_end-lh_start)
+            ##########
 
             new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pt.flatten())}
             log.info(f" New point {new_pt_vals}")
-            log.info(f" Objective function value = {new_val.item():.4f}, GP predicted value = {self.gp.predict_mean(new_pt_u).item():.4f}")
+            suprise_factor = (np.abs(new_val.item() - self.gp.predict_mean(new_pt_u).item()))/np.sqrt(self.gp.predict_var(new_pt_u).item())
+            log.info(f" Objective function value = {new_val.item():.4f}, GP predicted value = {self.gp.predict_mean(new_pt_u).item():.4f}, Suprise Factor = {suprise_factor:.4f}")
+            self.sample_point_data['del_val'].append((np.abs(new_val.item() - self.gp.predict_mean(new_pt_u).item())))
+            self.sample_point_data['variance'].append(self.gp.predict_var(new_pt_u).item())
 
-            pt_exists_or_below_threshold = self.gp.update(new_pt_u, new_val, refit=refit,step=ii,n_restarts=4)
+            ### GP FIT ###
+            start_gp = time.time()
+            pt_exists_or_below_threshold, mll_val = self.gp.update(new_pt_u, new_val, refit=refit,step=ii,n_restarts=8)
             # x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
-
+            end_gp = time.time()
+            self.timing['GP'].append(end_gp - start_gp)
+            if mll_val != np.nan:
+                self.mll_val = mll_val
+            if self.use_clf:
+                self.hyperparameter_data['lengthscales'].append(self.gp.gp.lengthscales.tolist())
+                self.hyperparameter_data['outputscale'].append(self.gp.gp.outputscale.tolist())
+                self.hyperparameter_data['mll'].append(self.mll_val)
+            else:
+                self.hyperparameter_data['lengthscales'].append(self.gp.lengthscales.tolist())
+                self.hyperparameter_data['outputscale'].append(self.gp.outputscale.tolist())
+                self.hyperparameter_data['mll'].append(self.mll_val)
+            
             if (pt_exists_or_below_threshold and self.mc_points_method == 'NUTS') and (self.mc_samples['method'] == 'MCMC'):
                 update_mc = True
+                
+            ### Update MC ###
+            mc_start = time.time()
             if update_mc:
                 x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
                 self.mc_samples = get_mc_samples(
@@ -397,6 +475,9 @@ class BOBE:
                     thinning=1, method=self.mc_points_method,init_params=x0_hmc
                 )
                 self.mc_samples['method'] = 'MCMC'
+            mc_end = time.time()
+            self.timing['MC'].append(mc_end-mc_start)
+            #################
 
             if float(new_val) > self.best_f:
                 self.best_f = float(new_val)
@@ -411,22 +492,27 @@ class BOBE:
             if (ii % 10 == 0) and self.save:
                 log.info(" Saving GP to file")
                 self.gp.save(outfile=self.output_file)
-
+            ### NS ###
+            ns_start = time.time()
             if ns_flag:
                 log.info(" Running Nested Sampling")
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(
                     self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1
                 )
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-
+                self.logz_data.append(logz_dict)
                 if ns_success and self.check_convergence(i, logz_dict,threshold=self.logz_threshold,ndim=self.ndim):
                     self.converged = True
                     self.termination_reason = "LogZ converged"
+                    ns_end = time.time()
+                    self.timing['NS'].append(ns_end-ns_start)
                     break
-
+            
                 self.mc_samples = ns_samples
                 self.mc_samples['method'] = 'NS'
-
+                
+            ns_end = time.time()
+            self.timing['NS'].append(ns_end-ns_start)
             self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
             if self.gp.train_x.shape[0] >= self.max_gp_size:
@@ -456,7 +542,7 @@ class BOBE:
                 self.gp, self.ndim, maxcall=int(1e7), dynamic=True, dlogz=0.01
             )
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-
+            self.logz_data.append(logz_dict)
         if ns_samples is None:
             log.info("No nested sampling results found, MC samples from HMC/MCMC will be used instead.")
             samples = self.mc_samples['x']
@@ -476,9 +562,28 @@ class BOBE:
         }
 
         if self.save:
-            np.savez(f'{self.output_file}_samples.npz',
-                     samples=samples,param_bounds=self.loglikelihood.param_bounds,
-                     weights=weights,loglikes=loglikes)
+            # np.savez(f'{self.output_file}_samples.npz',
+            #          samples=samples,param_bounds=self.loglikelihood.param_bounds,
+            #          weights=weights,loglikes=loglikes)
+            np.savez(f'{self.output_file}_data.npz',
+                     samples=samples,
+                     param_bounds=self.loglikelihood.param_bounds,
+                     weights=weights,
+                     loglikes=loglikes,
+                     logz_data=self.logz_data,
+                     train_x=self.gp.train_x,
+                     train_y=self.gp.train_y,
+                     train_y_unstd=self.gp.train_y*self.gp.y_std + self.gp.y_mean,
+                     lengthscales=self.hyperparameter_data['lengthscales'],
+                     outputscales=self.hyperparameter_data['outputscale'],
+                     mll=self.hyperparameter_data['mll'],
+                     acq_data_x=self.acq_data['xs'],
+                     acq_data_y=self.acq_data['ys'],
+                     acq_mcpoints = self.acq_data['mc_points'],
+                     acq_point_val = self.acq_data['pt_and_val'],
+                     acq_opt_path = self.acq_data['opt_path'],
+                     sobol_samples=self.n_sobol_init,
+                     allow_pickle=True)
 
         if self.return_getdist_samples:
             sampler_method = 'nested' if ns_samples is not None else 'mcmc'

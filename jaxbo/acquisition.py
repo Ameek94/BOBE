@@ -7,7 +7,7 @@ from jax.scipy.stats import norm
 from jax import config
 from jax.scipy.special import erfc, logsumexp
 import logging
-from .optim import FunctionOptimizer
+#from .optim import FunctionOptimizer
 
 config.update("jax_enable_x64", True)
 log = logging.getLogger("[ACQ]")
@@ -27,8 +27,8 @@ def WIPV(x, gp, mc_points=None):
     Returns:
         Mean of the posterior variance at the input points.
     """
-    var = gp.fantasy_var(x, mc_points=mc_points)
-    return jnp.mean(var)
+    var = gp.fantasy_var(x, mc_points=mc_points['x'])
+    return jnp.average(var, weights=mc_points['weights'])
 
 
 def _scaled_improvement(mean, sigma, best_f, maximize=True):
@@ -144,8 +144,8 @@ class AcquisitionFunction:
 
 class EI(AcquisitionFunction):
     """Expected Improvement acquisition function"""
-    def __init__(self, zeta: float = 0.0):
-        super().__init__()
+    def __init__(self, gp, zeta: float = 0.0):
+        super().__init__(gp)
         self.zeta = zeta
     
     def __call__(self, x, gp, **kwargs):

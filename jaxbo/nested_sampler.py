@@ -18,11 +18,11 @@ except ModuleNotFoundError:
     print("Proceeding without dynesty since not installed")
 import math
 
-import tensorflow_probability.substrates.jax as tfp
-tfpd = tfp.distributions
-from jaxns.framework.model import Model
-from jaxns.framework.prior import Prior
-from jaxns import NestedSampler, TerminationCondition, resample
+#import tensorflow_probability.substrates.jax as tfp
+#tfpd = tfp.distributions
+# from jaxns.framework.model import Model
+# from jaxns.framework.prior import Prior
+# from jaxns import NestedSampler, TerminationCondition, resample
 import logging
 log = logging.getLogger("[NS]")
 
@@ -173,127 +173,127 @@ def nested_sampling_Dy(gp: GP
 
 #-------------JAXNS functions---------------------
 
-def nested_sampling_jaxns(gp
-                          ,ndim: int = 1
-                          ,dlogZ: float = 0.1
-                          ,evidence_uncert: float = 0.1
-                          ,logz_std: bool = True
-                          ,maxcall: int = 1e6 # type: ignore
-                          ,boost_maxcall: int = 1
-                          ,batch_size = 50 # what is the optimal size?
-                          ,parameter_estimation = False
-                          ,difficult_model = False
-                        ,equal_weights: bool = False):
-    """
-    Nested Sampling using JaxNS
+# def nested_sampling_jaxns(gp
+#                           ,ndim: int = 1
+#                           ,dlogZ: float = 0.1
+#                           ,evidence_uncert: float = 0.1
+#                           ,logz_std: bool = True
+#                           ,maxcall: int = 1e6 # type: ignore
+#                           ,boost_maxcall: int = 1
+#                           ,batch_size = 50 # what is the optimal size?
+#                           ,parameter_estimation = False
+#                           ,difficult_model = False
+#                         ,equal_weights: bool = False):
+#     """
+#     Nested Sampling using JaxNS
 
-    Arguments
-    ---------
-    gp : saas_fbgp
-        Gaussian Process model
-    ndim : int
-        Number of dimensions
-    dlogz : float
-        Log evidence goal
-    logz_std : bool
-        Compute the upper and lower bounds on logZ using the GP uncertainty
-    maxcall : int
-        Maximum number of function calls
-    boost_maxcall : int
-        Boost the maximum number of function calls
-    batch_size : int
-        Batch size for computing the upper and lower bounds on logZ, used to manage memory
-    parameter_estimation : bool
-        Jaxns settings to get robust parameter estimation, see Jaxns documentation for more details
-    difficult_model : bool  
-        Jaxns settings to handle difficult models, see Jaxns documentation for more details
+#     Arguments
+#     ---------
+#     gp : saas_fbgp
+#         Gaussian Process model
+#     ndim : int
+#         Number of dimensions
+#     dlogz : float
+#         Log evidence goal
+#     logz_std : bool
+#         Compute the upper and lower bounds on logZ using the GP uncertainty
+#     maxcall : int
+#         Maximum number of function calls
+#     boost_maxcall : int
+#         Boost the maximum number of function calls
+#     batch_size : int
+#         Batch size for computing the upper and lower bounds on logZ, used to manage memory
+#     parameter_estimation : bool
+#         Jaxns settings to get robust parameter estimation, see Jaxns documentation for more details
+#     difficult_model : bool  
+#         Jaxns settings to handle difficult models, see Jaxns documentation for more details
 
-    Returns
-    -------
-    samples : ndarray
-        Equally weighted samples from the nested sampler
-    logz_dict : dict
-        Dictionary containing the mean, upper and lower bounds on logZ and the logZ error from the nested sampler
-    """
+#     Returns
+#     -------
+#     samples : ndarray
+#         Equally weighted samples from the nested sampler
+#     logz_dict : dict
+#         Dictionary containing the mean, upper and lower bounds on logZ and the logZ error from the nested sampler
+#     """
         
-    @jit
-    def log_likelihood(x):
-        mu = gp.predict_mean(x) 
-        return mu
+#     @jit
+#     def log_likelihood(x):
+#         mu = gp.predict_mean(x) 
+#         return mu
         
-    def prior_model():
-        x = yield Prior(tfpd.Uniform(low=jnp.zeros(ndim), high= jnp.ones(ndim)), name='x') # type: ignore
-        return x
+#     def prior_model():
+#         x = yield Prior(tfpd.Uniform(low=jnp.zeros(ndim), high= jnp.ones(ndim)), name='x') # type: ignore
+#         return x
     
-    model_mean = Model(prior_model=prior_model,
-              log_likelihood=log_likelihood)
+#     model_mean = Model(prior_model=prior_model,
+#               log_likelihood=log_likelihood)
     
-    term_cond = TerminationCondition(evidence_uncert=evidence_uncert,dlogZ=dlogZ
-                                     ,max_num_likelihood_evaluations=int(maxcall*boost_maxcall)) 
+#     term_cond = TerminationCondition(evidence_uncert=evidence_uncert,dlogZ=dlogZ
+#                                      ,max_num_likelihood_evaluations=int(maxcall*boost_maxcall)) 
     
-    start = time.time()
-    log.info(" Running Jaxns for logZ computation")
-    ns_mean = NestedSampler(model=model_mean,
-                        max_samples=maxcall*boost_maxcall,
-                        parameter_estimation=parameter_estimation,
-                        difficult_model=difficult_model,)
-                        #num_parallel_workers=10)
-     # Run the sampler
-    termination_reason, state = ns_mean(jax.random.PRNGKey(42),term_cond=term_cond)
-    # Get the results
-    results = ns_mean.to_results(termination_reason=termination_reason, state=state)
+#     start = time.time()
+#     log.info(" Running Jaxns for logZ computation")
+#     ns_mean = NestedSampler(model=model_mean,
+#                         max_samples=maxcall*boost_maxcall,
+#                         parameter_estimation=parameter_estimation,
+#                         difficult_model=difficult_model,)
+#                         #num_parallel_workers=10)
+#      # Run the sampler
+#     termination_reason, state = ns_mean(jax.random.PRNGKey(42),term_cond=term_cond)
+#     # Get the results
+#     results = ns_mean.to_results(termination_reason=termination_reason, state=state)
 
-    # ns_mean.plot_cornerplot(results)
+#     # ns_mean.plot_cornerplot(results)
     
-    mean = results.log_Z_mean
-    logz_err = results.log_Z_uncert
+#     mean = results.log_Z_mean
+#     logz_err = results.log_Z_uncert
 
-    # Upper and Lower bound calculation
-    logvol = results.log_X_mean
+#     # Upper and Lower bound calculation
+#     logvol = results.log_X_mean
 
-    # variance needs to be computed in batches
-    f = jit(lambda x: (gp.predict_var(x),))
-    # num_inputs = len(results.samples['x'])
-    # log.info(f" Computing upper and lower logZ using {num_inputs} points")
-    # # batch_size = batch_size
-    # num_batches = (num_inputs + batch_size - 1 ) // batch_size
-    # input_arrays = (results.samples['x'],)
-    # batch_idxs = [np.arange( i*batch_size, min( (i+1)*batch_size,num_inputs  )) for i in range(num_batches)]
-    # res = [f(*tuple([arr[idx] for arr in input_arrays])) for idx in batch_idxs]
-    # nres = len(res[0])
-    # # now combine results across batches and function outputs to return a tuple (num_outputs, num_inputs, ...)
-    # logl_var = tuple(np.concatenate([x[i] for x in res]) for i in range(nres))[0]
+#     # variance needs to be computed in batches
+#     f = jit(lambda x: (gp.predict_var(x),))
+#     # num_inputs = len(results.samples['x'])
+#     # log.info(f" Computing upper and lower logZ using {num_inputs} points")
+#     # # batch_size = batch_size
+#     # num_batches = (num_inputs + batch_size - 1 ) // batch_size
+#     # input_arrays = (results.samples['x'],)
+#     # batch_idxs = [np.arange( i*batch_size, min( (i+1)*batch_size,num_inputs  )) for i in range(num_batches)]
+#     # res = [f(*tuple([arr[idx] for arr in input_arrays])) for idx in batch_idxs]
+#     # nres = len(res[0])
+#     # # now combine results across batches and function outputs to return a tuple (num_outputs, num_inputs, ...)
+#     # logl_var = tuple(np.concatenate([x[i] for x in res]) for i in range(nres))[0]
     
-    # can we use map instead?
-    logl_var = jax.lax.map(f,results.samples['x'],batch_size=batch_size) # type: ignore
+#     # can we use map instead?
+#     logl_var = jax.lax.map(f,results.samples['x'],batch_size=batch_size) # type: ignore
 
-    logl_upper = results.log_L_samples + np.sqrt(logl_var)
-    logl_lower = results.log_L_samples - np.sqrt(logl_var)
+#     logl_upper = results.log_L_samples + np.sqrt(logl_var)
+#     logl_lower = results.log_L_samples - np.sqrt(logl_var)
     
-    upper =  compute_integrals(logl=logl_upper, logvol=logvol)[-1]
-    lower = compute_integrals(logl=logl_lower, logvol=logvol)[-1]
+#     upper =  compute_integrals(logl=logl_upper, logvol=logvol)[-1]
+#     lower = compute_integrals(logl=logl_lower, logvol=logvol)[-1]
     
-    #Log evidence estimates
-    log.info(f" Nested Sampling took {time.time() - start:.2f}s")
-    log.info(f" jaxns did {results.total_num_likelihood_evaluations} likelihood evaluations") #, terminated due to {termination_reasons[results.termination_reason]}")
-    # log.info(f" Mean LogZ: {mean}, Upper LogZ: {upper}, Lower LogZ: {lower}, Internal dLogZ: {logz_err}")
-    logz_dict = {'upper': upper, 'mean': mean.item(), 'lower': lower,'dlogz sampler': logz_err.item()}
+#     #Log evidence estimates
+#     log.info(f" Nested Sampling took {time.time() - start:.2f}s")
+#     log.info(f" jaxns did {results.total_num_likelihood_evaluations} likelihood evaluations") #, terminated due to {termination_reasons[results.termination_reason]}")
+#     # log.info(f" Mean LogZ: {mean}, Upper LogZ: {upper}, Lower LogZ: {lower}, Internal dLogZ: {logz_err}")
+#     logz_dict = {'upper': upper, 'mean': mean.item(), 'lower': lower,'dlogz sampler': logz_err.item()}
 
 
-    ns_samples = {}
-    if equal_weights:
-        samples = resample(key=jax.random.PRNGKey(0),
-                    samples=results.samples,
-                    log_weights=results.log_dp_mean, # type: ignore
-                    replace=True,) 
-        weights = np.ones(samples.shape[0])
+#     ns_samples = {}
+#     if equal_weights:
+#         samples = resample(key=jax.random.PRNGKey(0),
+#                     samples=results.samples,
+#                     log_weights=results.log_dp_mean, # type: ignore
+#                     replace=True,) 
+#         weights = np.ones(samples.shape[0])
 
-    else:    
-        samples = results.samples
-        logwts = results.log_dp_mean
-        weights = renormalise_log_weights(logwts)
+#     else:    
+#         samples = results.samples
+#         logwts = results.log_dp_mean
+#         weights = renormalise_log_weights(logwts)
     
-    ns_samples['x'] = samples
-    ns_samples['weights'] = weights
+#     ns_samples['x'] = samples
+#     ns_samples['weights'] = weights
 
-    return ns_samples, logz_dict
+#     return ns_samples, logz_dict
