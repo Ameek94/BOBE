@@ -11,6 +11,7 @@ from optax import adam, apply_updates
 from getdist import plots, MCSamples, loadMCSamples
 import tqdm
 import time
+from scipy import stats
 # from .acquisition import WIPV, EI #, logEI
 from .gp import GP, DSLP_GP, SAAS_GP, load_gp #, sample_GP_NUTS
 from .clf_gp import GPwithClassifier, load_clf_gp
@@ -29,6 +30,10 @@ log = get_logger("[bo]")
 log.info(f'JAX using {jax.device_count()} devices.')
 
 _acq_funcs = {"wipv": WIPV, "ei": EI, "logei": LogEI}
+
+import numpy as np
+from scipy import stats
+import warnings
 
 
 class BOBE:
@@ -413,16 +418,17 @@ class BOBE:
                 x0_acq = jnp.vstack([self.gp.get_random_point() for _ in range(n_restarts)])
             elif acqf == WIPV: 
                 acq_str = "WIPV"
-                n_restarts = 4  
-                maxiter = 200
-                early_stop_patience = 50
+                n_restarts = 6  
+                maxiter = 150
+                early_stop_patience = 25
                 acq_kwargs = {'mc_points': self.mc_points}
                 if self.mc_samples is not None:
                     x0_acq1 = self.mc_samples['best']
-                    vars = jax.lax.map(self.gp.predict_var,self.mc_points,batch_size=10)
+                    vars = jax.lax.map(self.gp.predict_var,self.mc_points,batch_size=25)
                     x0_acq2 = self.mc_points[jnp.argmax(vars)]
                     x0_acq3 = self.gp.train_x[jnp.argmax(self.gp.train_y)]
                     x0_acq = jnp.vstack([x0_acq1, x0_acq2, x0_acq3])
+                    x0_acq = jnp.vstack([x0_acq, [self.gp.get_random_point() for _ in range(n_restarts - 3)] ])
                 else:
                     x0_acq = jnp.vstack([self.gp.get_random_point() for _ in range(n_restarts)])
 
@@ -529,7 +535,7 @@ class BOBE:
                 log.info(" Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.05,equal_weights=False
+                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01,equal_weights=False
                 )
                 self.results_manager.end_timing('Nested Sampling')
 
