@@ -387,7 +387,7 @@ class GP:
         r = jnp.arange(maxiter)
         for n in range(n_restarts):
             opt_state = optimizer.init(u_params)
-            progress_bar = tqdm.tqdm(r,desc=f'Training GP')
+            progress_bar = tqdm.tqdm(r,desc=f'Training GP, restart {n + 1}')
             with logging_redirect_tqdm():
                 for i in progress_bar:
                     (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
@@ -424,9 +424,9 @@ class GP:
 
         chosen_index = np.random.choice(self.npoints, size=1)
     
-        result = self.train_x_clf[chosen_index]
-        log.info(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
-    
+        result = self.train_x[chosen_index]
+        log.info(f"Random point sampled with value {self.train_y[chosen_index]}")
+
         return result
 
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,

@@ -154,6 +154,11 @@ def nested_sampling_Dy(gp: GP
     log.info(f" Nested Sampling took {time.time() - start:.2f}s")
     log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
     log.info(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
+    samples_dict = {}
+    samples_dict['x'] = samples_x
+    weights = renormalise_log_weights(res['logwt'])
+    samples_dict['weights'] = weights    
+    samples_dict['logl'] = logl
     if logz_std:
         var = jax.lax.map(gp.predict_var,samples_x,batch_size=100)
         std = np.sqrt(var.squeeze(-1))
@@ -164,19 +169,11 @@ def nested_sampling_Dy(gp: GP
         lower = compute_integrals(logl=logl_lower,logvol=logvol)
         logz_dict['upper'] = upper[-1]
         logz_dict['lower'] = lower[-1]
-    samples_dict = {}
+        samples_dict['logl_upper'] = logl_upper
+        samples_dict['logl_lower'] = logl_lower
     best_pt = samples_x[np.argmax(logl)]
     samples_dict['best'] = best_pt
-    # if equal_weights:
-    #     equal_samples, equal_logl = resample_equal(res['samples'], logl, res['logwt'], get_numpy_rng())
-    #     samples['x'] = equal_samples
-    #     samples['logl'] = equal_logl
-    #     samples['weights'] = np.ones(len(equal_samples))
-    # else:
-    samples_dict['x'] = samples_x
-    weights = renormalise_log_weights(res['logwt'])
-    samples_dict['weights'] = weights    
-    samples_dict['logl'] = logl
+
     return (samples_dict, logz_dict, success)
 
 #-------------JAXNS functions---------------------
