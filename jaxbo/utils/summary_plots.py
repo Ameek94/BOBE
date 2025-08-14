@@ -611,6 +611,108 @@ class BOBESummaryPlotter:
         
         return ax
     
+    def plot_kl_divergences(self, ax: Optional[plt.Axes] = None) -> plt.Axes:
+        """
+        Plot successive KL divergences evolution over iterations.
+        
+        Args:
+            ax: Matplotlib axes to plot on (creates new if None)
+            
+        Returns:
+            The matplotlib axes object
+        """
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(8*self.figsize_scale, 5*self.figsize_scale))
+        
+        # Check for successive KL divergence data
+        if not hasattr(self.results, 'successive_kl') or not self.results.successive_kl:
+            ax.text(0.5, 0.5, 'No successive KL divergence data available\n(computed between nested sampling iterations)', 
+                   transform=ax.transAxes, ha='center', va='center', fontsize=12)
+            ax.set_title('Successive KL Divergences Between NS Iterations')
+            return ax
+        
+        successive_kl_data = self.results.successive_kl
+        
+        # Extract data for plotting
+        iterations = []
+        forward_kl = []
+        reverse_kl = []
+        symmetric_kl = []
+        
+        # Threshold for capping very large KL values
+        KL_MAX_THRESHOLD = 1e3
+        
+        for entry in successive_kl_data:
+            iter_num = entry.get('iteration', 0)
+            forward_val = entry.get('forward', np.nan)
+            reverse_val = entry.get('reverse', np.nan)
+            symmetric_val = entry.get('symmetric', np.nan)
+            
+            iterations.append(iter_num)
+            
+            # Cap large/infinite values and only include finite values
+            def cap_kl_value(val, threshold=KL_MAX_THRESHOLD):
+                if np.isnan(val):
+                    return np.nan
+                elif np.isinf(val) or val > threshold:
+                    return threshold
+                elif val < 0:  # KL divergence should be non-negative
+                    return 0.0
+                else:
+                    return val
+            
+            forward_kl.append(cap_kl_value(forward_val))
+            reverse_kl.append(cap_kl_value(reverse_val))
+            symmetric_kl.append(cap_kl_value(symmetric_val))
+        
+        if not iterations:
+            ax.text(0.5, 0.5, 'No valid successive KL divergence data', 
+                   transform=ax.transAxes, ha='center', va='center')
+            ax.set_title('Successive KL Divergences Between NS Iterations')
+            return ax
+        
+        # Plot the different KL divergence types
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c']  # Blue, orange, green
+        
+        # Plot reverse KL (most stable and informative)
+        if any(not np.isnan(val) for val in reverse_kl):
+            mask = ~np.isnan(reverse_kl)
+            if np.any(mask):
+                ax.plot(np.array(iterations)[mask], np.array(reverse_kl)[mask], 
+                       'o-', color=colors[0], label='Reverse KL (most stable)', 
+                       linewidth=2, markersize=6, alpha=0.8)
+        
+        # Plot forward KL if finite
+        if any(not np.isnan(val) for val in forward_kl):
+            mask = ~np.isnan(forward_kl)
+            if np.any(mask):
+                ax.plot(np.array(iterations)[mask], np.array(forward_kl)[mask], 
+                       'o-', color=colors[1], label='Forward KL', 
+                       linewidth=2, markersize=6, alpha=0.8)
+        
+        # Plot symmetric KL if finite
+        if any(not np.isnan(val) for val in symmetric_kl):
+            mask = ~np.isnan(symmetric_kl)
+            if np.any(mask):
+                ax.plot(np.array(iterations)[mask], np.array(symmetric_kl)[mask], 
+                       'o-', color=colors[2], label='Symmetric KL', 
+                       linewidth=2, markersize=6, alpha=0.8)
+        
+        ax.set_xlabel('Nested Sampling Iteration')
+        ax.set_ylabel('KL Divergence')
+        ax.set_title('Successive KL Divergences Between NS Iterations')
+        ax.set_yscale('log')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Add annotation about convergence
+        ax.text(0.02, 0.98, 'Lower values indicate better convergence\nbetween successive NS runs', 
+               transform=ax.transAxes, va='top', ha='left', 
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7),
+               fontsize=9)
+        
+        return ax
+    
     def plot_parameter_evolution(self, param_evolution_data: Optional[Dict] = None,
                                 max_params: int = 4) -> plt.Figure:
         """
@@ -690,41 +792,43 @@ class BOBESummaryPlotter:
         Returns:
             The matplotlib figure object
         """
-        # Create figure with subplots (2x3 grid)
-        fig = plt.figure(figsize=(18*self.figsize_scale, 14*self.figsize_scale))
-        gs = GridSpec(2, 3, figure=fig, hspace=0.3, wspace=0.3)
+        # Create figure with subplots (3x3 grid to include KL divergences)
+        fig = plt.figure(figsize=(18*self.figsize_scale, 18*self.figsize_scale))
+        gs = GridSpec(3, 3, figure=fig, hspace=0.3, wspace=0.3)
         
-        # Evidence evolution (top left)
+        # Top row: Evidence, GP lengthscales, GP outputscale
         ax1 = fig.add_subplot(gs[0, 0])
         self.plot_evidence_evolution(ax=ax1)
         
-        # GP lengthscales (top middle)
         ax2 = fig.add_subplot(gs[0, 1])
         self.plot_gp_lengthscales(gp_data=gp_data, ax=ax2)
         
-        # GP outputscale (top right)
         ax3 = fig.add_subplot(gs[0, 2])
         self.plot_gp_outputscale(gp_data=gp_data, ax=ax3)
 
-        # Convergence diagnostics (middle left)
+        # Middle row: Convergence, Best log-likelihood, Acquisition
         ax4 = fig.add_subplot(gs[1, 0])
         self.plot_convergence_diagnostics(ax=ax4)
 
-        # Best log-likelihood (middle left)
         ax5 = fig.add_subplot(gs[1, 1])
         self.plot_best_loglike_evolution(best_loglike_data=best_loglike_data, ax=ax5)
 
-        # Acquisition function evolution (middle right)
         ax6 = fig.add_subplot(gs[1, 2])
         self.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax6)
         
-        # # Timing breakdown (bottom left)
-        # ax7 = fig.add_subplot(gs[2, 0])
-        # self.plot_timing_breakdown(timing_data=timing_data, ax=ax7)
+        # Bottom row: KL divergences, Timing breakdown, Summary stats
+        ax7 = fig.add_subplot(gs[2, 0])
+        self.plot_kl_divergences(ax=ax7)
+        
+        ax8 = fig.add_subplot(gs[2, 1])
+        self.plot_timing_breakdown(timing_data=timing_data, ax=ax8)
+        
+        ax9 = fig.add_subplot(gs[2, 2])
+        self.plot_summary_stats(ax=ax9)
         
         # Add overall title
-        fig.suptitle(f'BOBE Summary: {self.output_file}', 
-                    fontsize=16*self.figsize_scale, y=0.95)
+        fig.suptitle(f'BOBE Summary Dashboard: {self.output_file}', 
+                    fontsize=18*self.figsize_scale, y=0.95)
         
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -914,6 +1018,7 @@ class BOBESummaryPlotter:
         plots_to_save = [
             ('evidence_evolution', self.plot_evidence_evolution),
             ('convergence_diagnostics', self.plot_convergence_diagnostics),
+            ('kl_divergences', self.plot_kl_divergences),
         ]
         
         # Optional plots with data

@@ -38,6 +38,7 @@ class GPwithClassifier:
                  noise=1e-8, kernel="rbf", optimizer="adam", 
                  outputscale_bounds=[-4, 4], lengthscale_bounds=[np.log10(0.05), 2],
                  lengthscale_priors='DSLP', lengthscales=None, outputscale=1.0,
+                 tausq=None, tausq_bounds=[-4, 4]
                  ):
         """
         Generic Classifier-GP class combining a GP with a classifier. The GP is trained on the data points
@@ -97,14 +98,15 @@ class GPwithClassifier:
         # Initialize GP 
         self.ndim = train_x_gp.shape[1] 
 
-        if lengthscale_priors == 'DSLP':
+        if lengthscale_priors.upper() == 'DSLP':
             self.gp = DSLP_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
                               outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
-        elif lengthscale_priors == 'SAAS':
+        elif lengthscale_priors.upper() == 'SAAS':
             self.gp = SAAS_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
-                              outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
+                              outputscale_bounds, lengthscale_bounds, tausq_bounds,
+                              lengthscales=lengthscales, outputscale=outputscale, tausq=tausq)
         else:
-            log.warning(f"Not using DSLP or SAAS priors, using default GP")
+            log.warning(f"Not using DSLP or SAAS priors (got '{lengthscale_priors}'), using default GP")
             self.gp = GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
                           outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
 
@@ -309,18 +311,123 @@ class GPwithClassifier:
     
     def save(self,outfile='gp'):
         """
-        Saves the GP to a file
+        Saves the GPwithClassifier to a file
 
         Arguments
         ---------
         outfile: str
             The name of the file to save the GP to. Default is 'gp'.
         """
-        np.savez(f'{outfile}.npz',train_x=self.train_x_clf,train_y=self.train_y_clf,noise=self.noise,
-                 y_std = self.train_y_clf.std(),y_mean=self.train_y_clf.mean(),
-                 clf_threshold=self.clf_threshold,gp_threshold=self.gp_threshold,
-                lengthscales=self.gp.lengthscales,outputscale=self.gp.outputscale
-                )
+        # Save both classifier training data and GP training data
+        save_dict = {
+            'train_x_clf': self.train_x_clf,
+            'train_y_clf': self.train_y_clf,
+            'train_x_gp': self.gp.train_x,
+            'train_y_gp': self.gp.train_y * self.gp.y_std + self.gp.y_mean,  # unstandardize
+            'noise': self.noise,
+            'clf_threshold': self.clf_threshold,
+            'gp_threshold': self.gp_threshold,
+            'lengthscales': self.gp.lengthscales,
+            'outputscale': self.gp.outputscale,
+            'hyperparam_priors': self.gp.hyperparam_priors,
+            'clf_type': self.clf_type,
+            'clf_use_size': self.clf_use_size,
+            'clf_update_step': self.clf_update_step,
+            'probability_threshold': self.probability_threshold,
+            'minus_inf': self.minus_inf,
+            'clf_flag': self.clf_flag,
+            'use_clf': self.use_clf
+        }
+        
+        # Add SAAS-specific parameters if applicable
+        if hasattr(self.gp, 'tausq'):
+            save_dict['tausq'] = self.gp.tausq
+            save_dict['tausq_bounds'] = getattr(self.gp, 'tausq_bounds', [-4, 4])
+            
+        # Add classifier parameters if available
+        if self.clf_params is not None:
+            save_dict['clf_params'] = self.clf_params
+        if self.clf_metrics:
+            save_dict['clf_metrics'] = self.clf_metrics
+        
+        np.savez(f'{outfile}.npz', **save_dict)
+
+    @classmethod
+    def load(cls, filename, **kwargs):
+        """
+        Loads a GPwithClassifier from a file
+        
+        Arguments
+        ---------
+        filename: str
+            The name of the file to load the GP from (with or without .npz extension)
+        **kwargs: 
+            Additional keyword arguments to pass to the GPwithClassifier constructor
+            
+        Returns
+        -------
+        gp_clf: GPwithClassifier
+            The loaded GPwithClassifier object
+        """
+        if not filename.endswith('.npz'):
+            filename += '.npz'
+            
+        try:
+            data = np.load(filename, allow_pickle=True)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find file {filename}")
+        
+        # Extract classifier training data
+        train_x_clf = jnp.array(data['train_x_clf'])
+        train_y_clf = jnp.array(data['train_y_clf'])
+        
+        # Extract GP settings
+        clf_threshold = float(data['clf_threshold']) if 'clf_threshold' in data.files else 250
+        gp_threshold = float(data['gp_threshold']) if 'gp_threshold' in data.files else 1000
+        clf_type = str(data['clf_type']) if 'clf_type' in data.files else 'svm'
+        clf_use_size = int(data['clf_use_size']) if 'clf_use_size' in data.files else 300
+        clf_update_step = int(data['clf_update_step']) if 'clf_update_step' in data.files else 5
+        probability_threshold = float(data['probability_threshold']) if 'probability_threshold' in data.files else 0.5
+        minus_inf = float(data['minus_inf']) if 'minus_inf' in data.files else -1e5
+        clf_flag = bool(data['clf_flag']) if 'clf_flag' in data.files else True
+        noise = float(data['noise']) if 'noise' in data.files else 1e-8
+        
+        # Determine GP type and create lengthscale_priors
+        lengthscale_priors = str(data['hyperparam_priors'].item()) if 'hyperparam_priors' in data.files else 'DSLP'
+        lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
+        outputscale = float(data['outputscale']) if 'outputscale' in data.files else None
+        tausq = float(data['tausq']) if 'tausq' in data.files else None
+        tausq_bounds = data['tausq_bounds'].tolist() if 'tausq_bounds' in data.files else [-4, 4]
+        
+        # Create GPwithClassifier instance
+        gp_clf = cls(
+            train_x=train_x_clf,
+            train_y=train_y_clf,
+            clf_flag=clf_flag,
+            clf_type=clf_type,
+            clf_use_size=clf_use_size,
+            clf_update_step=clf_update_step,
+            probability_threshold=probability_threshold,
+            minus_inf=minus_inf,
+            clf_threshold=clf_threshold,
+            gp_threshold=gp_threshold,
+            noise=noise,
+            lengthscale_priors=lengthscale_priors,
+            lengthscales=lengthscales,
+            outputscale=outputscale,
+            tausq=tausq,
+            tausq_bounds=tausq_bounds,
+            **kwargs
+        )
+        
+        # Restore saved classifier parameters if available
+        if 'clf_params' in data.files:
+            gp_clf.clf_params = data['clf_params'].item()
+        if 'clf_metrics' in data.files:
+            gp_clf.clf_metrics = data['clf_metrics'].item()
+            
+        log.info(f"Loaded GPwithClassifier from {filename} with {train_x_clf.shape[0]} training points")
+        return gp_clf
         
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
                        init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4):
@@ -625,3 +732,22 @@ class GPwithClassifier:
     #     TO BE IMPLEMENTED
     #     """
     #     pass
+
+
+def load_clf_gp(filename, **kwargs):
+    """
+    Utility function to load a GPwithClassifier from a file
+    
+    Arguments
+    ---------
+    filename: str
+        The name of the file to load the GP from (with or without .npz extension)
+    **kwargs: 
+        Additional keyword arguments to pass to the GPwithClassifier constructor
+        
+    Returns
+    -------
+    gp_clf: GPwithClassifier
+        The loaded GPwithClassifier object
+    """
+    return GPwithClassifier.load(filename, **kwargs)

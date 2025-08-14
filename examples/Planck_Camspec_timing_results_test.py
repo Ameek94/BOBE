@@ -16,7 +16,7 @@ clf = str(sys.argv[1]) if len(sys.argv) > 1 else 'nn'
 clf_update_step = 1 if clf == 'svm' else 5
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_{clf}_200_mc')
+        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_{clf}_KL')
 
 
 print("="*60)
@@ -31,7 +31,7 @@ print("="*60)
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
-        miniters=500, maxiters=2000, max_gp_size=1500,
+        miniters=500, maxiters=200, max_gp_size=1500,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
@@ -155,7 +155,7 @@ if acquisition_data and acquisition_data.get('iterations'):
     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
     plt.tight_layout()
     plt.savefig(f"{likelihood.name}_acquisition_evolution.png", dpi=300, bbox_inches='tight')
-    plt.show()
+    # plt.show()
 else:
     print("No acquisition function data available for plotting.")
 

@@ -12,12 +12,12 @@ from getdist import plots, MCSamples, loadMCSamples
 import tqdm
 import time
 # from .acquisition import WIPV, EI #, logEI
-from .gp import DSLP_GP, SAAS_GP #, sample_GP_NUTS
-from .clf_gp import GPwithClassifier
+from .gp import GP, DSLP_GP, SAAS_GP, load_gp #, sample_GP_NUTS
+from .clf_gp import GPwithClassifier, load_clf_gp
 from .loglike import ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
-from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal
+from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, compute_kl_divergences, compute_successive_kl
 from .utils.seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
 from .optim import optimize
@@ -171,72 +171,65 @@ class BOBE:
                 'return_getdist_samples': return_getdist_samples,
                 'seed': seed
             },
-            likelihood_name=self.loglikelihood.name
+            likelihood_name=self.loglikelihood.name,
+            resume_from_existing=resume
         )
 
+        # Initialize KL divergence tracking
+        self.prev_samples = None
+
+        # Check if we're resuming from a file or from existing results
         if resume and resume_file is not None:
-            # assert resume_file is not None, "resume_file must be provided if resume is True"
+            # Resume from explicit file
             log.info(f" Resuming from file {resume_file}")
-            data = np.load(resume_file)
-            self.train_x = jnp.array(data['train_x'])
-            self.train_y = jnp.array(data['train_y'])
-            lengthscales = data['lengthscales']
-            outputscale = data['outputscale']
+            # Use the standard naming convention: add _gp if not present
+            if not resume_file.endswith('_gp') and not resume_file.endswith('_gp.npz'):
+                gp_file = f"{resume_file}_gp"
+            else:
+                gp_file = resume_file
+                
+            if use_clf:
+                self.gp = load_clf_gp(gp_file)
+            else:
+                self.gp = load_gp(gp_file)                
         else:
-            # Time the initial points evaluation
+            # Fresh start - evaluate initial points
             self.results_manager.start_timing('True Objective Evaluations')
             init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
                                     n_init_sobol=n_sobol_init)
             self.results_manager.end_timing('True Objective Evaluations')
             
-            self.train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
-            self.train_y = jnp.array(init_vals)
+            train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
+            train_y = jnp.array(init_vals)
             lengthscales = None
             outputscale = None
-
-        # Best point so far
-        idx_best = jnp.argmax(self.train_y)
-        self.best_pt = scale_from_unit(self.train_x[idx_best],self.loglikelihood.param_bounds).flatten()
-        self.best_f = float(self.train_y.max())
-        self.best = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
-        log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
-
-        # GP setup
-        if use_clf:
-            self.gp = GPwithClassifier(
-                train_x=self.train_x, train_y=self.train_y,
+            # GP setup
+            if use_clf:
+                self.gp = GPwithClassifier(
+                train_x=train_x, train_y=train_y,
                 minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
                 clf_type=clf_type, clf_use_size=clf_use_size, clf_update_step=clf_update_step,
                 clf_threshold=clf_threshold, gp_threshold=gp_threshold,
-                lengthscales=lengthscales, outputscale=outputscale
-            )
-            # gp = SVM_GP(
-            #     train_x=self.train_x, train_y=self.train_y,
-            #     minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
-            #     kernel='rbf',svm_use_size=svm_use_size,svm_update_step=svm_update_step,
-            #     svm_threshold=svm_threshold,gp_threshold=svm_gp_threshold,lengthscales=lengthscales,
-            #     outputscale=outputscale
-            # )
-        else:
-            self.gp = {
-                'DSLP': DSLP_GP,
-                'SAAS': SAAS_GP
-            }[lengthscale_priors](
-                train_x=self.train_x, train_y=self.train_y,
+                lengthscales=lengthscales, outputscale=outputscale)
+            else:
+                self.gp = {
+                    'UNIFORM': GP,
+                    'DSLP': DSLP_GP,
+                    'SAAS': SAAS_GP
+                }[lengthscale_priors.upper()](
+                train_x=train_x, train_y=train_y,
                 noise=1e-8, kernel='rbf',lengthscales=lengthscales,outputscale=outputscale
-            )
-
-
-        if resume:
+                )
             self.results_manager.start_timing('GP Training')
-            self.gp.fit(maxiter=100,n_restarts=2) # if resuming need not spend too much time on fitting
-            self.results_manager.end_timing('GP Training')
-        else:
-            # Fit the GP to the initial points
-            self.results_manager.start_timing('GP Training')
-            self.gp.fit(maxiter=150,n_restarts=4)
+            self.gp.fit(maxiter=200,n_restarts=4)
             self.results_manager.end_timing('GP Training')
 
+        idx_best = jnp.argmax(self.gp.train_y)
+        self.best_pt = scale_from_unit(self.gp.train_x[idx_best], self.loglikelihood.param_bounds).flatten()
+        self.best_f = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
+
+        self.best = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
+        log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
 
         # Store remaining settings
         self.maxiters = maxiters
@@ -252,27 +245,80 @@ class BOBE:
         self.mc_points_method = mc_points_method
 
         if self.save:
-            self.gp.save(outfile=self.output_file)
-            log.info(f" Saving GP to file {self.output_file}")
+            self.gp.save(outfile=f"{self.output_file}_gp")
+            log.info(f" Saving GP to file {self.output_file}_gp")
 
-    def check_convergence(self, step, logz_dict, threshold=1.0):
+    def check_convergence(self, step, gp, logz_dict, ns_samples, threshold=1.0):
         """
-        Check if the nested sampling has converged.
-        """
-        # if ndim > 10:
-        #     delta = logz_dict['upper'] - logz_dict['lower'] # for now just to speed up results
-        # else:
-        delta = logz_dict['upper'] - logz_dict['lower']
+        Check if the nested sampling has converged and compute KL divergence metrics.
         
+        Args:
+            step: Current iteration number
+            logz_dict: Dictionary with logz bounds and mean
+            ns_samples: Nested sampling samples with x, weights, logl
+            threshold: LogZ convergence threshold
+            
+        Returns:
+            bool: Whether convergence is achieved based on logz only
+        """
+        # Standard logz convergence check
+        delta = logz_dict['upper'] - logz_dict['lower']
         converged = delta < threshold
         
-        # Update results manager with convergence info
+        # Compute KL divergences if we have nested sampling samples
+        kl_results = None
+        successive_kl = None
+        
+        if ns_samples is not None:
+            try:
+                # Get the three likelihood estimates from logz bounds
+                log_weights = np.log(ns_samples['weights'] + 1e-300)  # Avoid log(0)
+                logl = ns_samples['logl']
+                upper_logl = ns_samples['logl_upper']
+                lower_logl = ns_samples['logl_lower']
+
+                # Compute KL divergences between all combinations
+                kl_results = compute_kl_divergences(logl, upper_logl, lower_logl, log_weights)
+
+                # Compute successive KL if we have previous samples
+                if self.prev_samples is not None:
+                    # compare different iterations with the equal weighted samples at the previous iteration.
+                    prev_logl = self.prev_samples['logl']
+                    prev_samples_x = self.prev_samples['x']
+                    new_logl = jax.lax.map(gp.predict_mean_single,prev_samples_x,batch_size=200)
+                    log_weights = np.zeros_like(new_logl)
+                    successive_kl = compute_successive_kl(prev_logl, new_logl, log_weights)
+
+                # Store current samples for next iteration
+                equal_prev_samples, equal_prev_logl = resample_equal(ns_samples['x'], logl, ns_samples['weights'])
+                self.prev_samples = {'x': equal_prev_samples, 'logl': equal_prev_logl}
+
+                log.debug(f" KL divergences: sym_mean_upper={kl_results.get('sym_mean_upper', 0):.4f}, "
+                        f"sym_upper_lower={kl_results.get('sym_upper_lower', 0):.4f}")
+                if successive_kl:
+                    log.debug(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
+
+            except Exception as e:
+                log.warning(f"Could not compute KL divergences: {e}")
+                kl_results = None
+                successive_kl = None
+        
+        # Update results manager with convergence info and KL divergences
         self.results_manager.update_convergence(
             iteration=step,
             logz_dict=logz_dict,
             converged=converged,
             threshold=threshold
         )
+        
+        # Store KL divergences if computed
+        if kl_results is not None:
+            self.results_manager.update_kl_divergences(
+                iteration=step,
+                kl_results=kl_results,
+                successive_kl=successive_kl
+            )
+
         log.info(f" Convergence check: delta = {delta:.4f}, step = {step}, threshold = {threshold}")
         if converged:
             log.info(" Converged")
@@ -301,7 +347,7 @@ class BOBE:
 
         results_dict = {}
 
-        # Monte Carlo points for acquisition function
+        # Initial Monte Carlo points for acquisition function
         self.results_manager.start_timing('MCMC Sampling')
         self.mc_samples = get_mc_samples(self.gp,warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, 
                                          thinning=4,method=self.mc_points_method)
@@ -315,13 +361,29 @@ class BOBE:
 
         best_pt_iteration = 0
 
-        ii = 0
+        # Check if resuming and adjust starting iteration
+        if self.results_manager.is_resuming():
+            start_iteration = self.results_manager.get_last_iteration()
+            log.info(f"Resuming from iteration {start_iteration}")
+            log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
+            
+            # If we have previous best loglikelihood data, restore the best point info
+            if self.results_manager.best_loglike_values:
+                self.best_f = max(self.results_manager.best_loglike_values)
+                best_loglike_idx = self.results_manager.best_loglike_values.index(self.best_f)
+                best_pt_iteration = self.results_manager.best_loglike_iterations[best_loglike_idx]
+                log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {best_pt_iteration}")
+        else:
+            start_iteration = 0
+            log.info("Starting fresh optimization")
+
+        ii = start_iteration
         x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
 
         acqf = WIPV
         acq_str = "WIPV"
 
-        for i in range(self.maxiters):
+        for i in range(start_iteration, self.maxiters):
 
 
             # ideally, we want to decide whether to do the mc_update depending on the results of the previous steps
@@ -393,38 +455,30 @@ class BOBE:
             log.info(f" New point {new_pt_vals}")
             log.info(f" Objective function value = {new_val.item():.4f}, GP predicted value = {self.gp.predict_mean(new_pt_u).item():.4f}")
 
-            # Extract GP hyperparameters for tracking
-            try:
-                gp_obj = self.gp           
-
-                lengthscales = gp_obj.lengthscales
-                outputscale = gp_obj.outputscale
-                gp_hyperparams = {
-                    'lengthscales': lengthscales.tolist() if hasattr(lengthscales, 'tolist') else float(lengthscales),
-                    'outputscale': float(outputscale)
-                }
-                lengthscales_list = gp_hyperparams['lengthscales'] if isinstance(gp_hyperparams['lengthscales'], list) else [gp_hyperparams['lengthscales']]
-                self.results_manager.update_gp_hyperparams(ii, lengthscales_list, gp_hyperparams['outputscale'])
-                log.debug(f"Saved GP hyperparameters: {gp_hyperparams}")
-        
-                # if hasattr(gp_obj, 'lengthscales') and hasattr(gp_obj, 'outputscale'):
-                #     gp_hyperparams = {
-                #         'lengthscales': gp_obj.lengthscales.tolist() if hasattr(gp_obj.lengthscales, 'tolist') else float(gp_obj.lengthscales),
-                #         'outputscale': float(gp_obj.outputscale)
-                #     }
-                #     if hasattr(gp_obj, 'tausq'):
-                #         gp_hyperparams['tausq'] = float(gp_obj.tausq)
+            # Try to extract GP hyperparameters for tracking
+            lengthscales = list(self.gp.lengthscales)
+            outputscale = float(self.gp.outputscale)
+            self.results_manager.update_gp_hyperparams(ii, lengthscales, outputscale)
+            # try:
+            #     # Get the underlying GP object (handle both regular GP and GP with classifier)
+            #     gp_obj = self.gp #self.gp.gp if hasattr(self.gp, 'gp') else self.gp
+                
+            #     if hasattr(gp_obj, 'lengthscales') and hasattr(gp_obj, 'outputscale'):
+            #         gp_hyperparams = {
+            #             'lengthscales': gp_obj.lengthscales.tolist() if hasattr(gp_obj.lengthscales, 'tolist') else float(gp_obj.lengthscales),
+            #             'outputscale': float(gp_obj.outputscale)
+            #         }
+            #         if hasattr(gp_obj, 'tausq'):
+            #             gp_hyperparams['tausq'] = float(gp_obj.tausq)
                     
-                #     # Track GP hyperparameters evolution
-                #     lengthscales_list = gp_hyperparams['lengthscales'] if isinstance(gp_hyperparams['lengthscales'], list) else [gp_hyperparams['lengthscales']]
-                #     self.results_manager.update_gp_hyperparams(ii, lengthscales_list, gp_hyperparams['outputscale'])
-                #     log.info(f"Saved GP hyperparameters: {gp_hyperparams}")
-                # else:
-                #     gp_hyperparams = None
-                #     log.info("GP hyperparameters not available or not in expected format.")
-            except:
-                gp_hyperparams = None
-                log.error("Error extracting GP hyperparameters, they may not be available in this GP implementation.")
+            #         # Track GP hyperparameters evolution
+            #         lengthscales_list = gp_hyperparams['lengthscales'] if isinstance(gp_hyperparams['lengthscales'], list) else [gp_hyperparams['lengthscales']]
+            #         self.results_manager.update_gp_hyperparams(ii, lengthscales_list, gp_hyperparams['outputscale'])
+            #     else:
+            #         gp_hyperparams = None
+            # except:
+            #     gp_hyperparams = None
+            #     log.error("Error extracting GP hyperparameters, they may not be available in this GP implementation.")
 
             # Update results manager with iteration info (simplified)
             self.results_manager.update_iteration(iteration=ii)
@@ -440,8 +494,8 @@ class BOBE:
             if (pt_exists_or_below_threshold and self.mc_points_method == 'NUTS') and (self.mc_samples['method'] == 'MCMC'):
                 update_mc = True
             if update_mc:
-                # if not refit:
-                #     self.gp.fit(maxiter=75,n_restarts=1)
+                if not refit:
+                    self.gp.fit(maxiter=100,n_restarts=1)
                 x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
                 self.results_manager.start_timing('MCMC Sampling')
                 self.mc_samples = get_mc_samples(
@@ -469,7 +523,7 @@ class BOBE:
 
             if (ii % 10 == 0) and self.save:
                 log.info(" Saving GP to file")
-                self.gp.save(outfile=self.output_file)
+                self.gp.save(outfile=f"{self.output_file}_gp")
 
             if ns_flag:
                 log.info(" Running Nested Sampling")
@@ -490,7 +544,7 @@ class BOBE:
                     'best': ns_samples['best']
                 }
                 if ns_success:
-                    self.converged = self.check_convergence(ii, logz_dict, threshold=self.logz_threshold)
+                    self.converged = self.check_convergence(ii, self.gp, logz_dict, ns_samples, threshold=self.logz_threshold)
                     if self.converged:
                         self.termination_reason = "LogZ converged"
                         results_dict['logz'] = logz_dict
@@ -505,6 +559,9 @@ class BOBE:
                 break
             if self.gp.train_x.shape[0] > 1600:
                 self.ns_step = 25
+
+
+        #-------End of BO loop-------
 
         log.info(f" Sampling stopped: {self.termination_reason}")
         log.info(f" Final GP training set size: {self.gp.train_x.shape[0]}, max size: {self.max_gp_size}")
@@ -521,7 +578,7 @@ class BOBE:
 
         # Save and final nested sampling
         if self.save:
-            self.gp.save(outfile=self.output_file)
+            self.gp.save(outfile=f"{self.output_file}_gp")
 
         # Prepare final results 
         if self.do_final_ns and not self.converged:

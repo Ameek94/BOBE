@@ -16,6 +16,7 @@ from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
 from .utils.core_utils import renormalise_log_weights, resample_equal
 from scipy.special import logsumexp
+from .utils.core_utils import compute_integrals
 log = get_logger("[ns]")
 
 try:
@@ -31,34 +32,8 @@ from jaxns.framework.prior import Prior
 from jaxns import NestedSampler, TerminationCondition, resample
 
 
-#-------------Dynesty functions---------------------
 def prior_transform(x):
     return x
-
-# dynesty utility function for computing evidence
-def compute_integrals(logl=None, logvol=None, reweight=None):
-    assert logl is not None
-    assert logvol is not None
-    loglstar_pad = np.concatenate([[-1.e300], logl])
-    # we want log(exp(logvol_i)-exp(logvol_(i+1)))
-    # assuming that logvol0 = 0
-    # log(exp(LV_{i})-exp(LV_{i+1})) =
-    # = LV{i} + log(1-exp(LV_{i+1}-LV{i}))
-    # = LV_{i+1} - (LV_{i+1} -LV_i) + log(1-exp(LV_{i+1}-LV{i}))
-    dlogvol = np.diff(logvol, prepend=0)
-    logdvol = logvol - dlogvol + np.log1p(-np.exp(dlogvol))
-    # logdvol is log(delta(volumes)) i.e. log (X_i-X_{i-1})
-    logdvol2 = logdvol + math.log(0.5)
-    # These are log(1/2(X_(i+1)-X_i))
-    dlogvol = -np.diff(logvol, prepend=0)
-    # this are delta(log(volumes)) of the run
-    # These are log((L_i+L_{i_1})*(X_i+1-X_i)/2)
-    saved_logwt = np.logaddexp(loglstar_pad[1:], loglstar_pad[:-1]) + logdvol2
-    if reweight is not None:
-        saved_logwt = saved_logwt + reweight
-    saved_logz = np.logaddexp.accumulate(saved_logwt)
-    return saved_logz
-
 
 def nested_sampling_Dy(gp: GP
                        ,ndim: int = 1
@@ -154,29 +129,26 @@ def nested_sampling_Dy(gp: GP
     log.info(f" Nested Sampling took {time.time() - start:.2f}s")
     log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
     log.info(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
-    if logz_std:
-        var = jax.lax.map(gp.predict_var,samples_x,batch_size=100)
-        std = np.sqrt(var.squeeze(-1))
-        logl_lower,logl_upper = logl - std, logl + std
-        logvol = res['logvol']
-        print(f"shapes: logl: {logl.shape}, std: {std.shape}, logl_lower: {logl_lower.shape}, logl_upper: {logl_upper.shape}, logvol: {logvol.shape}")
-        upper = compute_integrals(logl=logl_upper,logvol=logvol)
-        lower = compute_integrals(logl=logl_lower,logvol=logvol)
-        logz_dict['upper'] = upper[-1]
-        logz_dict['lower'] = lower[-1]
+    
+    var = jax.lax.map(gp.predict_var,samples_x,batch_size=100)
+    std = np.sqrt(var.squeeze(-1))
+    logl_lower,logl_upper = logl - std, logl + std
+    logvol = res['logvol']
+    upper = compute_integrals(logl=logl_upper,logvol=logvol)
+    lower = compute_integrals(logl=logl_lower,logvol=logvol)
+    logz_dict['upper'] = upper[-1]
+    logz_dict['lower'] = lower[-1]
+
     samples_dict = {}
     best_pt = samples_x[np.argmax(logl)]
     samples_dict['best'] = best_pt
-    # if equal_weights:
-    #     equal_samples, equal_logl = resample_equal(res['samples'], logl, res['logwt'], get_numpy_rng())
-    #     samples['x'] = equal_samples
-    #     samples['logl'] = equal_logl
-    #     samples['weights'] = np.ones(len(equal_samples))
-    # else:
     samples_dict['x'] = samples_x
     weights = renormalise_log_weights(res['logwt'])
     samples_dict['weights'] = weights    
     samples_dict['logl'] = logl
+    samples_dict['logl_upper'] = logl_upper
+    samples_dict['logl_lower'] = logl_lower
+    samples_dict['logvol'] = logvol
     return (samples_dict, logz_dict, success)
 
 #-------------JAXNS functions---------------------

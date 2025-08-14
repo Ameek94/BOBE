@@ -145,6 +145,7 @@ class GP:
     """
     Base class for the GP with no hyperparameter priors.
     """
+    hyperparam_priors: str = 'uniform'
 
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam"
                  ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,outputscale=None):
@@ -285,6 +286,7 @@ class GP:
             if refit:
                 self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
             else:
+                # self.fit(lr=lr,maxiter=100,n_restarts=1)
                 self.cholesky = fast_update_cholesky(self.cholesky,k,k_self)
                 self.alphas = cho_solve((self.cholesky, True), self.train_y)
             return False
@@ -340,7 +342,7 @@ class GP:
         val = gp_mll(k,self.train_y,self.train_y.shape[0])
         return -val
 
-    def fit(self, init_params = None, lr=5e-3,maxiter=300,n_restarts=4,early_stop_patience=25):
+    def fit(self, lr=5e-3,maxiter=300,n_restarts=4,early_stop_patience=25):
         """ 
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
@@ -386,6 +388,7 @@ class GP:
         # display with progress bar
         r = jnp.arange(maxiter)
         for n in range(n_restarts):
+            patience_counter = early_stop_patience
             opt_state = optimizer.init(u_params)
             progress_bar = tqdm.tqdm(r,desc=f'Training GP')
             with logging_redirect_tqdm():
@@ -417,8 +420,48 @@ class GP:
         """
         Saves the GP to a file
         """
-        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=self.train_y,noise=self.noise,
-         y_mean=self.y_mean,y_std=self.y_std,lengthscales=self.lengthscales,outputscale=self.outputscale)
+        train_y = self.train_y * self.y_std + self.y_mean  # unstandardize the training targets
+        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=train_y,noise=self.noise,
+         lengthscales=self.lengthscales,outputscale=self.outputscale,hyperparam_priors=self.hyperparam_priors)
+
+    @classmethod
+    def load(cls, filename, **kwargs):
+        """
+        Loads a GP from a file
+        
+        Arguments
+        ---------
+        filename: str
+            The name of the file to load the GP from (with or without .npz extension)
+        **kwargs: 
+            Additional keyword arguments to pass to the GP constructor
+            
+        Returns
+        -------
+        gp: GP
+            The loaded GP object
+        """
+        if not filename.endswith('.npz'):
+            filename += '.npz'
+            
+        try:
+            data = np.load(filename)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find file {filename}")
+        
+        # Extract data from the file
+        train_x = jnp.array(data['train_x'])
+        train_y = jnp.array(data['train_y'])  # This is unstandardized
+        noise = float(data['noise'])
+        lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
+        outputscale = float(data['outputscale']) if 'outputscale' in data.files else None
+        
+        # Create GP instance - it will automatically standardize train_y and compute cholesky/alphas
+        gp = cls(train_x=train_x, train_y=train_y, noise=noise, 
+                lengthscales=lengthscales, outputscale=outputscale, **kwargs)
+        
+        log.info(f"Loaded GP from {filename} with {train_x.shape[0]} training points")
+        return gp
 
     def get_random_point(self):
 
@@ -521,6 +564,8 @@ class GP:
 
 class DSLP_GP(GP):
 
+    hyperparam_priors: str = 'dslp'
+
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam",
                  outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,outputscale=None):
         """
@@ -605,11 +650,16 @@ jax.tree_util.register_pytree_node(
     DSLP_GP.tree_unflatten,
 )
 
+#----- SAAS_GP -----
+
 class SAAS_GP(DSLP_GP):
+
+    hyperparam_priors: str = 'saas'
+
     def __init__(self,
                  train_x, train_y, noise=1e-8, kernel="rbf", optimizer="adam",
                  outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],
-                 tausq_bounds = [-4,4]):
+                 tausq_bounds = [-4,4],lengthscales=None,outputscale=None,tausq=None):
         """
         Class for the Gaussian Process with SAAS priors, using maximum likelihood hyperparameters. 
         The implementation is based on the paper "High-Dimensional Bayesian Optimization with Sparse Axis-Aligned Subspaces", 2021
@@ -636,7 +686,7 @@ class SAAS_GP(DSLP_GP):
             Default is [-4,4]. These are the bounds for the tausq parameter of the GP.
         """
         super().__init__(train_x, train_y, noise, kernel, optimizer,outputscale_bounds,lengthscale_bounds)
-        self.tausq = 1.
+        self.tausq = tausq if tausq is not None else 1.0
         self.hyperparam_bounds = [tausq_bounds] + self.hyperparam_bounds
 
     def tree_flatten(self):
@@ -788,18 +838,56 @@ class SAAS_GP(DSLP_GP):
         outfile: str
             The name of the file to save the GP to. Default is 'gp'.
         """
-        np.savez(f'{outfile}.npz', train_x=self.train_x, train_y=self.train_y, 
-                 noise=self.noise,y_mean=self.y_mean, y_std=self.y_std, 
-                 lengthscales=self.lengthscales, outputscale=self.outputscale,
-                 tausq=self.tausq)
-    
+        train_y = self.train_y * self.y_std + self.y_mean  # unstandardize the training targets
+        np.savez(f'{outfile}.npz', train_x=self.train_x, train_y=train_y, 
+                 noise=self.noise, lengthscales=self.lengthscales, outputscale=self.outputscale,
+                 tausq=self.tausq, hyperparam_priors=self.hyperparam_priors)
+
+    @classmethod
+    def load(cls, filename, **kwargs):
+        """
+        Loads a SAAS_GP from a file
+        
+        Arguments
+        ---------
+        filename: str
+            The name of the file to load the GP from (with or without .npz extension)
+        **kwargs: 
+            Additional keyword arguments to pass to the GP constructor
+            
+        Returns
+        -------
+        gp: SAAS_GP
+            The loaded SAAS_GP object
+        """
+        if not filename.endswith('.npz'):
+            filename += '.npz'
+            
+        try:
+            data = np.load(filename)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find file {filename}")
+        
+        # Extract data from the file
+        train_x = jnp.array(data['train_x'])
+        train_y = jnp.array(data['train_y'])  # This is unstandardized
+        noise = float(data['noise'])
+        lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
+        outputscale = float(data['outputscale']) if 'outputscale' in data.files else None
+        tausq = float(data['tausq']) if 'tausq' in data.files else None
+        
+        # Create SAAS_GP instance - it will automatically standardize train_y and compute cholesky/alphas
+        gp = cls(train_x=train_x, train_y=train_y, noise=noise, 
+                lengthscales=lengthscales, outputscale=outputscale, tausq=tausq, **kwargs)
+        
+        log.info(f"Loaded SAAS_GP from {filename} with {train_x.shape[0]} training points")
+        return gp
+
 jax.tree_util.register_pytree_node(
     SAAS_GP,
     SAAS_GP.tree_flatten,
     SAAS_GP.tree_unflatten,
 )
-
-
 
 
 def load_gp(filename, gp_type="auto", **kwargs):
@@ -811,7 +899,7 @@ def load_gp(filename, gp_type="auto", **kwargs):
     filename: str
         The name of the file to load the GP from (with or without .npz extension)
     gp_type: str
-        The type of GP to create. Can be 'auto', 'DSLP', 'SAAS'. If 'auto', attempts to detect
+        The type of GP to create. Can be 'auto', 'GP', 'DSLP', 'SAAS'. If 'auto', attempts to detect
         the type based on the saved parameters. Default is 'auto'.
     **kwargs: 
         Additional keyword arguments to pass to the GP constructor
@@ -819,7 +907,7 @@ def load_gp(filename, gp_type="auto", **kwargs):
     Returns
     -------
     gp: GP
-        The loaded GP object (DSLP_GP or SAAS_GP)
+        The loaded GP object (GP, DSLP_GP, or SAAS_GP)
     """
     if not filename.endswith('.npz'):
         filename += '.npz'
@@ -831,19 +919,37 @@ def load_gp(filename, gp_type="auto", **kwargs):
     
     if gp_type == "auto":
         # Try to detect GP type based on saved parameters
-        if 'tausq' in data.files:
+        if 'hyperparam_priors' in data.files:
+            hyperparam_priors = str(data['hyperparam_priors'].item()).lower()
+            if hyperparam_priors == 'saas':
+                gp_type = "SAAS"
+                log.info("Auto-detected SAAS_GP from hyperparam_priors")
+            elif hyperparam_priors == 'dslp':
+                gp_type = "DSLP"
+                log.info("Auto-detected DSLP_GP from hyperparam_priors")
+            elif hyperparam_priors == 'uniform':
+                gp_type = "GP"
+                log.info("Auto-detected GP (uniform priors) from hyperparam_priors")
+            else:
+                gp_type = "GP"
+                log.info(f"Unknown hyperparam_priors '{hyperparam_priors}', defaulting to GP")
+        elif 'tausq' in data.files:
+            # Fallback: if tausq exists but no hyperparam_priors, assume SAAS
             gp_type = "SAAS"
-            log.info("Auto-detected SAAS_GP from saved parameters")
+            log.info("Auto-detected SAAS_GP from presence of tausq parameter")
         else:
+            # Fallback: no clear indicators, default to DSLP for backward compatibility
             gp_type = "DSLP" 
-            log.info("Auto-detected DSLP_GP from saved parameters")
+            log.info("No clear indicators, defaulting to DSLP_GP for backward compatibility")
     
-    if gp_type.upper() == "SAAS":
-        return SAAS_GP.load(filename, **kwargs)
+    if gp_type.upper() == "GP":
+        return GP.load(filename, **kwargs)
     elif gp_type.upper() == "DSLP":
         return DSLP_GP.load(filename, **kwargs)
+    elif gp_type.upper() == "SAAS":
+        return SAAS_GP.load(filename, **kwargs)
     else:
-        raise ValueError(f"Unknown GP type: {gp_type}. Must be 'DSLP', 'SAAS', or 'auto'")
+        raise ValueError(f"Unknown GP type: {gp_type}. Must be 'GP', 'DSLP', 'SAAS', or 'auto'")
        
 
     # def create_jitted_single_predict(self):

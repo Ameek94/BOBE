@@ -23,12 +23,12 @@ else:
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=32, n_sobol_init=32,
-        miniters=500, maxiters=2500, max_gp_size=2000,
+        miniters=500, maxiters=2500, max_gp_size=2100,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step=25, update_mc_step=5, ns_step=25,
+        fit_step=50, update_mc_step=5, ns_step=50,
         num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=256,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
@@ -147,7 +147,7 @@ if acquisition_data and acquisition_data.get('iterations'):
     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
     plt.tight_layout()
     plt.savefig(f"{likelihood.name}_acquisition_evolution.png", dpi=300, bbox_inches='tight')
-    plt.show()
+    # plt.show()
 else:
     print("No acquisition function data available for plotting.")
 
