@@ -208,51 +208,30 @@ class BOBESummaryPlotter:
             return ax
         
         # Extract data
-        iterations = [entry['iteration'] for entry in self.results.logz_evolution]
-        logz_values = [entry['logz'] for entry in self.results.logz_evolution]
+        data = [(entry['iteration'], entry['logz'], 
+                entry.get('logz_upper', entry['logz'] + entry.get('logz_err', 0)),
+                entry.get('logz_lower', entry['logz'] - entry.get('logz_err', 0)))
+                for entry in self.results.logz_evolution]
+        iterations, logz_values, logz_upper, logz_lower = map(np.array, zip(*data))
         
-        # Use actual upper and lower bounds if available, otherwise fall back to symmetric errors
-        if self.results.logz_evolution and 'logz_upper' in self.results.logz_evolution[0]:
-            logz_upper = [entry['logz_upper'] for entry in self.results.logz_evolution]
-            logz_lower = [entry['logz_lower'] for entry in self.results.logz_evolution]
-        else:
-            # Fallback to symmetric errors for backwards compatibility
-            logz_errors = [entry['logz_err'] for entry in self.results.logz_evolution]
-            logz_errors = np.array(logz_errors)
-            logz_values_arr = np.array(logz_values)
-            logz_upper = logz_values_arr + logz_errors
-            logz_lower = logz_values_arr - logz_errors
-        
-        # Convert to numpy arrays
-        iterations = np.array(iterations)
-        logz_values = np.array(logz_values)
-        logz_upper = np.array(logz_upper)
-        logz_lower = np.array(logz_lower)
-        
-        # Plot mean line
+        # Plot evolution with uncertainty
         ax.plot(iterations, logz_values, 'b-', linewidth=2, label='Mean log Z', alpha=0.9)
-        
-        # Plot upper and lower bounds
         ax.plot(iterations, logz_upper, 'r--', linewidth=1.5, alpha=0.7, label='Upper bound')
         ax.plot(iterations, logz_lower, 'g--', linewidth=1.5, alpha=0.7, label='Lower bound')
-        
-        # Shade the region between upper and lower bounds
         ax.fill_between(iterations, logz_lower, logz_upper, 
                        alpha=0.2, color='blue', label='Uncertainty region')
         
-        # Mark convergence points if requested
+        # Mark convergence points
         if show_convergence and self.results.convergence_history:
             conv_iterations = [conv.iteration for conv in self.results.convergence_history if conv.converged]
-            if conv_iterations:
-                for conv_iter in conv_iterations:
-                    # Find corresponding logZ value
-                    idx = np.searchsorted(iterations, conv_iter)
-                    if idx < len(logz_values):
-                        ax.axvline(conv_iter, color='red', linestyle='--', alpha=0.7)
-                        ax.scatter(conv_iter, logz_values[idx], color='red', s=50, 
-                                 marker='o', zorder=5, label='Convergence' if conv_iter == conv_iterations[0] else "")
+            for i, conv_iter in enumerate(conv_iterations):
+                idx = np.searchsorted(iterations, conv_iter)
+                if idx < len(logz_values):
+                    ax.axvline(conv_iter, color='red', linestyle='--', alpha=0.7)
+                    ax.scatter(conv_iter, logz_values[idx], color='red', s=50, 
+                             marker='o', zorder=5, label='Convergence' if i == 0 else "")
         
-        # Final logZ if available
+        # Final logZ
         if self.results.final_logz_dict:
             final_logz = self.results.final_logz_dict.get('mean', np.nan)
             if not np.isnan(final_logz):
@@ -454,7 +433,7 @@ class BOBESummaryPlotter:
         if acquisition_data is None:
             acquisition_data = self.results.get_acquisition_data()
         
-        if not acquisition_data or 'iterations' not in acquisition_data:
+        if not acquisition_data or 'iterations' not in acquisition_data or len(acquisition_data['iterations']) == 0:
             ax.text(0.5, 0.5, 'No acquisition function data available', 
                    transform=ax.transAxes, ha='center', va='center')
             return ax
@@ -462,68 +441,48 @@ class BOBESummaryPlotter:
         iterations = np.array(acquisition_data['iterations'])
         values = np.array(acquisition_data['values'])
         functions = acquisition_data['functions']
-
-        min_val = -5.
-        max_val = 5.
-            
-        if len(iterations) == 0:
-            ax.text(0.5, 0.5, 'No acquisition function data available', 
-                   transform=ax.transAxes, ha='center', va='center')
-            return ax
         
-        # Create color map for different acquisition functions
+        # Transform and plot each function type
         unique_functions = list(set(functions))
         colors = plt.cm.tab10(np.linspace(0, 1, len(unique_functions)))
-        color_map = dict(zip(unique_functions, colors))
         
-        # Plot values colored by function type
-        for func_name in unique_functions:
-            func_mask = np.array(functions) == func_name
-            func_iterations = iterations[func_mask]
-            func_values = values[func_mask]
+        y_values = []
+        for i, func_name in enumerate(unique_functions):
+            mask = np.array(functions) == func_name
+            func_iterations, func_values = iterations[mask], values[mask]
+            
+            # Transform values based on function type
             if func_name == "WIPV":
                 func_values = np.log10(func_values)
-                func_name_use = "WIPV (log10)"
+                label = "WIPV (log10)"
+            elif func_name in ["LogEI", "EI"]:
+                func_values = -func_values
+                label = func_name
             else:
-                func_name_use = func_name
-                if func_name in  ["LogEI","EI"]:
-                    func_values = -func_values
-            # if func_name == "LogEI":
-            #     func_values = np.log10(func_values)
-
-            ax.scatter(func_iterations, func_values, 
-                      color=color_map[func_name], 
-                      label=f'{func_name_use}',
-                      alpha=0.7, s=20)
+                label = func_name
             
-            current_min_val = func_values.min()
-            if current_min_val < min_val:
-                min_val = current_min_val
-            current_max_val = func_values.max()
-            if current_max_val > max_val:
-                max_val = current_max_val
+            y_values.extend(func_values)
             
-            # Connect points with lines for each function
-            if len(func_iterations) > 1:
-                ax.plot(func_iterations, func_values, 
-                    color=color_map[func_name], alpha=0.3, linewidth=1)
+            # Plot with lines connecting points
+            ax.plot(func_iterations, func_values, 'o-', color=colors[i], 
+                   label=label, alpha=0.7, markersize=4, linewidth=1)
         
-        # Add switches between acquisition functions
+        # Mark function switches
         if len(unique_functions) > 1:
-            switch_points = []
-            for i in range(1, len(functions)):
-                if functions[i] != functions[i-1]:
-                    switch_points.append(iterations[i])
-            
-            for switch_iter in switch_points:
+            switch_points = [iterations[i] for i in range(1, len(functions)) 
+                           if functions[i] != functions[i-1]]
+            for i, switch_iter in enumerate(switch_points):
                 ax.axvline(switch_iter, color='red', linestyle='--', alpha=0.5,
-                          label='Function switch' if switch_iter == switch_points[0] else '')
-
-        ax.set_ylim(max(min_val, -5), min(max_val, 5)) # make sure plot doesnt have too big a range. 
+                          label='Function switch' if i == 0 else '')
+        
+        # Set reasonable y-limits
+        if y_values:
+            y_min, y_max = np.min(y_values), np.max(y_values)
+            ax.set_ylim(max(y_min, -5), min(y_max, 5))
+        
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Acquisition Function Value')
         ax.set_title('Acquisition Function Evolution')
-        ax.set_yscale('linear')  # Log scale often useful for acquisition values but LogEI is now linear, WIPV is converted to log
         ax.legend()
         ax.grid(True, alpha=0.3)
 
@@ -542,45 +501,29 @@ class BOBESummaryPlotter:
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(8*self.figsize_scale, 6*self.figsize_scale))
         
+        # Prepare timing data
         if timing_data is None:
-            # Use basic timing info from results
             total_time = (self.results.end_time - self.results.start_time) if self.results.end_time else 0
             timing_data = {'Total Runtime': total_time}
+        elif 'phase_times' in timing_data:
+            timing_data = {phase: time for phase, time in timing_data['phase_times'].items() if time > 0}
         
-        # Handle new timing data structure from BOBEResults
-        if isinstance(timing_data, dict) and 'phase_times' in timing_data:
-            # Extract phase times from new structure
-            phase_times = timing_data['phase_times']
-            # Only include phases that have time > 0
-            timing_data = {phase: time for phase, time in phase_times.items() if time > 0}
+        phases, times = list(timing_data.keys()), list(timing_data.values())
         
         # Create bar plot
-        phases = list(timing_data.keys())
-        times = list(timing_data.values())
+        colors = plt.cm.Set3(np.linspace(0, 1, len(phases))) if len(phases) > 1 else ['skyblue']
+        bars = ax.bar(range(len(phases)), times, color=colors, alpha=0.7)
         
-        if len(phases) == 1:
-            # Simple total time display
-            ax.bar([0], times, color='skyblue', alpha=0.7)
-            ax.set_xticks([0])
-            ax.set_xticklabels(phases)
-            ax.set_ylabel('Time (seconds)')
-            ax.set_title('Runtime Information')
-        else:
-            # Multiple phases
-            colors = plt.cm.Set3(np.linspace(0, 1, len(phases)))
-            bars = ax.bar(range(len(phases)), times, color=colors, alpha=0.7)
-            
-            # Add value labels on bars
-            for bar, time_val in zip(bars, times):
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + max(times)*0.01,
-                       f'{time_val:.1f}s', ha='center', va='bottom')
-            
-            ax.set_xticks(range(len(phases)))
-            ax.set_xticklabels(phases, rotation=45, ha='right')
-            ax.set_ylabel('Time (seconds)')
-            ax.set_title('Runtime Breakdown')
+        # Add value labels on bars
+        for bar, time_val in zip(bars, times):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + max(times)*0.01,
+                   f'{time_val:.1f}s', ha='center', va='bottom')
         
+        ax.set_xticks(range(len(phases)))
+        ax.set_xticklabels(phases, rotation=45 if len(phases) > 1 else 0, ha='right' if len(phases) > 1 else 'center')
+        ax.set_ylabel('Time (seconds)')
+        ax.set_title('Runtime Breakdown' if len(phases) > 1 else 'Runtime Information')
         ax.grid(True, alpha=0.3, axis='y')
         plt.tight_layout()
         
@@ -604,24 +547,19 @@ class BOBESummaryPlotter:
                    transform=ax.transAxes, ha='center', va='center')
             return ax
         
-        # Extract convergence data
-        iterations = [conv.iteration for conv in self.results.convergence_history]
-        deltas = [conv.delta for conv in self.results.convergence_history]
-        thresholds = [conv.threshold for conv in self.results.convergence_history]
-        converged_flags = [conv.converged for conv in self.results.convergence_history]
+        # Extract and plot convergence data
+        conv_data = [(conv.iteration, conv.delta, conv.threshold, conv.converged) 
+                     for conv in self.results.convergence_history]
+        iterations, deltas, thresholds, converged_flags = zip(*conv_data)
         
-        # Plot delta evolution
         ax.plot(iterations, deltas, 'b-', linewidth=2, label='Δlog Z', alpha=0.8)
-        
-        # Plot threshold
         ax.plot(iterations, thresholds, 'r--', linewidth=2, label='Threshold', alpha=0.7)
         
         # Mark convergence points
-        conv_iterations = [it for it, conv in zip(iterations, converged_flags) if conv]
-        conv_deltas = [delta for delta, conv in zip(deltas, converged_flags) if conv]
-        
-        if conv_iterations:
-            ax.scatter(conv_iterations, conv_deltas, color='green', s=50, 
+        conv_points = [(it, delta) for it, delta, conv in zip(iterations, deltas, converged_flags) if conv]
+        if conv_points:
+            conv_its, conv_deltas = zip(*conv_points)
+            ax.scatter(conv_its, conv_deltas, color='green', s=50, 
                       marker='o', zorder=5, label='Converged points')
         
         ax.set_xlabel('Iteration')
@@ -635,7 +573,7 @@ class BOBESummaryPlotter:
     
     def plot_kl_divergences(self, ax: Optional[plt.Axes] = None) -> plt.Axes:
         """
-        Plot combined KL divergences: successive (between NS iterations) and bounds (upper/lower/mean).
+        Plot successive KL divergences between NS iterations (reverse, forward, symmetric).
         
         Args:
             ax: Matplotlib axes to plot on (creates new if None)
@@ -646,59 +584,54 @@ class BOBESummaryPlotter:
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(8*self.figsize_scale, 5*self.figsize_scale))
         
-        def cap_kl_value(val, threshold=1e3):
-            """Cap large/infinite KL values for plotting."""
-            return np.clip(val, 0, threshold) if np.isfinite(val) else np.nan
+        def handle_invalid_kl_value(val, large_value=1e3):
+            """Replace invalid/infinite KL values with a large number for consistent plotting."""
+            if np.isfinite(val) and val >= 0:
+                return min(val, large_value)  # Cap at large_value but keep valid values
+            else:
+                return large_value  # Replace invalid values with large_value
         
-        # Define KL data sources and labels
-        kl_sources = [
-            ('successive_kl', 'symmetric', 'Successive Symmetric', '#2ca02c'),
-            ('kl_divergences', 'upper_lower', 'Upper ↔ Lower', '#d62728'),
-            ('kl_divergences', 'upper_mean', 'Upper ↔ Mean', '#1f77b4'),
-            ('kl_divergences', 'lower_mean', 'Lower ↔ Mean', '#ff7f0e')
+        # Define successive KL data sources and labels
+        successive_kl_sources = [
+            ('reverse', 'Reverse KL', '#d62728'),
+            ('forward', 'Forward KL', '#1f77b4'), 
+            ('symmetric', 'Symmetric KL', '#2ca02c')
         ]
         
         plot_count = 0
         
-        for data_attr, value_key, label, color in kl_sources:
-            iterations, values = [], []
-            
-            if data_attr == 'successive_kl' and hasattr(self.results, 'successive_kl'):
+        if hasattr(self.results, 'successive_kl') and self.results.successive_kl:
+            for value_key, label, color in successive_kl_sources:
+                iterations, values = [], []
+                
                 for entry in self.results.successive_kl:
                     iterations.append(entry.get('iteration', 0))
-                    values.append(cap_kl_value(entry.get(value_key, np.nan)))
-            
-            elif data_attr == 'kl_divergences' and hasattr(self.results, 'kl_divergences'):
-                kl_iterations = getattr(self.results, 'kl_iterations', list(range(len(self.results.kl_divergences))))
-                for i, entry in enumerate(self.results.kl_divergences):
-                    iterations.append(kl_iterations[i] if i < len(kl_iterations) else i)
-                    values.append(cap_kl_value(entry.get(value_key, np.nan)))
-            
-            # Plot if we have valid data
-            if iterations and any(np.isfinite(values)):
-                mask = np.isfinite(values)
-                ax.plot(np.array(iterations)[mask], np.array(values)[mask], 
-                       'o-', color=color, label=label, linewidth=2, markersize=6, alpha=0.8)
-                plot_count += 1
+                    values.append(handle_invalid_kl_value(entry.get(value_key, np.nan)))
+                
+                # Plot all data points (no filtering)
+                if iterations and values:
+                    ax.plot(iterations, values, 'o-', color=color, label=label, 
+                           linewidth=2, markersize=6, alpha=0.8)
+                    plot_count += 1
         
         # Handle empty plot
         if plot_count == 0:
-            ax.text(0.5, 0.5, 'No KL divergence data available', 
+            ax.text(0.5, 0.5, 'No successive KL divergence data available', 
                    transform=ax.transAxes, ha='center', va='center', fontsize=12)
-            ax.set_title('KL Divergences')
+            ax.set_title('Successive KL Divergences')
             return ax
         
         # Configure plot
         ax.set_xlabel('Iteration')
         ax.set_ylabel('KL Divergence')
-        ax.set_title('KL Divergences (Successive & Bounds)')
+        ax.set_title('Successive KL Divergences')
         ax.set_yscale('log')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
         # Add annotation
-        ax.text(0.02, 0.98, 'Successive: between means across NS runs\n'
-                            'Bounds: between upper lower and mean', 
+        ax.text(0.02, 0.98, 'KL divergences between successive NS iterations\n'
+                            'Invalid values shown as 1000', 
                transform=ax.transAxes, va='top', ha='left', 
                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7), fontsize=9)
         
@@ -718,9 +651,7 @@ class BOBESummaryPlotter:
         """
         n_plot = min(self.ndim, max_params)
         fig, axes = plt.subplots(n_plot, 1, figsize=(8*self.figsize_scale, 3*n_plot*self.figsize_scale))
-        
-        if n_plot == 1:
-            axes = [axes]
+        axes = [axes] if n_plot == 1 else axes
         
         if param_evolution_data is None:
             for i, ax in enumerate(axes):
@@ -730,37 +661,26 @@ class BOBESummaryPlotter:
         
         for i in range(n_plot):
             param_name = self.param_names[i]
-            if param_name in param_evolution_data:
-                data = param_evolution_data[param_name]
-                iterations = data.get('iterations', [])
-                values = data.get('values', [])
+            data = param_evolution_data.get(param_name, {})
+            iterations, values = data.get('iterations', []), data.get('values', [])
+            
+            if iterations and values:
+                axes[i].plot(iterations, values, 'o-', linewidth=1, markersize=3, alpha=0.7)
+                axes[i].set_ylabel(self._format_latex_label(self.param_labels[i]))
+                axes[i].grid(True, alpha=0.3)
                 
-                if iterations and values:
-                    axes[i].plot(iterations, values, 'o-', linewidth=1, markersize=3, alpha=0.7)
-                    
-                    # Format parameter label for LaTeX rendering
-                    label = self._format_latex_label(self.param_labels[i])
-                    
-                    axes[i].set_ylabel(label)
-                    axes[i].grid(True, alpha=0.3)
-                    
-                    # Add parameter bounds if available
-                    if hasattr(self.results, 'param_bounds') and i < len(self.results.param_bounds[0]):
-                        lower = self.results.param_bounds[0, i]
-                        upper = self.results.param_bounds[1, i]
-                        axes[i].axhline(lower, color='red', linestyle=':', alpha=0.5, label='Bounds')
-                        axes[i].axhline(upper, color='red', linestyle=':', alpha=0.5)
-                        axes[i].legend()
-                else:
-                    axes[i].text(0.5, 0.5, f'No data for {param_name}', 
-                               transform=axes[i].transAxes, ha='center', va='center')
+                # Add parameter bounds
+                if hasattr(self.results, 'param_bounds') and i < len(self.results.param_bounds[0]):
+                    lower, upper = self.results.param_bounds[0, i], self.results.param_bounds[1, i]
+                    axes[i].axhline(lower, color='red', linestyle=':', alpha=0.5, label='Bounds')
+                    axes[i].axhline(upper, color='red', linestyle=':', alpha=0.5)
+                    axes[i].legend()
             else:
                 axes[i].text(0.5, 0.5, f'No data for {param_name}', 
                            transform=axes[i].transAxes, ha='center', va='center')
         
         axes[-1].set_xlabel('Iteration')
         plt.tight_layout()
-        
         return fig
     
     def create_summary_dashboard(self, 
@@ -840,42 +760,38 @@ class BOBESummaryPlotter:
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(6*self.figsize_scale, 4*self.figsize_scale))
         
-        # Collect summary statistics
-        stats_text = []
+        # Basic run info
+        stats_lines = [
+            f"Problem: {self.ndim}D",
+            f"Likelihood: {self.results.likelihood_name}"
+        ]
         
-        # Basic info
-        stats_text.append(f"Problem: {self.ndim}D")
-        stats_text.append(f"Likelihood: {self.results.likelihood_name}")
-        
-        # Samples info
+        # Sample statistics
         if self.results.final_samples is not None:
             n_samples = len(self.results.final_samples)
-            stats_text.append(f"Final samples: {n_samples}")
-            
-            if len(self.results.final_weights) > 0:
-                n_eff = int(np.sum(self.results.final_weights)**2 / np.sum(self.results.final_weights**2))
-                stats_text.append(f"Effective samples: {n_eff}")
+            n_eff = int(np.sum(self.results.final_weights)**2 / np.sum(self.results.final_weights**2)) if len(self.results.final_weights) > 0 else n_samples
+            stats_lines.extend([f"Final samples: {n_samples}", f"Effective samples: {n_eff}"])
         
-        # Evidence
+        # Evidence estimate
         if self.results.final_logz_dict:
-            logz = self.results.final_logz_dict.get('mean', np.nan)
-            logz_err = (self.results.final_logz_dict.get('upper', 0) - 
-                       self.results.final_logz_dict.get('lower', 0))
+            logz_data = self.results.final_logz_dict
+            logz, logz_err = logz_data.get('mean', np.nan), (logz_data.get('upper', 0) - logz_data.get('lower', 0))
             if not np.isnan(logz):
-                stats_text.append(f"log Z = {logz:.3f} ± {logz_err:.3f}")
+                stats_lines.append(f"log Z = {logz:.3f} ± {logz_err:.3f}")
         
-        # Runtime
+        # Runtime and convergence
         if self.results.end_time:
             runtime = self.results.end_time - self.results.start_time
             runtime_str = f"{runtime/3600:.2f} hours" if runtime > 3600 else f"{runtime:.1f} seconds"
-            stats_text.append(f"Runtime: {runtime_str}")
+            stats_lines.append(f"Runtime: {runtime_str}")
         
-        # Convergence
-        stats_text.append(f"Converged: {'Yes' if self.results.converged else 'No'}")
-        stats_text.append(f"Termination: {self.results.termination_reason}")
+        stats_lines.extend([
+            f"Converged: {'Yes' if self.results.converged else 'No'}",
+            f"Termination: {self.results.termination_reason}"
+        ])
         
-        # Display text
-        ax.text(0.05, 0.95, '\n'.join(stats_text), transform=ax.transAxes, 
+        # Display formatted text
+        ax.text(0.05, 0.95, '\n'.join(stats_lines), transform=ax.transAxes, 
                fontsize=11*self.figsize_scale, verticalalignment='top',
                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.3))
         
@@ -883,109 +799,6 @@ class BOBESummaryPlotter:
         ax.set_ylim(0, 1)
         ax.axis('off')
         ax.set_title('Run Summary')
-        
-        return ax
-    
-    def plot_parameter_traces(self, param_evolution_data: Dict, 
-                             ax: Optional[plt.Axes] = None) -> plt.Axes:
-        """
-        Plot parameter traces for all parameters in a single plot.
-        
-        Args:
-            param_evolution_data: Dictionary with parameter evolution data
-            ax: Matplotlib axes to plot on (creates new if None)
-            
-        Returns:
-            The matplotlib axes object
-        """
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=(12*self.figsize_scale, 4*self.figsize_scale))
-        
-        colors = plt.cm.Set1(np.linspace(0, 1, self.ndim))
-        
-        for i, param_name in enumerate(self.param_names):
-            if param_name in param_evolution_data:
-                data = param_evolution_data[param_name]
-                iterations = data.get('iterations', [])
-                values = data.get('values', [])
-                
-                if iterations and values:
-                    # Normalize values to [0, 1] for display
-                    if hasattr(self.results, 'param_bounds') and i < len(self.results.param_bounds[0]):
-                        lower = self.results.param_bounds[0, i]
-                        upper = self.results.param_bounds[1, i]
-                        norm_values = (np.array(values) - lower) / (upper - lower)
-                    else:
-                        norm_values = np.array(values)
-                    
-                    # Format parameter label for LaTeX rendering
-                    label = self._format_latex_label(self.param_labels[i])
-                    
-                    ax.plot(iterations, norm_values, color=colors[i], 
-                           linewidth=1, alpha=0.7, label=label)
-        
-        ax.set_xlabel('Iteration')
-        ax.set_ylabel('Normalized Parameter Value')
-        ax.set_title('Parameter Evolution (Normalized)')
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.grid(True, alpha=0.3)
-        
-        return ax
-    
-    def plot_final_parameter_summary(self, ax: Optional[plt.Axes] = None) -> plt.Axes:
-        """
-        Plot final parameter values and uncertainties.
-        
-        Args:
-            ax: Matplotlib axes to plot on (creates new if None)
-            
-        Returns:
-            The matplotlib axes object
-        """
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=(10*self.figsize_scale, 4*self.figsize_scale))
-        
-        if self.results.final_samples is None:
-            ax.text(0.5, 0.5, 'No final samples available', 
-                   transform=ax.transAxes, ha='center', va='center')
-            return ax
-        
-        # Calculate parameter statistics
-        param_means = []
-        param_stds = []
-        
-        for i in range(self.ndim):
-            values = self.results.final_samples[:, i]
-            weights = self.results.final_weights
-            
-            mean = np.average(values, weights=weights)
-            var = np.average((values - mean)**2, weights=weights)
-            std = np.sqrt(var)
-            
-            param_means.append(mean)
-            param_stds.append(std)
-        
-        # Create error bar plot
-        x_pos = np.arange(self.ndim)
-        ax.errorbar(x_pos, param_means, yerr=param_stds, 
-                   fmt='o', markersize=8, capsize=5, capthick=2)
-        
-        # Add parameter bounds if available
-        if hasattr(self.results, 'param_bounds'):
-            for i in range(self.ndim):
-                lower = self.results.param_bounds[0, i]
-                upper = self.results.param_bounds[1, i]
-                ax.axhline(lower, color='red', linestyle=':', alpha=0.3)
-                ax.axhline(upper, color='red', linestyle=':', alpha=0.3)
-        
-        # Format parameter labels for LaTeX rendering
-        formatted_labels = [self._format_latex_label(label) for label in self.param_labels]
-        
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(formatted_labels)
-        ax.set_ylabel('Parameter Value')
-        ax.set_title('Final Parameter Estimates')
-        ax.grid(True, alpha=0.3)
         
         return ax
     

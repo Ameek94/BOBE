@@ -246,15 +246,12 @@ def nested_sampling_jaxns(gp
     # # now combine results across batches and function outputs to return a tuple (num_outputs, num_inputs, ...)
     # logl_var = tuple(np.concatenate([x[i] for x in res]) for i in range(nres))[0]
     
-    # can we use map instead?
     logl_var = jax.lax.map(gp.predict_var,results.samples['x'],batch_size=100)
-     #jax.lax.map(f,results.samples['x'],batch_size=batch_size) # type: ignore
     logl_std = np.sqrt(logl_var.squeeze(-1))
 
     logl_upper = results.log_L_samples + logl_std
     logl_lower = results.log_L_samples - logl_std
 
-    print(f"shapes logvol {logvol.shape}, logvar {logl_var.shape}, logl_upper {logl_upper.shape}, logl_lower {logl_lower.shape}")
 
     upper =  compute_integrals(logl=logl_upper, logvol=logvol)[-1]
     lower = compute_integrals(logl=logl_lower, logvol=logvol)[-1]
