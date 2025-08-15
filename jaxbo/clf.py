@@ -201,7 +201,7 @@ def train_nn(
     dropout_rate=0.1,
     lr=1e-3,
     weight_decay=1e-4,
-    n_epochs=1000,
+    n_epochs=750,
     batch_size=128,
     early_stop_patience=100,
     seed=0,

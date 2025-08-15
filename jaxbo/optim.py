@@ -63,7 +63,9 @@ def optimize(
     bounds_arr = _setup_bounds(bounds, ndim)
     
     # Scaled function: operates in unit space [0,1], then maps to real bounds
-    scaled_func = lambda x: func(scale_from_unit(x, bounds_arr), *fun_args, **fun_kwargs)
+    def scaled_func(x):
+        return func(scale_from_unit(x, bounds_arr), *fun_args, **fun_kwargs)
+    # scaled_func = lambda x: func(scale_from_unit(x, bounds_arr), *fun_args, **fun_kwargs)
 
     # Get optimizer
     optimizer = _get_optimizer(optimizer_name, lr, optimizer_kwargs)

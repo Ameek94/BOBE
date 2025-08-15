@@ -1,47 +1,41 @@
-import os
-os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
-    os.cpu_count()
-)
 from jaxbo.bo import BOBE
-from jaxbo.utils.summary_plots import plot_final_samples,BOBESummaryPlotter 
-from jaxbo.loglike import CobayaLikelihood
+from jaxbo.loglike import ExternalLikelihood
+from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter 
 import matplotlib.pyplot as plt
 import time
 import sys
+from jaxbo.nested_sampler import renormalise_log_weights
+from getdist import MCSamples
+from dynesty import DynamicNestedSampler
+import numpy as np
+import time
 
-cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
+ndim = 2
+param_list = ['x1','x2']
+param_labels = ['x_1','x_2']
+param_bounds = np.array([[-1,1],[-1,2]]).T
+
+def loglike(X):
+    logpdf = -0.25*(5*(0.2-X[0]))**2 - (20*(X[1]/4 - X[0]**4))**2
+    return logpdf
+
+def prior_transform(x):
+    x[0] = x[0]*2 - 1 #x[0] * (param_bounds[0,1] - param_bounds[0,0]) + param_bounds[0,0]
+    x[1] = x[1]*3 - 1 #x[1] * (param_bounds[1,1] - param_bounds[1,0]) + param_bounds[1,0]
+    return x
 
 
-clf = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
-clf_update_step = 1 if clf == 'svm' else 5
-
-likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Camspec_{clf}_KL_LogEImix')
-
-
-print("="*60)
-print("PLANCK CAMSPEC CLF TEST")
-print("="*60)
-print(f"Likelihood: {likelihood.name}")
-print(f"Parameters: {likelihood.param_list}")
-print(f"Dimensions: {len(likelihood.param_list)}")
-print("="*60)
-
-
-
+likelihood = ExternalLikelihood(loglikelihood=loglike,ndim=ndim,param_list=param_list,
+        param_bounds=param_bounds,param_labels=param_labels,
+        name='banana',noise_std=0.0,minus_inf=-1e5)
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
-        miniters=500, maxiters=2500, max_gp_size=1500,
+sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8, 
+        miniters=25, maxiters=120,max_gp_size=200,
         loglikelihood=likelihood,
-        resume=False,
-        resume_file=f'{likelihood.name}.npz',
-        save=True,
-        fit_step=25, update_mc_step=5, ns_step=25,
-        num_hmc_warmup=512, num_hmc_samples=2048, mc_points_size=200,
-        lengthscale_priors='DSLP',
-        use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
-        clf_threshold=300, gp_threshold=500,
-        minus_inf=-1e5, logz_threshold=1.)
+        fit_step = 2, update_mc_step = 2, ns_step = 10,
+        num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 32,
+        logz_threshold=0.1,
+        lengthscale_priors='DSLP', use_clf=False,minus_inf=-1e5,)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
@@ -54,7 +48,6 @@ print("\n" + "="*60)
 print("RUN COMPLETED")
 print("="*60)
 print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
-
 
 # Extract components for backward compatibility
 gp = results['gp']
@@ -170,19 +163,28 @@ else:  # Dictionary format
 
 
 
-param_list_LCDM = ['omch2','logA','ns','H0','ombh2','tau']
-plot_final_samples(
-    gp, 
-    {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-    param_list=likelihood.param_list,
-    param_bounds=likelihood.param_bounds,
-    param_labels=likelihood.param_labels,
-    output_file=likelihood.name,
-    reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
-    reference_ignore_rows=0.0,
-    reference_label='PolyChord',
-    scatter_points=False,
-)
+dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,
+                                       sample='rwalk')
+
+dns_sampler.run_nested(print_progress=True,dlogz_init=0.01) 
+res = dns_sampler.results  
+mean = res['logz'][-1]
+logz_err = res['logzerr'][-1]
+print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
+
+samples = res['samples']
+weights = renormalise_log_weights(res['logwt'])
+
+reference_samples = MCSamples(samples=samples, names=param_list, labels=param_labels,
+                            weights=weights, 
+                            ranges= dict(zip(param_list,param_bounds.T)))
+
+
+plot_final_samples(gp,{'x': sample_array, 'weights': weights_array},
+                   param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
+                   param_labels=likelihood.param_labels,output_file=likelihood.name,reference_samples=reference_samples,
+                   reference_file=None,scatter_points=True,reference_label='Dynesty')
+
 
 # Save comprehensive results
 print("\n" + "="*60)
@@ -197,20 +199,3 @@ print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
 print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
 print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
 print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
-
-
-# 2025-04-21 18:27:42,039 INFO:[BO]:  Final LogZ: upper=-5527.4084, mean=-5529.4980, lower=-5530.0967, dlogz sampler=0.1720
-# PolyChord result: # log-evidence
-# logZ: -5529.65218118231
-# logZstd: 0.447056743748251
-
-# 2025-07-26 05:39:58,814 INFO:[BO]:  Final LogZ: mean=-5529.6915, dlogz sampler=0.1793, upper=-5509.8101, lower=-5530.1042
-# Total time taken = 9495.8532 seconds
-
-# Ellipsoid classifier used for Planck Camspec data
-# INFO:[bo]: LogZ info: mean=-5529.5996, dlogz sampler=0.2407, upper=-5529.2020, lower=-5529.9512
-# INFO:[bo]: Convergence check: delta = 0.7493, step = 350
-# INFO:[bo]: Converged
-# INFO:[bo]: Sampling stopped: LogZ converged
-# INFO:[bo]: Final GP training set size: 1251, max size: 1500
-# INFO:[bo]: Number of iterations: 350, max iterations: 2500
