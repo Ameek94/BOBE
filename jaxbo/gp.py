@@ -308,6 +308,7 @@ class GP:
         """
         Computes the variance of the GP at the mc_points assuming a single point new_x is added to the training set
         """
+        # TODO Precompute part kernel matrix
         new_x = jnp.atleast_2d(new_x)
         new_train_x = jnp.concatenate([self.train_x,new_x])
         k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
@@ -342,7 +343,7 @@ class GP:
         val = gp_mll(k,self.train_y,self.train_y.shape[0])
         return -val
 
-    def fit(self, lr=5e-3,maxiter=300,n_restarts=4,early_stop_patience=25):
+    def fit(self, lr=5e-3,maxiter=300,n_restarts=4,early_stop_patience=50):
         """ 
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
@@ -356,6 +357,9 @@ class GP:
             The number of restarts for the optax optimizer. Default is 2.
 
         """
+
+        # NEED TO HANDLE CASE WHERE ONLY 1 ADDED TO TRAINING SET
+
         outputscale = jnp.array([self.outputscale])
         init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
         log.info(f" Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")

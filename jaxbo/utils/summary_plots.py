@@ -460,7 +460,10 @@ class BOBESummaryPlotter:
         iterations = np.array(acquisition_data['iterations'])
         values = np.array(acquisition_data['values'])
         functions = acquisition_data['functions']
-        
+
+        min_val = -3.
+        max_val = 3.
+            
         if len(iterations) == 0:
             ax.text(0.5, 0.5, 'No acquisition function data available', 
                    transform=ax.transAxes, ha='center', va='center')
@@ -476,16 +479,31 @@ class BOBESummaryPlotter:
             func_mask = np.array(functions) == func_name
             func_iterations = iterations[func_mask]
             func_values = values[func_mask]
-            
+            if func_name == "WIPV":
+                func_values = np.log10(func_values)
+                func_name_use = "WIPV (log10)"
+            else:
+                func_name_use = func_name
+                if func_name in  ["LogEI","EI"]:
+                    func_values = -func_values
+            # if func_name == "LogEI":
+            #     func_values = np.log10(func_values)
+
             ax.scatter(func_iterations, func_values, 
                       color=color_map[func_name], 
-                      label=f'{func_name} acquisition',
+                      label=f'{func_name_use}',
                       alpha=0.7, s=20)
             
             # Connect points with lines for each function
             if len(func_iterations) > 1:
+                current_min_val = func_values.min()
+                if current_min_val < min_val:
+                    min_val = current_min_val
+                current_max_val = func_values.max()
+                if current_max_val > max_val:
+                    max_val = current_max_val
                 ax.plot(func_iterations, func_values, 
-                       color=color_map[func_name], alpha=0.3, linewidth=1)
+                    color=color_map[func_name], alpha=0.3, linewidth=1)
         
         # Add switches between acquisition functions
         if len(unique_functions) > 1:
@@ -497,11 +515,12 @@ class BOBESummaryPlotter:
             for switch_iter in switch_points:
                 ax.axvline(switch_iter, color='red', linestyle='--', alpha=0.5,
                           label='Function switch' if switch_iter == switch_points[0] else '')
-        
+
+        ax.set_ylim(max(min_val, -5), min(max_val, 5)) # make sure plot doesnt have too big a range. 
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Acquisition Function Value')
         ax.set_title('Acquisition Function Evolution')
-        ax.set_yscale('log')  # Log scale often useful for acquisition values
+        ax.set_yscale('linear')  # Log scale often useful for acquisition values but LogEI is now linear, WIPV is converted to log
         ax.legend()
         ax.grid(True, alpha=0.3)
 

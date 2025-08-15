@@ -15,7 +15,7 @@ clf_type = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
 clf_update_step = 1 if clf_type == 'svm' else 5
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Planck_DESI_Omk_{clf_type}')
+        minus_inf=-1e5, noise_std=0.0,name=f'Planck_DESI_Omk_{clf_type}_mix_acq')
 
 
 print("="*60)
@@ -31,13 +31,13 @@ print("="*60)
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
-        miniters=750, maxiters=2500, max_gp_size=1800,
+        miniters=500, maxiters=2500, max_gp_size=1800,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
         fit_step=50, update_mc_step=5, ns_step=50,
-        num_hmc_warmup=512, num_hmc_samples=3000, mc_points_size=108,
+        num_hmc_warmup=512, num_hmc_samples=4000, mc_points_size=200,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf_type, clf_use_size=50, clf_update_step=clf_update_step,
         clf_threshold=300, gp_threshold=500,

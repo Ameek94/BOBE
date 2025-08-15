@@ -205,6 +205,7 @@ class BOBE:
             self.results_manager.end_timing('True Objective Evaluations')
             
             train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
+            print(train_x.shape)
             train_y = jnp.array(init_vals)
             lengthscales = None
             outputscale = None
@@ -385,8 +386,11 @@ class BOBE:
         ii = start_iteration
         x0_acq =  self.gp.train_x[jnp.argmax(self.gp.train_y)]
 
-        acqf = WIPV
-        acq_str = "WIPV"
+        acqf = LogEI 
+        acq_str = "logei" 
+        
+        # acqf = WIPV
+        # acq_str = "WIPV"
 
         for i in range(start_iteration, self.maxiters):
 
@@ -394,12 +398,13 @@ class BOBE:
             # ideally, we want to decide whether to do the mc_update depending on the results of the previous steps
             #  e.g. if using ns_samples we can stay on it for a bit longer since it explores the space better
             ii = i + 1
-            # Change acquisition function if no improvement in 100 iterations.
-            # if (ii - best_pt_iteration > 40)  and acqf == LogEI:
-            #     log.info(f" No improvement in 100 iterations, changing acquisition function from {acq_str} to WIPV")
-            #     acq_str = "WIPV"
-            #     acqf = WIPV
-            #     update_mc = True
+
+            # Change acquisition function if no improvement in 75 iterations.
+            if (ii > 250)  and acqf == LogEI:
+                log.info(f" No improvement in 75 iterations, changing acquisition function from {acq_str} to WIPV")
+                acq_str = "WIPV"
+                acqf = WIPV
+                update_mc = True
 
             refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and ii >= self.miniters
@@ -414,13 +419,14 @@ class BOBE:
                 n_restarts = 8
                 maxiter = 500
                 early_stop_patience = 100
-                acq_kwargs = {'zeta': 0.05}
+                acq_kwargs = {'zeta': 0.1}
                 x0_acq = jnp.vstack([self.gp.get_random_point() for _ in range(n_restarts)])
+                x0_acq = jnp.clip(x0_acq + np.random.normal(0, 0.01, size=x0_acq.shape),0.,1.)
             elif acqf == WIPV: 
                 acq_str = "WIPV"
-                n_restarts = 6  
-                maxiter = 150
-                early_stop_patience = 25
+                n_restarts = 4
+                maxiter = 200
+                early_stop_patience = 50
                 acq_kwargs = {'mc_points': self.mc_points}
                 if self.mc_samples is not None:
                     x0_acq1 = self.mc_samples['best']
@@ -501,7 +507,7 @@ class BOBE:
                 update_mc = True
             if update_mc:
                 if not refit:
-                    self.gp.fit(maxiter=100,n_restarts=1)
+                    self.gp.fit(maxiter=50,n_restarts=1)
                 x0_hmc = self.gp.train_x[jnp.argmax(self.gp.train_y)]
                 self.results_manager.start_timing('MCMC Sampling')
                 self.mc_samples = get_mc_samples(

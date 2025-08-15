@@ -292,22 +292,28 @@ class GPwithClassifier:
         return gp_not_updated
 
     def get_random_point(self):
-        pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold
-    
-        # if not jnp.any(pts_idx):
-        #     log.info("No points above threshold")
-        #     return self.train_x_clf[jnp.argmax(self.train_y_clf)]
 
-        # Sample a random point from the filtered points
-        valid_indices = jnp.where(pts_idx)[0]
+        if self.use_clf:
+            pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold
     
-        # Use np.random for random selection
-        chosen_index = np.random.choice(valid_indices, size=1)[0]
+            # if not jnp.any(pts_idx):
+            #     log.info("No points above threshold")
+            #     return self.train_x_clf[jnp.argmax(self.train_y_clf)]
+
+            # Sample a random point from the filtered points
+            valid_indices = jnp.where(pts_idx)[0]
     
-        result = self.train_x_clf[chosen_index]
-        log.info(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
+            # Use np.random for random selection
+            chosen_index = np.random.choice(valid_indices, size=1)[0]
     
-        return result
+            pt = self.train_x_clf[chosen_index]
+            log.info(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
+        else:
+            log.info(f"Getting random point")
+
+            pt = np.random.uniform(0, 1, size=self.ndim)
+
+        return pt
     
     def save(self,outfile='gp'):
         """
@@ -439,7 +445,7 @@ class GPwithClassifier:
 
         rng_mcmc = get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1., 2.5) ** 2
+        high_temp = rng_mcmc.uniform(1.33, 3.) ** 2
         temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")

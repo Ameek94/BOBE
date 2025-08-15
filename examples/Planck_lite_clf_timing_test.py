@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 cobaya_input_file = './cosmo_input/LCDM_6D.yaml'
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0, name='Planck_lite_clf_timing_test')
+        minus_inf=-1e5, noise_std=0.0, name='Planck_lite_clf_timing_test_logEI_WIPV')
 
 print("="*60)
 print("PLANCK LITE CLF TIMING TEST")
@@ -38,7 +38,7 @@ sampler = BOBE(
     mc_points_size=64,
     lengthscale_priors='DSLP', 
     use_clf=True,
-    clf_use_size=50,
+    clf_use_size=10,
     clf_threshold=350,
     clf_update_step=1,  # SVM update step
     clf_type='svm',  # Using SVM for classification

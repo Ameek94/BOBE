@@ -14,7 +14,7 @@ clf = sys.argv[1] if len(sys.argv) > 1 else 'svm'
 cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_CPL.yaml'
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_CPL_{clf}_256_mc')
+        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_CPL_{clf}_mix_acq')
 
 if clf == 'svm':
     clf_update_step = 1
@@ -23,7 +23,7 @@ else:
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=32, n_sobol_init=32,
-        miniters=500, maxiters=2500, max_gp_size=2100,
+        miniters=500, maxiters=2500, max_gp_size=2000,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
@@ -32,7 +32,7 @@ sampler = BOBE(n_cobaya_init=32, n_sobol_init=32,
         num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=256,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
-        clf_threshold=350, gp_threshold=500,
+        clf_threshold=300, gp_threshold=500,
         minus_inf=-1e5, logz_threshold=10.)
 
 # Run BOBE with automatic timing collection
@@ -165,10 +165,24 @@ plot_params = ['w','wa','omch2','logA','ns','H0','ombh2','tau'] #'omk'
 plot_final_samples(
     gp, 
     {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+    plot_params=plot_params,
     param_list=likelihood.param_list,
     param_bounds=likelihood.param_bounds,
     param_labels=likelihood.param_labels,
-    output_file=likelihood.name,
+    output_file=f"{likelihood.name}_cosmo",
+    reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
+    reference_ignore_rows=0.0,
+    reference_label='PolyChord',
+    scatter_points=False,
+)
+
+plot_final_samples(
+    gp, 
+    {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+    param_list=likelihood.param_list,
+    param_bounds=likelihood.param_bounds,
+    param_labels=likelihood.param_labels,
+    output_file=f"{likelihood.name}_full",
     reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
     reference_ignore_rows=0.0,
     reference_label='PolyChord',
