@@ -335,8 +335,7 @@ class BOBEResults:
             outputscale: Outputscale value
         """
         self.gp_iterations.append(iteration)
-        # Convert lengthscales to JSON-serializable format
-        self.gp_lengthscales.append(convert_jax_to_json_serializable(lengthscales))
+        self.gp_lengthscales.append(lengthscales)
         self.gp_outputscales.append(float(outputscale))
     
     def update_best_loglike(self, iteration: int, best_loglike: float):

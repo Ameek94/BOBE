@@ -297,7 +297,9 @@ class BOBESummaryPlotter:
         
         iterations = np.array(gp_data['iterations'])
         lengthscales = np.array(gp_data['lengthscales'])  # Shape: [n_iterations, n_params]
-        
+
+        print(f"shape {lengthscales.shape}")
+
         # Plot lengthscales for each parameter
         colors = plt.cm.Set1(np.linspace(0, 1, self.ndim))
         for i in range(self.ndim):
@@ -461,8 +463,8 @@ class BOBESummaryPlotter:
         values = np.array(acquisition_data['values'])
         functions = acquisition_data['functions']
 
-        min_val = -3.
-        max_val = 3.
+        min_val = -5.
+        max_val = 5.
             
         if len(iterations) == 0:
             ax.text(0.5, 0.5, 'No acquisition function data available', 
@@ -494,14 +496,15 @@ class BOBESummaryPlotter:
                       label=f'{func_name_use}',
                       alpha=0.7, s=20)
             
+            current_min_val = func_values.min()
+            if current_min_val < min_val:
+                min_val = current_min_val
+            current_max_val = func_values.max()
+            if current_max_val > max_val:
+                max_val = current_max_val
+            
             # Connect points with lines for each function
             if len(func_iterations) > 1:
-                current_min_val = func_values.min()
-                if current_min_val < min_val:
-                    min_val = current_min_val
-                current_max_val = func_values.max()
-                if current_max_val > max_val:
-                    max_val = current_max_val
                 ax.plot(func_iterations, func_values, 
                     color=color_map[func_name], alpha=0.3, linewidth=1)
         
@@ -632,7 +635,7 @@ class BOBESummaryPlotter:
     
     def plot_kl_divergences(self, ax: Optional[plt.Axes] = None) -> plt.Axes:
         """
-        Plot successive KL divergences evolution over iterations.
+        Plot combined KL divergences: successive (between NS iterations) and bounds (upper/lower/mean).
         
         Args:
             ax: Matplotlib axes to plot on (creates new if None)
@@ -643,92 +646,61 @@ class BOBESummaryPlotter:
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(8*self.figsize_scale, 5*self.figsize_scale))
         
-        # Check for successive KL divergence data
-        if not hasattr(self.results, 'successive_kl') or not self.results.successive_kl:
-            ax.text(0.5, 0.5, 'No successive KL divergence data available\n(computed between nested sampling iterations)', 
+        def cap_kl_value(val, threshold=1e3):
+            """Cap large/infinite KL values for plotting."""
+            return np.clip(val, 0, threshold) if np.isfinite(val) else np.nan
+        
+        # Define KL data sources and labels
+        kl_sources = [
+            ('successive_kl', 'symmetric', 'Successive Symmetric', '#2ca02c'),
+            ('kl_divergences', 'upper_lower', 'Upper ↔ Lower', '#d62728'),
+            ('kl_divergences', 'upper_mean', 'Upper ↔ Mean', '#1f77b4'),
+            ('kl_divergences', 'lower_mean', 'Lower ↔ Mean', '#ff7f0e')
+        ]
+        
+        plot_count = 0
+        
+        for data_attr, value_key, label, color in kl_sources:
+            iterations, values = [], []
+            
+            if data_attr == 'successive_kl' and hasattr(self.results, 'successive_kl'):
+                for entry in self.results.successive_kl:
+                    iterations.append(entry.get('iteration', 0))
+                    values.append(cap_kl_value(entry.get(value_key, np.nan)))
+            
+            elif data_attr == 'kl_divergences' and hasattr(self.results, 'kl_divergences'):
+                kl_iterations = getattr(self.results, 'kl_iterations', list(range(len(self.results.kl_divergences))))
+                for i, entry in enumerate(self.results.kl_divergences):
+                    iterations.append(kl_iterations[i] if i < len(kl_iterations) else i)
+                    values.append(cap_kl_value(entry.get(value_key, np.nan)))
+            
+            # Plot if we have valid data
+            if iterations and any(np.isfinite(values)):
+                mask = np.isfinite(values)
+                ax.plot(np.array(iterations)[mask], np.array(values)[mask], 
+                       'o-', color=color, label=label, linewidth=2, markersize=6, alpha=0.8)
+                plot_count += 1
+        
+        # Handle empty plot
+        if plot_count == 0:
+            ax.text(0.5, 0.5, 'No KL divergence data available', 
                    transform=ax.transAxes, ha='center', va='center', fontsize=12)
-            ax.set_title('Successive KL Divergences Between NS Iterations')
+            ax.set_title('KL Divergences')
             return ax
         
-        successive_kl_data = self.results.successive_kl
-        
-        # Extract data for plotting
-        iterations = []
-        forward_kl = []
-        reverse_kl = []
-        symmetric_kl = []
-        
-        # Threshold for capping very large KL values
-        KL_MAX_THRESHOLD = 1e3
-        
-        for entry in successive_kl_data:
-            iter_num = entry.get('iteration', 0)
-            forward_val = entry.get('forward', np.nan)
-            reverse_val = entry.get('reverse', np.nan)
-            symmetric_val = entry.get('symmetric', np.nan)
-            
-            iterations.append(iter_num)
-            
-            # Cap large/infinite values and only include finite values
-            def cap_kl_value(val, threshold=KL_MAX_THRESHOLD):
-                if np.isnan(val):
-                    return np.nan
-                elif np.isinf(val) or val > threshold:
-                    return threshold
-                elif val < 0:  # KL divergence should be non-negative
-                    return 0.0
-                else:
-                    return val
-            
-            forward_kl.append(cap_kl_value(forward_val))
-            reverse_kl.append(cap_kl_value(reverse_val))
-            symmetric_kl.append(cap_kl_value(symmetric_val))
-        
-        if not iterations:
-            ax.text(0.5, 0.5, 'No valid successive KL divergence data', 
-                   transform=ax.transAxes, ha='center', va='center')
-            ax.set_title('Successive KL Divergences Between NS Iterations')
-            return ax
-        
-        # Plot the different KL divergence types
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c']  # Blue, orange, green
-        
-        # Plot reverse KL (most stable and informative)
-        if any(not np.isnan(val) for val in reverse_kl):
-            mask = ~np.isnan(reverse_kl)
-            if np.any(mask):
-                ax.plot(np.array(iterations)[mask], np.array(reverse_kl)[mask], 
-                       'o-', color=colors[0], label='Reverse KL (most stable)', 
-                       linewidth=2, markersize=6, alpha=0.8)
-        
-        # Plot forward KL if finite
-        if any(not np.isnan(val) for val in forward_kl):
-            mask = ~np.isnan(forward_kl)
-            if np.any(mask):
-                ax.plot(np.array(iterations)[mask], np.array(forward_kl)[mask], 
-                       'o-', color=colors[1], label='Forward KL', 
-                       linewidth=2, markersize=6, alpha=0.8)
-        
-        # Plot symmetric KL if finite
-        if any(not np.isnan(val) for val in symmetric_kl):
-            mask = ~np.isnan(symmetric_kl)
-            if np.any(mask):
-                ax.plot(np.array(iterations)[mask], np.array(symmetric_kl)[mask], 
-                       'o-', color=colors[2], label='Symmetric KL', 
-                       linewidth=2, markersize=6, alpha=0.8)
-        
-        ax.set_xlabel('Nested Sampling Iteration')
+        # Configure plot
+        ax.set_xlabel('Iteration')
         ax.set_ylabel('KL Divergence')
-        ax.set_title('Successive KL Divergences Between NS Iterations')
+        ax.set_title('KL Divergences (Successive & Bounds)')
         ax.set_yscale('log')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # Add annotation about convergence
-        ax.text(0.02, 0.98, 'Lower values indicate better convergence\nbetween successive NS runs', 
+        # Add annotation
+        ax.text(0.02, 0.98, 'Successive: between means across NS runs\n'
+                            'Bounds: between upper lower and mean', 
                transform=ax.transAxes, va='top', ha='left', 
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7),
-               fontsize=9)
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7), fontsize=9)
         
         return ax
     

@@ -304,27 +304,30 @@ class GP:
         log.info("Updated GP with new point.")
         log.info(f" GP training size = {self.npoints}")
 
-    def fantasy_var(self,new_x,mc_points):
+    def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
         Computes the variance of the GP at the mc_points assuming a single point new_x is added to the training set
         """
-        # TODO Precompute part kernel matrix
+
         new_x = jnp.atleast_2d(new_x)
-        new_train_x = jnp.concatenate([self.train_x,new_x])
+        # new_train_x = jnp.concatenate([self.train_x,new_x])
         k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
                         noise=self.noise,include_noise=False).flatten()           # shape (n,)
         k_self = kernel_diag(new_x,self.outputscale,self.noise,include_noise=True)[0]  # scalar
-        # k_self = self.kernel(new_x,new_x,self.lengthscales,
-        #                   self.outputscale,noise=self.noise,include_noise=True)[0, 0]  # scalar
         k11_cho = fast_update_cholesky(self.cholesky,k,k_self)
-        k12 = self.kernel(new_train_x,mc_points,self.lengthscales,
-                          self.outputscale,noise=self.noise,include_noise=False)
+
+        # Compute only the extra row for new_x
+        k_new_mc = self.kernel(
+            new_x, mc_points,
+            self.lengthscales, self.outputscale,
+        noise=self.noise, include_noise=False)  # shape (1, n_mc)
+        k12 = jnp.vstack([k_train_mc,k_new_mc])
+
+        # k12 = self.kernel(new_train_x,mc_points,self.lengthscales,
+        #                   self.outputscale,noise=self.noise,include_noise=False)
         k22 = kernel_diag(mc_points,self.outputscale,self.noise,include_noise=True) # (N_mc,)
         vv = solve_triangular(k11_cho, k12, lower=True) # shape (N_train,N_mc)
         var = k22 - jnp.sum(vv*vv,axis=0) 
-        # k22 = self.kernel(mc_points,mc_points,self.lengthscales,
-        #                   self.outputscale,noise=self.noise,include_noise=True) # precompute k22 instead
-        # var = get_var_from_cho(k11_cho,k12,k22)
         return var * self.y_std**2 # return to physical scale for better interpretability
         
     def get_phys_points(self,x_bounds):
@@ -469,12 +472,14 @@ class GP:
 
     def get_random_point(self):
 
-        chosen_index = np.random.choice(self.npoints, size=1)
+        # chosen_index = np.random.choice(self.npoints, size=1)
     
-        result = self.train_x[chosen_index]
-        log.info(f"Random point sampled with value {self.train_y[chosen_index]}")
+        # result = self.train_x[chosen_index]
+        # log.info(f"Random point sampled with value {self.train_y[chosen_index]}")
 
-        return result
+        pt = np.random.uniform(0, 1, size=self.train_x.shape[1])
+
+        return pt
 
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
                        init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=2):

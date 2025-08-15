@@ -23,7 +23,7 @@ bobe = BOBE(loglikelihood=my_likelihood, **settings.to_dict())
 
 # Or customize specific parameters
 custom_settings = BOBESettings(
-    maxiters=2000,
+    max_eval_budget=2000,
     use_clf=True,
     lengthscale_priors='SAAS'
 )
@@ -92,7 +92,7 @@ settings = JaxBoSettings.from_dict(config_dict)
 
 ```python
 bobe_settings = BOBESettings(
-    maxiters=1500,           # Maximum iterations
+    max_eval_budget=1500,    # Maximum evaluation budget
     miniters=200,            # Minimum iterations before convergence check
     use_clf=True,            # Use classifier for filtering
     clf_type='svm',          # Classifier type
@@ -154,14 +154,14 @@ The settings system is designed to be backward compatible. You can gradually ado
 # Old way (still works)
 bobe = BOBE(
     loglikelihood=likelihood,
-    maxiters=1500,
+    max_eval_budget=1500,
     use_clf=True,
     lengthscale_priors='SAAS'
 )
 
 # New way (recommended)
 settings = BOBESettings(
-    maxiters=1500,
+    max_eval_budget=1500,
     use_clf=True,
     lengthscale_priors='SAAS'
 )
@@ -223,7 +223,7 @@ settings = get_fast_settings()
 ### Production Cosmology Analysis
 ```python
 settings = BOBESettings(
-    maxiters=2000,
+    max_eval_budget=2000,
     use_clf=True,
     clf_type='svm',
     lengthscale_priors='SAAS',

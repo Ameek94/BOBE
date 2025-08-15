@@ -41,7 +41,7 @@ def _setup_bounds(bounds: Optional[Union[List, Tuple, jnp.ndarray]], ndim: int) 
     return bounds
 
 def optimize(
-    func: Callable,
+    fun: Callable,
     fun_args: Optional[Tuple] = (),
     fun_kwargs: Optional[dict] = {},
     ndim: int = 1,
@@ -64,7 +64,7 @@ def optimize(
     
     # Scaled function: operates in unit space [0,1], then maps to real bounds
     def scaled_func(x):
-        return func(scale_from_unit(x, bounds_arr), *fun_args, **fun_kwargs)
+        return fun(scale_from_unit(x, bounds_arr), *fun_args, **fun_kwargs)
     # scaled_func = lambda x: func(scale_from_unit(x, bounds_arr), *fun_args, **fun_kwargs)
 
     # Get optimizer

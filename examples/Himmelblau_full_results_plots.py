@@ -1,57 +1,51 @@
-import os
-os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
-    os.cpu_count()
-)
 from jaxbo.bo import BOBE
-from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
-from jaxbo.loglike import CobayaLikelihood
-import time
+from jaxbo.loglike import ExternalLikelihood
+from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter 
 import matplotlib.pyplot as plt
+import time
+import sys
+from jaxbo.nested_sampler import renormalise_log_weights
+from getdist import MCSamples
+from dynesty import DynamicNestedSampler
+import numpy as np
+import time
 
-# Set up the cosmological likelihood
-cobaya_input_file = './cosmo_input/LCDM_6D_wide_priors.yaml'
+ndim = 2
+param_list = ['x1','x2']
+param_labels = ['x_1','x_2']
+param_bounds = np.array([[-1,1],[-1,2]]).T
 
-likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0, name='Planck_lite_clf_logEI_WIPV_wp')
+ndim = 2
+param_bounds = np.array([[-4,4],[-4,4]]).T
+param_list = ['x1','x2']
+param_labels = ['x_1','x_2']
 
-print("="*60)
-print("PLANCK LITE CLF TIMING TEST")
-print("="*60)
-print(f"Likelihood: {likelihood.name}")
-print(f"Parameters: {likelihood.param_list}")
-print(f"Dimensions: {len(likelihood.param_list)}")
-print("="*60)
+afac= 0.1
 
+def prior_transform(x):
+    return 8*x - 4
+
+def loglike(X):
+    r1 = (X[0] + X[1]**2 -7)**2
+    r2 = (X[0]**2 + X[1]-11)**2
+    return -0.5*(afac*r1 + r2)
+
+
+likelihood = ExternalLikelihood(loglikelihood=loglike,ndim=ndim,param_list=param_list,
+        param_bounds=param_bounds,param_labels=param_labels,
+        name='Himmelblau',noise_std=0.0,minus_inf=-1e5)
 start = time.time()
-sampler = BOBE(
-    n_cobaya_init=2, 
-    n_sobol_init=8, 
-    min_iters=100, 
-    max_eval_budget=300,
-    max_gp_size=300,
-    loglikelihood=likelihood,
-    fit_step=5, 
-    update_mc_step=5, 
-    ns_step=10,
-    num_hmc_warmup=512,
-    num_hmc_samples=1024, 
-    mc_points_size=64,
-    lengthscale_priors='DSLP', 
-    use_clf=True,
-    clf_use_size=10,
-    clf_threshold=300,
-    gp_threshold=400,
-    clf_update_step=1,  # SVM update step
-    clf_type='svm',  # Using SVM for classification
-    minus_inf=-1e5,
-    logz_threshold=0.5,
-    seed=10,  # For reproducibility
-    do_final_ns=False,
-)
+sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8, 
+        min_iters=10, max_eval_budget=250,max_gp_size=250,
+        loglikelihood=likelihood,
+        fit_step = 2, update_mc_step = 2, ns_step = 10,
+        num_hmc_warmup = 256,num_hmc_samples = 1024, mc_points_size = 64,
+        logz_threshold=0.05,resume=False,
+        lengthscale_priors='DSLP', use_clf=False,minus_inf=-1e5,)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=100)
+results = sampler.run(n_log_ei_iters=30)
 
 end = time.time()
 manual_timing = end - start
@@ -121,18 +115,16 @@ plotter = BOBESummaryPlotter(results['results_manager'])
 # Get GP and best loglike evolution data
 gp_data = results['results_manager'].get_gp_data()
 best_loglike_data = results['results_manager'].get_best_loglike_data()
-acquisition_data = results['results_manager'].get_acquisition_data()
 
 # Create summary dashboard with timing data
 print("Creating summary dashboard...")
 fig_dashboard = plotter.create_summary_dashboard(
     gp_data=gp_data,
-    acquisition_data=acquisition_data,
     best_loglike_data=best_loglike_data,
     timing_data=timing_data,
     save_path=f"{likelihood.name}_dashboard.png"
 )
-plt.show()
+# plt.show()
 
 # Create individual timing plot
 print("Creating detailed timing plot...")
@@ -141,7 +133,7 @@ plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
 ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
 plt.tight_layout()
 plt.savefig(f"{likelihood.name}_timing_detailed.png", dpi=300, bbox_inches='tight')
-plt.show()
+# plt.show()
 
 # Create evidence evolution plot if available
 if comprehensive_results.get('logz_history'):
@@ -151,7 +143,7 @@ if comprehensive_results.get('logz_history'):
     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
     plt.tight_layout()
     plt.savefig(f"{likelihood.name}_evidence.png", dpi=300, bbox_inches='tight')
-    plt.show()
+    # plt.show()
 
 # Create acquisition function evolution plot
 print("Creating acquisition function evolution plot...")
@@ -162,7 +154,7 @@ if acquisition_data and acquisition_data.get('iterations'):
     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
     plt.tight_layout()
     plt.savefig(f"{likelihood.name}_acquisition_evolution.png", dpi=300, bbox_inches='tight')
-    plt.show()
+    # plt.show()
 else:
     print("No acquisition function data available for plotting.")
 
@@ -175,18 +167,30 @@ else:  # Dictionary format
     sample_array = samples['x']
     weights_array = samples['weights']
 
-plot_final_samples(
-    gp, 
-    {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-    param_list=likelihood.param_list,
-    param_bounds=likelihood.param_bounds,
-    param_labels=likelihood.param_labels,
-    output_file=likelihood.name,
-    reference_file='./cosmo_input/chains/Planck_lite_LCDM',
-    reference_ignore_rows=0.3,
-    reference_label='MCMC',
-    scatter_points=False
-)
+
+
+dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,
+                                       sample='rwalk')
+
+dns_sampler.run_nested(print_progress=True,dlogz_init=0.01) 
+res = dns_sampler.results  
+mean = res['logz'][-1]
+logz_err = res['logzerr'][-1]
+print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
+
+samples = res['samples']
+weights = renormalise_log_weights(res['logwt'])
+
+reference_samples = MCSamples(samples=samples, names=param_list, labels=param_labels,
+                            weights=weights, 
+                            ranges= dict(zip(param_list,param_bounds.T)))
+
+
+plot_final_samples(gp,{'x': sample_array, 'weights': weights_array},
+                   param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
+                   param_labels=likelihood.param_labels,output_file=likelihood.name,reference_samples=reference_samples,
+                   reference_file=None,scatter_points=True,reference_label='Dynesty')
+
 
 # Save comprehensive results
 print("\n" + "="*60)
@@ -200,29 +204,4 @@ print(f"✓ Legacy samples: {likelihood.name}_samples.npz")
 print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
 print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
 print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
-print(f"✓ Acquisition evolution: {likelihood.name}_acquisition_evolution.png")
 print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
-
-# Create timing comparison with previous runs (if comments in original file are accurate)
-print("\n" + "="*60)
-print("PERFORMANCE COMPARISON")
-print("="*60)
-
-# Previous timing from comments in original file
-previous_times = {
-    "Fast updates": 292.68,
-    "Older code": 387.66
-}
-
-current_time = timing_data['total_runtime']
-print(f"Current run: {current_time:.2f} seconds")
-
-for version, prev_time in previous_times.items():
-    speedup = prev_time / current_time
-    improvement = ((prev_time - current_time) / prev_time) * 100
-    print(f"vs {version}: {speedup:.2f}x speedup ({improvement:+.1f}%)")
-
-print("\n" + "="*60)
-print("ANALYSIS COMPLETE")
-print("="*60)
-print("Check the generated plots and saved files for detailed analysis.")

@@ -30,7 +30,7 @@ print("="*60)
 
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
+sampler = BOBE(n_cobaya_init=16, n_sobol_init=16,
         miniters=500, maxiters=2500, max_gp_size=1500,
         loglikelihood=likelihood,
         resume=False,
@@ -45,7 +45,7 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run()
+results = sampler.run(n_log_ei_iters=200)
 
 end = time.time()
 manual_timing = end - start

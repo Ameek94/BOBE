@@ -232,12 +232,12 @@ class GPwithClassifier:
     #     x = jnp.atleast_2d(x)
     #     return jax.vmap(self.predict_var)(x)
 
-    def fantasy_var(self, x_new, mc_points):
+    def fantasy_var(self, new_x, mc_points,k_train_mc):
         """
         Computes the fantasy variance, see gp.py for more details.
         Classifier logic could potentially be added here if needed.
         """
-        return self.gp.fantasy_var(x_new, mc_points)
+        return self.gp.fantasy_var(new_x, mc_points,k_train_mc)
 
     def update(self, new_x, new_y, refit=True, lr=5e-3, maxiter=300, n_restarts=4, step=0):
         """
@@ -290,6 +290,12 @@ class GPwithClassifier:
 
         # Return whether GP was updated, classifier is always updated
         return gp_not_updated
+
+    def kernel(self,x1,x2,lengthscales,outputscale,noise,include_noise=True):
+        """
+        Returns the kernel function used by the GP.
+        """
+        return self.gp.kernel(x1,x2,lengthscales,outputscale,noise,include_noise=include_noise)
 
     def get_random_point(self):
 
@@ -446,7 +452,7 @@ class GPwithClassifier:
         rng_mcmc = get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
         high_temp = rng_mcmc.uniform(1.33, 3.) ** 2
-        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
@@ -574,8 +580,11 @@ class GPwithClassifier:
     def clf_data_size(self):
         """Size of the classifier's training inputs."""
         return self.train_x_clf.shape[0]
-
-
+    
+    @property
+    def npoints(self):
+        return self.train_x_clf.shape[0]
+    
     # def create_jitted_single_predict(self):
 
     #     @jax.jit

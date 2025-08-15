@@ -30,16 +30,16 @@ likelihood = ExternalLikelihood(loglikelihood=loglike,ndim=ndim,param_list=param
         name='banana',noise_std=0.0,minus_inf=-1e5)
 start = time.time()
 sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8, 
-        miniters=25, maxiters=120,max_gp_size=200,
+        min_iters=10, max_eval_budget=150,max_gp_size=200,
         loglikelihood=likelihood,
         fit_step = 2, update_mc_step = 2, ns_step = 10,
-        num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 32,
-        logz_threshold=0.1,
+        num_hmc_warmup = 256,num_hmc_samples = 1024, mc_points_size = 64,
+        logz_threshold=0.05,resume=False,
         lengthscale_priors='DSLP', use_clf=False,minus_inf=-1e5,)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run()
+results = sampler.run(n_log_ei_iters=20)
 
 end = time.time()
 manual_timing = end - start

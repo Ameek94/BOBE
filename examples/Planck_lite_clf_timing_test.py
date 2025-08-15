@@ -24,10 +24,10 @@ print("="*60)
 
 start = time.time()
 sampler = BOBE(
-    n_cobaya_init=4, 
+    n_cobaya_init=2, 
     n_sobol_init=4, 
-    miniters=25, 
-    maxiters=150,
+    min_iters=25, 
+    max_eval_budget=200,
     max_gp_size=200,
     loglikelihood=likelihood,
     fit_step=5, 
@@ -50,7 +50,7 @@ sampler = BOBE(
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run()
+results = sampler.run(n_log_ei_iters=30)
 
 end = time.time()
 manual_timing = end - start
