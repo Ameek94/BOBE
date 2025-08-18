@@ -16,7 +16,7 @@ clf = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
 clf_update_step = 1 if clf == 'svm' else 5
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Camspec_{clf}_KL_LogEImix')
+        minus_inf=-1e5, noise_std=0.0,name=f'Camspec_{clf}_KL_LogEImix_mcacq_iterations')
 
 
 print("="*60)
@@ -30,22 +30,22 @@ print("="*60)
 
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init=16,
-        miniters=500, maxiters=2500, max_gp_size=1500,
+sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
+        min_iters=500, max_eval_budget=2500, max_gp_size=1400,
         loglikelihood=likelihood,
         resume=False,
-        resume_file=f'{likelihood.name}.npz',
+        resume_file=f'{likelihood.name}',
         save=True,
-        fit_step=25, update_mc_step=5, ns_step=25,
-        num_hmc_warmup=512, num_hmc_samples=2048, mc_points_size=200,
+        fit_step=50, update_mc_step=5, ns_step=25,
+        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=256,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
         clf_threshold=300, gp_threshold=500,
-        minus_inf=-1e5, logz_threshold=1.)
+        minus_inf=-1e5, logz_threshold=1., seed=100)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=200)
+results = sampler.run(n_log_ei_iters=250)
 
 end = time.time()
 manual_timing = end - start

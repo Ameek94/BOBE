@@ -10,33 +10,6 @@ from .seed_utils import get_numpy_rng
 import math
 log = get_logger("[utils]")
 
-
-# NESTED SAMPLING UTILS
-# dynesty utility function for computing evidence
-def compute_integrals(logl=None, logvol=None, reweight=None):
-    assert logl is not None
-    assert logvol is not None
-    loglstar_pad = np.concatenate([[-1.e300], logl])
-    # we want log(exp(logvol_i)-exp(logvol_(i+1)))
-    # assuming that logvol0 = 0
-    # log(exp(LV_{i})-exp(LV_{i+1})) =
-    # = LV{i} + log(1-exp(LV_{i+1}-LV{i}))
-    # = LV_{i+1} - (LV_{i+1} -LV_i) + log(1-exp(LV_{i+1}-LV{i}))
-    dlogvol = np.diff(logvol, prepend=0)
-    logdvol = logvol - dlogvol + np.log1p(-np.exp(dlogvol))
-    # logdvol is log(delta(volumes)) i.e. log (X_i-X_{i-1})
-    logdvol2 = logdvol + math.log(0.5)
-    # These are log(1/2(X_(i+1)-X_i))
-    dlogvol = -np.diff(logvol, prepend=0)
-    # this are delta(log(volumes)) of the run
-    # These are log((L_i+L_{i_1})*(X_i+1-X_i)/2)
-    saved_logwt = np.logaddexp(loglstar_pad[1:], loglstar_pad[:-1]) + logdvol2
-    if reweight is not None:
-        saved_logwt = saved_logwt + reweight
-    saved_logz = np.logaddexp.accumulate(saved_logwt)
-    return saved_logz
-
-
 def renormalise_log_weights(log_weights):
     log_total = logsumexp(log_weights)
     normalized_weights = np.exp(log_weights - log_total)
@@ -66,6 +39,7 @@ def resample_equal(samples, aux, weights=None, logwts=None):
     resampled_samples = samples[idx][perm]
     resampled_aux = aux[idx][perm]
     return resampled_samples, resampled_aux
+
 
 #----Convergence KL----
 

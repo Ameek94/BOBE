@@ -141,6 +141,7 @@ class BOBE:
         self.do_final_ns = do_final_ns
         self.logz_threshold = logz_threshold
         self.converged = False
+        self.prev_converged = False
         self.termination_reason = "Max evaluation budget reached"
 
         # Initialize results manager BEFORE any timing operations
@@ -590,7 +591,7 @@ class BOBE:
             bool: Whether convergence is achieved based on logz only
         """
         # Standard logz convergence check
-        delta = logz_dict['upper'] - logz_dict['lower']
+        delta = logz_dict['upper'] - logz_dict['lower'] # logz_dict['std'] #
         converged = delta < threshold
         
         # Compute KL divergences if we have nested sampling samples
@@ -649,7 +650,13 @@ class BOBE:
 
         log.info(f" Convergence check: delta = {delta:.4f}, step = {step}, threshold = {threshold}")
         if converged:
-            log.info(" Converged")
-            return True
+            if self.prev_converged:
+                log.info(" Convergence achieved after 2 successive iterations")
+                return True
+            else:
+                self.prev_converged = True
+                log.info(f" Convergence not yet achieved in successive iterations")
+                return False
         else:
+            self.prev_converged = False
             return False

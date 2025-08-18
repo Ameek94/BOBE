@@ -208,14 +208,16 @@ class BOBESummaryPlotter:
             return ax
         
         # Extract data
-        data = [(entry['iteration'], entry['logz'], 
+        data = [(entry['iteration'], entry['logz'], entry['logz_var'], entry['logz_std'],
                 entry.get('logz_upper', entry['logz'] + entry.get('logz_err', 0)),
                 entry.get('logz_lower', entry['logz'] - entry.get('logz_err', 0)))
                 for entry in self.results.logz_evolution]
-        iterations, logz_values, logz_upper, logz_lower = map(np.array, zip(*data))
-        
+        iterations, logz_values, logz_var, logz_std, logz_upper, logz_lower = map(np.array, zip(*data))
+
         # Plot evolution with uncertainty
         ax.plot(iterations, logz_values, 'b-', linewidth=2, label='Mean log Z', alpha=0.9)
+        ax.fill_between(iterations, logz_values - logz_std, logz_values + logz_std, 
+                       alpha=0.2, color='red', label='1$\sigma$ region')
         ax.plot(iterations, logz_upper, 'r--', linewidth=1.5, alpha=0.7, label='Upper bound')
         ax.plot(iterations, logz_lower, 'g--', linewidth=1.5, alpha=0.7, label='Lower bound')
         ax.fill_between(iterations, logz_lower, logz_upper, 
@@ -240,6 +242,8 @@ class BOBESummaryPlotter:
         
         ax.set_xlabel('Iteration')
         ax.set_ylabel('log Z')
+        # limit plot range to +-10 of final logz
+        # ax.set_ylim(final_logz - 25, final_logz + 25)
         ax.set_title('Evidence Evolution')
         ax.legend()
         ax.grid(True, alpha=0.3)
@@ -478,7 +482,7 @@ class BOBESummaryPlotter:
         # Set reasonable y-limits
         if y_values:
             y_min, y_max = np.min(y_values), np.max(y_values)
-            ax.set_ylim(max(y_min, -5), min(y_max, 5))
+            ax.set_ylim(max(y_min, -10.), min(y_max, 10.))
         
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Acquisition Function Value')
@@ -742,7 +746,7 @@ class BOBESummaryPlotter:
                     fontsize=18*self.figsize_scale, y=0.95)
         
         if save_path:
-            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            plt.savefig(save_path, bbox_inches='tight')
             log.info(f"Saved summary dashboard to {save_path}")
         
         return fig
@@ -775,7 +779,7 @@ class BOBESummaryPlotter:
         # Evidence estimate
         if self.results.final_logz_dict:
             logz_data = self.results.final_logz_dict
-            logz, logz_err = logz_data.get('mean', np.nan), (logz_data.get('upper', 0) - logz_data.get('lower', 0))
+            logz, logz_err = logz_data.get('mean', np.nan), (logz_data.get('std', np.nan))
             if not np.isnan(logz):
                 stats_lines.append(f"log Z = {logz:.3f} ± {logz_err:.3f}")
         
@@ -845,15 +849,15 @@ class BOBESummaryPlotter:
             fig, ax = plt.subplots(1, 1, figsize=(8*self.figsize_scale, 6*self.figsize_scale))
             plot_func(ax=ax)
             plt.tight_layout()
-            save_path = output_dir / f"{base_name}_{plot_name}.png"
-            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            save_path = output_dir / f"{base_name}_{plot_name}.pdf"
+            plt.savefig(save_path, bbox_inches='tight')
             plt.close(fig)
             log.info(f"Saved {plot_name} to {save_path}")
         
         # Save summary dashboard
         dashboard_fig = self.create_summary_dashboard(**data_kwargs)
-        dashboard_path = output_dir / f"{base_name}_summary_dashboard.png"
-        dashboard_fig.savefig(dashboard_path, dpi=150, bbox_inches='tight')
+        dashboard_path = output_dir / f"{base_name}_summary_dashboard.pdf"
+        dashboard_fig.savefig(dashboard_path, bbox_inches='tight')
         plt.close(dashboard_fig)
         log.info(f"Saved summary dashboard to {dashboard_path}")
 

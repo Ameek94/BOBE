@@ -346,7 +346,7 @@ class GP:
         val = gp_mll(k,self.train_y,self.train_y.shape[0])
         return -val
 
-    def fit(self, lr=5e-3,maxiter=300,n_restarts=4,early_stop_patience=50):
+    def fit(self, lr=5e-3,maxiter=200,n_restarts=4,early_stop_patience=25):
         """ 
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
@@ -361,7 +361,7 @@ class GP:
 
         """
 
-        # NEED TO HANDLE CASE WHERE ONLY 1 ADDED TO TRAINING SET
+        # NEED TO HANDLE CASE WHERE ONLY 1 POINT ADDED TO TRAINING SET
 
         outputscale = jnp.array([self.outputscale])
         init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
@@ -398,13 +398,16 @@ class GP:
             patience_counter = early_stop_patience
             opt_state = optimizer.init(u_params)
             progress_bar = tqdm.tqdm(r,desc=f'Training GP, restart {n + 1}')
+            local_best_f = jnp.inf
             with logging_redirect_tqdm():
                 for i in progress_bar:
                     (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
                     progress_bar.set_postfix({"fval": float(fval)})
-                    if fval < best_f:
-                        best_f = fval
-                        best_params = u_params
+                    if fval < local_best_f:
+                        local_best_f = fval
+                        if local_best_f < best_f:
+                            best_f = local_best_f
+                            best_params = u_params
                         patience_counter = early_stop_patience
                     else:
                         patience_counter -= 1

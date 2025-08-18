@@ -220,30 +220,38 @@ class WIPV(AcquisitionFunction):
         mc_samples = acq_kwargs.get('mc_samples')
         mc_points_size = acq_kwargs.get('mc_points_size', 128)
         mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size)
-        x0_acq1 = mc_samples['best']
-        vars = lax.map(gp.predict_var,mc_points,batch_size=25)
-        x0_acq2 = mc_points[jnp.argmax(vars)]
-        x0_acq3 = gp.train_x[jnp.argmax(gp.train_y)]
-        x0_acq = jnp.vstack([x0_acq1, x0_acq2, x0_acq3])
-        if n_restarts > 3:
-            x0_acq = jnp.vstack([x0_acq, [gp.get_random_point() for _ in range(n_restarts - 3)]])
-        else:
-            x0_acq = x0_acq[:n_restarts]
         k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.outputscale, gp.noise, include_noise=False)
-        fun_kwargs = {'mc_points': mc_points, 'k_train_mc': k_train_mc}
 
-        return optimize(fun=self.fun,
-                        fun_args=(gp,),
-                        fun_kwargs=fun_kwargs,
-                        ndim=gp.ndim,
-                        x0=x0_acq,
-                        lr=lr,
-                        optimizer_name=optimizer_name,
-                        optimizer_kwargs=optimizer_kwargs,
-                        maxiter=maxiter,
-                        n_restarts=n_restarts,
-                        verbose=verbose,
-                        early_stop_patience=early_stop_patience)
+        acq_vals = lax.map(lambda x: self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc), mc_points)
+        acq_val_min = jnp.min(acq_vals)
+        best_x = mc_points[jnp.argmin(acq_vals)]
+
+        return best_x, float(acq_val_min)
+
+        # x0_acq1 = mc_samples['best']
+        # vars = lax.map(gp.predict_var,mc_points,batch_size=25)
+        # x0_acq2 = mc_points[jnp.argmax(vars)]
+        # x0_acq3 = gp.train_x[jnp.argmax(gp.train_y)]
+        # x0_acq = jnp.vstack([x0_acq1, x0_acq2, x0_acq3])
+        # if n_restarts > 3:
+        #     x0_acq = jnp.vstack([x0_acq, [gp.get_random_point() for _ in range(n_restarts - 3)]])
+        # else:
+        #     x0_acq = x0_acq[:n_restarts]
+        # k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.outputscale, gp.noise, include_noise=False)
+        # fun_kwargs = {'mc_points': mc_points, 'k_train_mc': k_train_mc}
+
+        # return optimize(fun=self.fun,
+        #                 fun_args=(gp,),
+        #                 fun_kwargs=fun_kwargs,
+        #                 ndim=gp.ndim,
+        #                 x0=x0_acq,
+        #                 lr=lr,
+        #                 optimizer_name=optimizer_name,
+        #                 optimizer_kwargs=optimizer_kwargs,
+        #                 maxiter=maxiter,
+        #                 n_restarts=n_restarts,
+        #                 verbose=verbose,
+        #                 early_stop_patience=early_stop_patience)
 
 def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",init_params=None):
     if method=='NUTS':

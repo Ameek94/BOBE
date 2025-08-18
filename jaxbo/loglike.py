@@ -7,6 +7,7 @@ from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from scipy.stats import qmc
 from .utils.logging_utils import get_logger
+from .utils.seed_utils import get_numpy_rng
 import logging
 log = get_logger("[loglike]")
 
@@ -147,7 +148,12 @@ class CobayaLikelihood(ExternalLikelihood):
         
         r = np.arange(n_init_sobol)
         progress_bar = tqdm.tqdm(r, desc="Evaluating Sobol points")
-        sobol = qmc.Sobol(d=self.ndim, scramble=True).random(n_init_sobol)
+        try:
+            rng = get_numpy_rng()
+        except Exception as e:
+            log.warning(f"Failed to get numpy RNG from seed utils: {e}, using default RNG.")
+            rng = np.random.default_rng()
+        sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=rng).random(n_init_sobol)
         sobol_points = scale_from_unit(sobol,self.param_bounds)
         for i in progress_bar:
             pt = sobol_points[i]
