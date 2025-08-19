@@ -111,7 +111,7 @@ def train_with_restarts(
     train_fn: Callable,
     x: jnp.ndarray,
     y: jnp.ndarray,
-    n_restarts: int = 4,
+    n_restarts: int = 2,
     seed_offset: int = 0,
     split_seed: int = 42,
     init_params = None,  # Add this parameter

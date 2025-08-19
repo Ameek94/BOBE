@@ -127,6 +127,7 @@ class BOBE:
 
 
         set_global_seed(seed)
+        self.rng = get_numpy_rng()
 
         if not isinstance(loglikelihood, ExternalLikelihood):
             raise ValueError("loglikelihood must be an instance of ExternalLikelihood")
@@ -141,6 +142,7 @@ class BOBE:
         self.do_final_ns = do_final_ns
         self.logz_threshold = logz_threshold
         self.converged = False
+        self.prev_converged = False
         self.termination_reason = "Max evaluation budget reached"
 
         # Initialize results manager BEFORE any timing operations
@@ -197,7 +199,7 @@ class BOBE:
             # Fresh start - evaluate initial points
             self.results_manager.start_timing('True Objective Evaluations')
             init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
-                                    n_init_sobol=n_sobol_init)
+                                    n_init_sobol=n_sobol_init,rng=self.rng)
             self.results_manager.end_timing('True Objective Evaluations')            
             train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
             train_y = jnp.array(init_vals)
@@ -376,8 +378,8 @@ class BOBE:
             if (pt_exists_or_below_threshold and self.mc_samples['method'] == 'MCMC'):
                 update_mc = True
             if update_mc and acq_str == 'WIPV':
-                if not refit:
-                    self.gp.fit(maxiter=50,n_restarts=1)
+                if not refit and (self.gp.train_x.shape[0] < 1200):
+                    self.gp.fit(maxiter=50, n_restarts=1)
                 self.results_manager.start_timing('MCMC Sampling')
                 self.mc_samples = get_mc_samples(
                     self.gp, warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples,
@@ -590,7 +592,7 @@ class BOBE:
             bool: Whether convergence is achieved based on logz only
         """
         # Standard logz convergence check
-        delta = logz_dict['upper'] - logz_dict['lower']
+        delta = logz_dict['upper'] - logz_dict['lower'] # logz_dict['std'] #
         converged = delta < threshold
         
         # Compute KL divergences if we have nested sampling samples
@@ -649,7 +651,13 @@ class BOBE:
 
         log.info(f" Convergence check: delta = {delta:.4f}, step = {step}, threshold = {threshold}")
         if converged:
-            log.info(" Converged")
-            return True
+            if self.prev_converged:
+                log.info(" Convergence achieved after 2 successive iterations")
+                return True
+            else:
+                self.prev_converged = True
+                log.info(f" Convergence not yet achieved in successive iterations")
+                return False
         else:
+            self.prev_converged = False
             return False

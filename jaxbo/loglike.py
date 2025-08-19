@@ -67,11 +67,11 @@ class ExternalLikelihood:
 
         return vals + noise
         
-    def get_initial_points(self,n_init_sobol=8,n_cobaya_init=0):
+    def get_initial_points(self,n_init_sobol=8,n_cobaya_init=0,rng=None):
         points, logpost = [], []        
         r = np.arange(n_init_sobol)
         progress_bar = tqdm.tqdm(r, desc="Evaluating Sobol points")
-        sobol = qmc.Sobol(d=self.ndim, scramble=True).random(n_init_sobol)
+        sobol = qmc.Sobol(d=self.ndim, scramble=True, seed=rng).random(n_init_sobol)
         sobol_points = scale_from_unit(sobol,self.param_bounds)
         for i in progress_bar:
             pt = sobol_points[i]
@@ -134,8 +134,8 @@ class CobayaLikelihood(ExternalLikelihood):
         vals = np.where(vals<self.minus_inf,self.minus_inf,vals)
         vals = np.reshape(vals,(x.shape[0],1))
         return vals + self.logprior_vol
-    
-    def get_initial_points(self, n_cobaya_init=4,n_init_sobol=16):
+
+    def get_initial_points(self, n_cobaya_init=4,n_init_sobol=16,rng=None):
         points, logpost = [], []
         progress_bar = tqdm.tqdm(range(n_cobaya_init), desc='Evaluating Cobaya reference points')
         for _ in progress_bar:
@@ -147,7 +147,7 @@ class CobayaLikelihood(ExternalLikelihood):
         
         r = np.arange(n_init_sobol)
         progress_bar = tqdm.tqdm(r, desc="Evaluating Sobol points")
-        sobol = qmc.Sobol(d=self.ndim, scramble=True).random(n_init_sobol)
+        sobol = qmc.Sobol(d=self.ndim, scramble=True,seed=rng).random(n_init_sobol)
         sobol_points = scale_from_unit(sobol,self.param_bounds)
         for i in progress_bar:
             pt = sobol_points[i]

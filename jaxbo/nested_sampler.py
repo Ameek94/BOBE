@@ -14,22 +14,77 @@ jax.config.update("jax_enable_x64", True)
 from .gp import GP
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
-from .utils.core_utils import renormalise_log_weights, resample_equal
 from scipy.special import logsumexp
-from .utils.core_utils import compute_integrals
 log = get_logger("[ns]")
 
-try:
-    from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
-except ModuleNotFoundError:
-    print("Proceeding without dynesty since not installed")
+# try:
+from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
 import math
 
-import tensorflow_probability.substrates.jax as tfp
-tfpd = tfp.distributions
-from jaxns.framework.model import Model
-from jaxns.framework.prior import Prior
-from jaxns import NestedSampler, TerminationCondition, resample
+try:
+    import tensorflow_probability.substrates.jax as tfp
+    tfpd = tfp.distributions
+    from jaxns.framework.model import Model
+    from jaxns.framework.prior import Prior
+    from jaxns import NestedSampler, TerminationCondition, resample
+except ImportError as e:
+    log.warning("Jaxns and TensorFlow Probability not available")
+
+# dynesty utility function for computing evidence
+def compute_integrals(logl=None, logvol=None, reweight=None,squared_weights=False):
+    assert logl is not None
+    assert logvol is not None
+    loglstar_pad = np.concatenate([[-1.e300], logl])
+    # we want log(exp(logvol_i)-exp(logvol_(i+1)))
+    # assuming that logvol0 = 0
+    # log(exp(LV_{i})-exp(LV_{i+1})) =
+    # = LV{i} + log(1-exp(LV_{i+1}-LV{i}))
+    # = LV_{i+1} - (LV_{i+1} -LV_i) + log(1-exp(LV_{i+1}-LV{i}))
+    dlogvol = np.diff(logvol, prepend=0)
+    logdvol = logvol - dlogvol + np.log1p(-np.exp(dlogvol))
+    # logdvol is log(delta(volumes)) i.e. log (X_i-X_{i-1})
+    logdvol2 = logdvol + math.log(0.5)
+    # These are log(1/2(X_(i+1)-X_i))
+    dlogvol = -np.diff(logvol, prepend=0)
+    # this are delta(log(volumes)) of the run
+    # These are log((L_i+L_{i_1})*(X_i+1-X_i)/2)
+    if squared_weights:
+        logdvol2 = 2 * logdvol2
+    saved_logwt = np.logaddexp(loglstar_pad[1:], loglstar_pad[:-1]) + logdvol2
+    if reweight is not None:
+        saved_logwt = saved_logwt + reweight
+    saved_logz = np.logaddexp.accumulate(saved_logwt)
+    return saved_logz
+
+def renormalise_log_weights(log_weights):
+    log_total = logsumexp(log_weights)
+    normalized_weights = np.exp(log_weights - log_total)
+    return normalized_weights
+
+def resample_equal(samples, aux, weights=None, logwts=None):
+    rstate = get_numpy_rng()
+    # Resample samples to obtain equal weights. Taken from jaxns
+    if logwts is not None:
+        wts = renormalise_log_weights(logwts)
+    else:
+        wts = weights
+    weights = wts / wts.sum()
+    cumulative_sum = np.cumsum(weights)
+    cumulative_sum /= cumulative_sum[-1]
+    nsamples = len(weights)
+    positions = (rstate.random() + np.arange(nsamples)) / nsamples
+    idx = np.zeros(nsamples, dtype=int)
+    i, j = 0, 0
+    while i < nsamples:
+        if positions[i] < cumulative_sum[j]:
+            idx[i] = j
+            i += 1
+        else:
+            j += 1
+    perm = rstate.permutation(nsamples)
+    resampled_samples = samples[idx][perm]
+    resampled_aux = aux[idx][perm]
+    return resampled_samples, resampled_aux
 
 
 def prior_transform(x):
@@ -86,13 +141,7 @@ def nested_sampling_Dy(gp: GP
 
     @jax.jit
     def loglike(x):
-        mu = gp.predict_mean(x) 
-        # var = gp.predict_var(x) 
-        # std = jnp.sqrt(var)
-        # mu = mu 
-        return jnp.reshape(mu,()) #, jnp.reshape(std,()) 
-
-    # loglike = gp.jitted_single_predict_mean
+        return gp.predict_mean_single(x) 
 
     start = time.time()
 
@@ -113,7 +162,7 @@ def nested_sampling_Dy(gp: GP
         # add check for all same logl values in case of initial plateau
         if np.all(logl == logl[0]):
             success = False
-            log.warning("All logl values are the same, this may indicate a problem with the model or the data. Retrying with the dynamic nested sampler.")
+            print("All logl values are the same, this may indicate a problem with the model or the data. Retrying with the dynamic nested sampler.")
             sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
                                        sample=sample_method,nlive=nlive)
             sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)     
@@ -130,16 +179,30 @@ def nested_sampling_Dy(gp: GP
     log.info(f" Nested Sampling took {time.time() - start:.2f}s")
     log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
     log.info(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
-    
-    var = jax.lax.map(gp.predict_var,samples_x,batch_size=100)
-    std = np.sqrt(var.squeeze(-1))
+
+    var = jax.lax.map(gp.predict_var_single,samples_x,batch_size=100)
+    std = np.sqrt(var)
     logl_lower,logl_upper = logl - std, logl + std
     logvol = res['logvol']
-    upper = compute_integrals(logl=logl_upper,logvol=logvol)
-    lower = compute_integrals(logl=logl_lower,logvol=logvol)
-    logz_dict['upper'] = upper[-1]
-    logz_dict['lower'] = lower[-1]
 
+    # naive uncertainity
+    upper = compute_integrals(logl=logl_upper,logvol=logvol)[-1]
+    lower = compute_integrals(logl=logl_lower,logvol=logvol)[-1]
+
+    # delta method uncertainity
+    varintegrand = 2*logl + np.log(var+1e-300)
+    log_var_delta = compute_integrals(logl=varintegrand,logvol=logvol,squared_weights=True)[-1]
+    log_var_logz = log_var_delta - 2*mean
+    log_var_logz = np.clip(log_var_logz, a_min=-100, a_max=100)  # Avoid numerical issues with very small or large variances
+    var_logz = np.exp(log_var_logz)
+
+    # create logz dict
+    logz_dict['upper'] = upper
+    logz_dict['lower'] = lower
+    logz_dict['var'] = var_logz
+    logz_dict['std'] = np.sqrt(var_logz)
+
+    # create samples dict
     samples_dict = {}
     best_pt = samples_x[np.argmax(logl)]
     samples_dict['best'] = best_pt
@@ -201,7 +264,7 @@ def nested_sampling_jaxns(gp
 
     @jax.jit
     def log_likelihood(x):
-        return  gp.predict_mean(x) 
+        return  gp.predict_mean_single(x) 
         
     def prior_model():
         x = yield Prior(tfpd.Uniform(low=jnp.zeros(ndim), high= jnp.ones(ndim)), name='x') # type: ignore
@@ -232,19 +295,6 @@ def nested_sampling_jaxns(gp
 
     # Upper and Lower bound calculation
     logvol = results.log_X_mean
-
-    # variance needs to be computed in batches
-    f = jax.jit(lambda x: (gp.predict_var(x),))
-    # num_inputs = len(results.samples['x'])
-    # log.info(f" Computing upper and lower logZ using {num_inputs} points")
-    # # batch_size = batch_size
-    # num_batches = (num_inputs + batch_size - 1 ) // batch_size
-    # input_arrays = (results.samples['x'],)
-    # batch_idxs = [np.arange( i*batch_size, min( (i+1)*batch_size,num_inputs  )) for i in range(num_batches)]
-    # res = [f(*tuple([arr[idx] for arr in input_arrays])) for idx in batch_idxs]
-    # nres = len(res[0])
-    # # now combine results across batches and function outputs to return a tuple (num_outputs, num_inputs, ...)
-    # logl_var = tuple(np.concatenate([x[i] for x in res]) for i in range(nres))[0]
     
     logl_var = jax.lax.map(gp.predict_var,results.samples['x'],batch_size=100)
     logl_std = np.sqrt(logl_var.squeeze(-1))

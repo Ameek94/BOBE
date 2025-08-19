@@ -363,7 +363,7 @@ class BOBEResults:
             converged: Whether convergence was achieved
             threshold: Convergence threshold used
         """
-        delta = logz_dict.get('upper', 0) - logz_dict.get('lower', 0)
+        delta = 2 * logz_dict['std'] #logz_dict.get('upper', 0) - logz_dict.get('lower', 0)
         
         conv_info = ConvergenceInfo(
             iteration=iteration,
@@ -381,7 +381,9 @@ class BOBEResults:
             'logz': logz_dict.get('mean', np.nan),
             'logz_upper': logz_dict.get('upper', np.nan),
             'logz_lower': logz_dict.get('lower', np.nan),
-            'logz_err': delta
+            'logz_err': delta,
+            'logz_var': logz_dict.get('var', np.nan),
+            'logz_std': logz_dict.get('std', np.nan)
         })
     
     def update_kl_divergences(self,
