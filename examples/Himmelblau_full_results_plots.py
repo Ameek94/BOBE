@@ -45,7 +45,7 @@ sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8,
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=30)
+results = sampler.run(n_log_ei_iters=200)
 
 end = time.time()
 manual_timing = end - start

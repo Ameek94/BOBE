@@ -16,6 +16,96 @@ log = get_logger("[acq]")
 #------------------Helper functions-------------------------
 # These are jax versions of the BoTorch functions.
 
+# def log1mexp(x):
+#     """
+#     Compute `log(1 - exp(-|x|))` elementwise in a numerically stable way.
+
+#     Args:
+#         x: Array-like input.
+
+#     Returns:
+#         Array of log(1 - exp(-|x|)) values.
+
+#     #### References
+
+#     [1]: Machler, Martin. Accurately computing log(1 - exp(-|a|))
+#          https://cran.r-project.org/web/packages/Rmpfr/vignettes/log1mexp-note.pdf
+#     """
+#     x = jnp.asarray(x, dtype=jnp.float64)  # or jnp.float32
+#     x = jnp.abs(x)
+    
+#     # Use tf.math.expm1 equivalent: expm1(-x) = exp(-x) - 1
+#     # So log(-expm1(-x)) = log(1 - exp(-x))
+#     # This is more stable for small x
+    
+#     # Use log1p equivalent: log1p(-exp(-x)) = log(1 - exp(-x))
+#     # This is more stable for large x
+    
+#     # Switching point recommended in [1]
+#     return jnp.where(
+#         x < jnp.log(2), 
+#         jnp.log(-jnp.expm1(-x)),      # More stable for x < log(2)
+#         jnp.log1p(-jnp.exp(-x))       # More stable for x >= log(2)
+#     )
+
+
+# def erfcx(x):
+#     """Compute erfcx using a Chebyshev expansion (JAX-compatible)."""
+#     x = jnp.asarray(x, dtype=jnp.float32)
+#     x_abs = jnp.abs(x)
+
+#     # Shift parameter
+#     y = (x_abs - 3.75) / (x_abs + 3.75)
+
+#     # Chebyshev coefficients (from Shepherd & Laframboise, 1981)
+#     coeff = jnp.array([
+#         3e-21,
+#         9.7e-20,
+#         2.7e-20,
+#         -2.187e-18,
+#         -2.237e-18,
+#         5.0681e-17,
+#         7.4182e-17,
+#         -1.250795e-15,
+#         -1.864563e-15,
+#         3.33478119e-14,
+#         3.2525481e-14,
+#         -9.65469675e-13,
+#         1.94558685e-13,
+#         2.8687950109e-11,
+#         -6.3180883409e-11,
+#         -7.75440020883e-10,
+#         4.521959811218e-09,
+#         1.0764999465671e-08,
+#         -2.18864010492344e-07,
+#         7.74038306619849e-07,
+#         4.139027986073010e-06,
+#         -6.9169733025012064e-05,
+#         4.90775836525808632e-04,
+#         -2.413163540417608191e-03,
+#         9.074997670705265094e-03,
+#         -2.6658668435305752277e-02,
+#         5.9209939998191890498e-02,
+#         -8.4249133366517915584e-02,
+#         -4.590054580646477331e-03,
+#         1.177578934567401754080,
+#     ], dtype=jnp.float32)
+
+#     # Clenshaw recurrence for Chebyshev expansion
+#     result = -4e-21
+#     previous_result = 0.0
+#     for c in coeff[:-1]:
+#         result, previous_result = (2 * y * result - previous_result + c, result)
+#     result = y * result - previous_result + coeff[-1]
+
+#     result = result / (1.0 + 2.0 * x_abs)
+
+#     # Flip approximation for negative x
+#     result = jnp.where(x < 0.0, 2.0 * jnp.exp(x**2) - result, result)
+#     result = jnp.where(jnp.isinf(x), jnp.array(1.0, dtype=result.dtype), result)
+
+#     return result
+
 def _scaled_improvement(mu, sigma, best_f):
     """u = (mu - best_f) / sigma, safe for sigma=0."""
     return (mu - best_f) / sigma

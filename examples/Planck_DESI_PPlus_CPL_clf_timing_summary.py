@@ -19,20 +19,20 @@ likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999
 if clf == 'svm':
     clf_update_step = 1
 else:
-    clf_update_step = 2
+    clf_update_step = 5
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init=16,
-        min_iters=900, max_eval_budget=2500, max_gp_size=1800,
+sampler = BOBE(n_cobaya_init=32, n_sobol_init=32,
+        min_iters=1000, max_eval_budget=3000, max_gp_size=2000,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step=50, update_mc_step=10, ns_step=50,
-        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=512,
+        fit_step=50, update_mc_step=5, ns_step=50,
+        num_hmc_warmup=512, num_hmc_samples=6000, mc_points_size=512,
         lengthscale_priors='DSLP',
-        use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
-        clf_threshold=300, gp_threshold=400,
+        use_clf=True, clf_type=clf, clf_use_size=300, clf_update_step=clf_update_step,
+        clf_threshold=400, gp_threshold=400,
         minus_inf=-1e5, logz_threshold=10.)
 
 # Run BOBE with automatic timing collection

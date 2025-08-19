@@ -17,18 +17,18 @@ from .utils.seed_utils import get_numpy_rng
 from scipy.special import logsumexp
 log = get_logger("[ns]")
 
-try:
-    from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
-except ModuleNotFoundError:
-    print("Proceeding without dynesty since not installed")
+# try:
+from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
 import math
 
-import tensorflow_probability.substrates.jax as tfp
-tfpd = tfp.distributions
-from jaxns.framework.model import Model
-from jaxns.framework.prior import Prior
-from jaxns import NestedSampler, TerminationCondition, resample
-
+try:
+    import tensorflow_probability.substrates.jax as tfp
+    tfpd = tfp.distributions
+    from jaxns.framework.model import Model
+    from jaxns.framework.prior import Prior
+    from jaxns import NestedSampler, TerminationCondition, resample
+except ImportError as e:
+    log.warning("Jaxns and TensorFlow Probability not available")
 
 # dynesty utility function for computing evidence
 def compute_integrals(logl=None, logvol=None, reweight=None):
