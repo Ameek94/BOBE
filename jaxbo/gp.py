@@ -398,13 +398,16 @@ class GP:
             patience_counter = early_stop_patience
             opt_state = optimizer.init(u_params)
             progress_bar = tqdm.tqdm(r,desc=f'Training GP, restart {n + 1}')
+            local_best_f = jnp.inf
             with logging_redirect_tqdm():
                 for i in progress_bar:
                     (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
                     progress_bar.set_postfix({"fval": float(fval)})
-                    if fval < best_f:
-                        best_f = fval
-                        best_params = u_params
+                    if fval < local_best_f:
+                        local_best_f = fval
+                        if local_best_f < best_f:
+                            best_f = local_best_f
+                            best_params = u_params
                         patience_counter = early_stop_patience
                     else:
                         patience_counter -= 1
