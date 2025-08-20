@@ -13,7 +13,7 @@ from typing import Callable, Dict, Any, Union, List, Optional, Tuple
 from functools import partial
 from .utils.logging_utils import get_logger 
 from .utils.seed_utils import get_numpy_rng, get_new_jax_key
-log = get_logger("[clf]")
+log = get_logger("clf")
 
 # -----------------------------------------------------------------------------
 # Scikit-learn SVM Classifier using JAX for prediction.

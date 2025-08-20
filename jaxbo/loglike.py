@@ -8,7 +8,7 @@ from cobaya.model import get_model
 from scipy.stats import qmc
 from .utils.logging_utils import get_logger
 import logging
-log = get_logger("[loglike]")
+log = get_logger("loglike")
 
 
 class ExternalLikelihood:

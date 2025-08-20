@@ -32,7 +32,7 @@ except ImportError:
 from .results import BOBEResults, load_bobe_results
 from .logging_utils import get_logger
 
-log = get_logger("[plots]")
+log = get_logger("plots")
 
 
 def scale_from_unit(x, param_bounds):

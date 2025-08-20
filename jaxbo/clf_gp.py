@@ -13,7 +13,7 @@ import numpyro.distributions as dist
 from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
-log = get_logger("[clf_gp]")
+log = get_logger("clf_gp")
 
 
 available_classifiers = {

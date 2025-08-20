@@ -26,7 +26,7 @@ except ImportError:
 from .timing import BOBETimingCollector  
 from .logging_utils import get_logger
 
-log = get_logger("[results]")
+log = get_logger("results")
 
 
 def convert_jax_to_json_serializable(obj):
@@ -164,7 +164,6 @@ class BOBEResults:
         
         # KL divergence tracking for convergence analysis
         self.kl_iterations = []
-        self.kl_divergences = []  # List of dictionaries with KL results
         self.successive_kl = []   # KL between successive iterations
         
         # Final results
@@ -263,13 +262,11 @@ class BOBEResults:
         if 'kl_data' in existing_results:
             kl_data = existing_results['kl_data']
             self.kl_iterations = kl_data.get('iterations', []).copy()
-            self.kl_divergences = kl_data.get('kl_divergences', []).copy()
             self.successive_kl = kl_data.get('successive_kl', []).copy()
         # Also check legacy naming for backward compatibility
         elif 'kl_divergence_data' in existing_results:
             kl_data = existing_results['kl_divergence_data']
             self.kl_iterations = kl_data.get('iterations', []).copy()
-            self.kl_divergences = kl_data.get('kl_divergences', []).copy()
             self.successive_kl = kl_data.get('successive_kl', []).copy()
         
         # Restore timing information (accumulate previous times)
@@ -388,7 +385,6 @@ class BOBEResults:
     
     def update_kl_divergences(self,
                              iteration: int,
-                             kl_results: Dict[str, float],
                              successive_kl: Optional[Dict[str, float]] = None):
         """
         Update KL divergence tracking for convergence analysis.
@@ -399,7 +395,6 @@ class BOBEResults:
             successive_kl: Optional KL divergence between successive iterations
         """
         self.kl_iterations.append(iteration)
-        self.kl_divergences.append(kl_results.copy())
         
         if successive_kl is not None:
             self.successive_kl.append({
@@ -626,7 +621,6 @@ class BOBEResults:
             # === KL DIVERGENCE TRACKING ===
             'kl_data': {
                 'iterations': self.kl_iterations,
-                'kl_divergences': self.kl_divergences,
                 'successive_kl': self.successive_kl
             },
 
@@ -791,7 +785,6 @@ class BOBEResults:
             },
             'kl_data': {
                 'iterations': self.kl_iterations,
-                'kl_divergences': convert_jax_to_json_serializable(self.kl_divergences),
                 'successive_kl': convert_jax_to_json_serializable(self.successive_kl)
             },
             'timing': self.get_timing_summary(),

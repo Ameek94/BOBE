@@ -1,6 +1,7 @@
 from jaxbo.bo import BOBE
 from jaxbo.loglike import ExternalLikelihood
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter 
+from jaxbo.utils.logging_utils import setup_logging
 import matplotlib.pyplot as plt
 import time
 import sys
@@ -9,6 +10,8 @@ from getdist import MCSamples
 from dynesty import DynamicNestedSampler
 import numpy as np
 import time
+
+# setup_logging(verbosity='INFO', log_file='banana_full_results.log')
 
 ndim = 2
 param_list = ['x1','x2']

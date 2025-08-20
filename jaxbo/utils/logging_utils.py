@@ -59,11 +59,11 @@ def setup_logging(verbosity='INFO', log_file=None):
         if verbosity.upper() == 'DEBUG':
             # In debug mode, show DEBUG and INFO on stdout
             stdout_handler.addFilter(LevelFilter([logging.DEBUG, logging.INFO]))
-            stdout_fmt = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+            stdout_fmt = logging.Formatter('%(asctime)s [%(name)s]: %(levelname)s: %(message)s')
         else:
             # Normal mode - only INFO on stdout
             stdout_handler.addFilter(LevelFilter(logging.INFO))
-            stdout_fmt = logging.Formatter('%(asctime)s [%(name)s] %(message)s')
+            stdout_fmt = logging.Formatter('%(asctime)s [%(name)s]: %(levelname)s: %(message)s')
             
         stdout_handler.setFormatter(stdout_fmt)
         handlers.append(stdout_handler)
@@ -72,7 +72,7 @@ def setup_logging(verbosity='INFO', log_file=None):
     if verbosity.upper() != 'QUIET':
         stderr_handler = logging.StreamHandler(sys.stderr)
         stderr_handler.setLevel(logging.WARNING)
-        stderr_fmt = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+        stderr_fmt = logging.Formatter('%(asctime)s [%(name)s]: %(levelname)s: %(message)s')
         stderr_handler.setFormatter(stderr_fmt)
         handlers.append(stderr_handler)
     
@@ -80,7 +80,7 @@ def setup_logging(verbosity='INFO', log_file=None):
     if log_file:
         file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
         file_handler.setLevel(logging.DEBUG)
-        file_fmt = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+        file_fmt = logging.Formatter('%(asctime)s [%(name)s]: %(levelname)s: %(message)s')
         file_handler.setFormatter(file_fmt)
         handlers.append(file_handler)
     
