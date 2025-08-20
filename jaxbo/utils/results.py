@@ -29,6 +29,28 @@ from .logging_utils import get_logger
 log = get_logger("[results]")
 
 
+def convert_jax_to_json_serializable(obj):
+    """
+    Convert JAX arrays and other non-JSON-serializable objects to JSON-serializable types.
+    
+    Args:
+        obj: Object to convert (can be JAX array, numpy array, list, dict, etc.)
+        
+    Returns:
+        JSON-serializable version of the object
+    """
+    if hasattr(obj, 'tolist'):  # JAX arrays and numpy arrays
+        return obj.tolist()
+    elif isinstance(obj, (list, tuple)):
+        return [convert_jax_to_json_serializable(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_jax_to_json_serializable(value) for key, value in obj.items()}
+    elif hasattr(obj, '__array__'):  # Other array-like objects
+        return np.asarray(obj).tolist()
+    else:
+        return obj
+
+
 # Removed IterationInfo dataclass - not needed for simplified tracking
 
 
@@ -66,7 +88,8 @@ class BOBEResults:
                  param_labels: List[str],
                  param_bounds: np.ndarray,
                  settings: Optional[Dict[str, Any]] = None,
-                 likelihood_name: str = "unknown"):
+                 likelihood_name: str = "unknown",
+                 resume_from_existing: bool = False):
         """
         Initialize the results manager.
         
@@ -77,6 +100,7 @@ class BOBEResults:
             param_bounds: Parameter bounds array [n_params, 2]
             settings: Dictionary of BOBE settings
             likelihood_name: Name of the likelihood function
+            resume_from_existing: If True, try to load existing results and continue from there
         """
         self.output_file = output_file
         self.param_names = param_names
@@ -88,6 +112,22 @@ class BOBEResults:
         # Store settings
         self.settings = settings or {}
         
+        # Try to resume from existing results if requested
+        if resume_from_existing:
+            existing_results = self._load_existing_results(output_file)
+            if existing_results:
+                self._merge_existing_results(existing_results)
+                log.info(f"Resumed from existing results with {len(self.convergence_history)} previous iterations")
+            else:
+                log.info("No existing results found, starting fresh")
+                self._initialize_fresh()
+        else:
+            self._initialize_fresh()
+        
+        log.info(f"Initialized BOBE results manager for {self.ndim}D problem")
+    
+    def _initialize_fresh(self):
+        """Initialize all tracking variables for a fresh run."""
         # Initialize tracking variables
         self.start_time = time.time()
         self.end_time = None
@@ -116,6 +156,16 @@ class BOBEResults:
         # Best loglikelihood tracking 
         self.best_loglike_iterations = []
         self.best_loglike_values = []
+
+        # Acquisition function tracking
+        self.acquisition_iterations = []
+        self.acquisition_values = []
+        self.acquisition_functions = []
+        
+        # KL divergence tracking for convergence analysis
+        self.kl_iterations = []
+        self.kl_divergences = []  # List of dictionaries with KL results
+        self.successive_kl = []   # KL between successive iterations
         
         # Final results
         self.final_samples = None
@@ -125,8 +175,130 @@ class BOBEResults:
         self.converged = False
         self.termination_reason = "Unknown"
         self.gp_info = {}  # Store GP and classifier information
+    
+    def _load_existing_results(self, output_file: str) -> Optional[Dict[str, Any]]:
+        """
+        Try to load existing results from previous runs.
         
-        log.info(f"Initialized BOBE results manager for {self.ndim}D problem")
+        Args:
+            output_file: Base name of the output files
+            
+        Returns:
+            Dictionary of existing results if found, None otherwise
+        """
+        # First try to load from pickle (most complete)
+        pickle_file = f"{output_file}_results.pkl"
+        if Path(pickle_file).exists():
+            try:
+                with open(pickle_file, 'rb') as f:
+                    results_dict = pickle.load(f)
+                log.info(f"Found existing results in {pickle_file}")
+                return results_dict
+            except Exception as e:
+                log.warning(f"Could not load existing pickle results: {e}")
+        
+        # Try to load from intermediate JSON
+        intermediate_file = f"{output_file}_intermediate.json"
+        if Path(intermediate_file).exists():
+            try:
+                with open(intermediate_file, 'r') as f:
+                    intermediate_dict = json.load(f)
+                log.info(f"Found existing intermediate results in {intermediate_file}")
+                return intermediate_dict
+            except Exception as e:
+                log.warning(f"Could not load existing intermediate results: {e}")
+        
+        return None
+    
+    def _merge_existing_results(self, existing_results: Dict[str, Any]):
+        """
+        Merge existing results into this instance for resuming.
+        
+        Args:
+            existing_results: Dictionary of existing results to merge
+        """
+        # Initialize fresh first
+        self._initialize_fresh()
+        
+        # Restore convergence history
+        if 'convergence_history' in existing_results:
+            self.convergence_history = []
+            for conv_dict in existing_results['convergence_history']:
+                conv_info = ConvergenceInfo(
+                    iteration=conv_dict['iteration'],
+                    logz_dict=conv_dict['logz_dict'],
+                    converged=conv_dict['converged'],
+                    delta=conv_dict['delta'],
+                    threshold=conv_dict['threshold']
+                )
+                self.convergence_history.append(conv_info)
+        
+        # Restore evidence evolution
+        if 'logz_evolution' in existing_results:
+            self.logz_evolution = existing_results['logz_evolution'].copy()
+        elif 'logz_history' in existing_results:
+            self.logz_evolution = existing_results['logz_history'].copy()
+        
+        # Restore acquisition function data if available
+        if 'acquisition_data' in existing_results:
+            acq_data = existing_results['acquisition_data']
+            self.acquisition_iterations = acq_data.get('iterations', []).copy()
+            self.acquisition_values = acq_data.get('values', []).copy()
+            self.acquisition_functions = acq_data.get('functions', []).copy()
+        
+        # Restore GP hyperparameter data if available (from comprehensive results)
+        if 'gp_hyperparams' in existing_results:
+            gp_data = existing_results['gp_hyperparams']
+            self.gp_iterations = gp_data.get('iterations', []).copy()
+            self.gp_lengthscales = gp_data.get('lengthscales', []).copy()
+            self.gp_outputscales = gp_data.get('outputscales', []).copy()
+        
+        # Restore best loglikelihood data if available
+        if 'best_loglike_data' in existing_results:
+            loglike_data = existing_results['best_loglike_data']
+            self.best_loglike_iterations = loglike_data.get('iterations', []).copy()
+            self.best_loglike_values = loglike_data.get('best_loglike', []).copy()
+        
+        # Restore KL divergence data if available
+        if 'kl_data' in existing_results:
+            kl_data = existing_results['kl_data']
+            self.kl_iterations = kl_data.get('iterations', []).copy()
+            self.kl_divergences = kl_data.get('kl_divergences', []).copy()
+            self.successive_kl = kl_data.get('successive_kl', []).copy()
+        # Also check legacy naming for backward compatibility
+        elif 'kl_divergence_data' in existing_results:
+            kl_data = existing_results['kl_divergence_data']
+            self.kl_iterations = kl_data.get('iterations', []).copy()
+            self.kl_divergences = kl_data.get('kl_divergences', []).copy()
+            self.successive_kl = kl_data.get('successive_kl', []).copy()
+        
+        # Restore timing information (accumulate previous times)
+        if 'timing' in existing_results and 'phase_times' in existing_results['timing']:
+            for phase, prev_time in existing_results['timing']['phase_times'].items():
+                if phase in self.phase_times:
+                    self.phase_times[phase] = prev_time
+        
+        # Restore GP info
+        if 'gp_info' in existing_results:
+            self.gp_info = existing_results['gp_info'].copy()
+        
+        # If this was a completed run, preserve final results
+        if 'samples' in existing_results and existing_results['samples'] is not None:
+            self.final_samples = np.array(existing_results['samples'])
+            self.final_weights = np.array(existing_results['weights'])
+            self.final_loglikes = np.array(existing_results['logl'])
+            self.final_logz_dict = existing_results.get('logz_bounds', {})
+            self.converged = existing_results.get('converged', False)
+            self.termination_reason = existing_results.get('termination_reason', "Resumed run")
+        
+        # Update start time to preserve total runtime calculation
+        if 'run_info' in existing_results and 'start_time' in existing_results['run_info']:
+            start_str = existing_results['run_info']['start_time']
+            try:
+                self.start_time = datetime.fromisoformat(start_str).timestamp()
+            except Exception:
+                # If parsing fails, keep current start time
+                pass
     
     def update_iteration(self, iteration: int, **kwargs):
         """
@@ -139,19 +311,32 @@ class BOBEResults:
         # Save intermediate results periodically
         if iteration % 50 == 0:
             self.save_intermediate()
-    
+
+    def update_acquisition(self, iteration: int, acquisition_value: float, acquisition_function: str):
+        """
+        Track acquisition function values throughout iterations.
+        
+        Args:
+            iteration: Current iteration number
+            acquisition_value: Value of the acquisition function at the selected point
+            acquisition_function: String name of the acquisition function used
+        """
+        self.acquisition_iterations.append(iteration)
+        self.acquisition_values.append(float(acquisition_value))
+        self.acquisition_functions.append(acquisition_function)
+
     def update_gp_hyperparams(self, iteration: int, lengthscales: list, outputscale: float):
         """
         Track GP hyperparameters evolution.
         
         Args:
             iteration: Current iteration number
-            lengthscales: List of lengthscale values
+            lengthscales: List of lengthscale values (can be JAX arrays)
             outputscale: Outputscale value
         """
         self.gp_iterations.append(iteration)
         self.gp_lengthscales.append(lengthscales)
-        self.gp_outputscales.append(outputscale)
+        self.gp_outputscales.append(float(outputscale))
     
     def update_best_loglike(self, iteration: int, best_loglike: float):
         """
@@ -178,7 +363,7 @@ class BOBEResults:
             converged: Whether convergence was achieved
             threshold: Convergence threshold used
         """
-        delta = logz_dict.get('upper', 0) - logz_dict.get('lower', 0)
+        delta = 2 * logz_dict['std'] #logz_dict.get('upper', 0) - logz_dict.get('lower', 0)
         
         conv_info = ConvergenceInfo(
             iteration=iteration,
@@ -196,8 +381,61 @@ class BOBEResults:
             'logz': logz_dict.get('mean', np.nan),
             'logz_upper': logz_dict.get('upper', np.nan),
             'logz_lower': logz_dict.get('lower', np.nan),
-            'logz_err': delta
+            'logz_err': delta,
+            'logz_var': logz_dict.get('var', np.nan),
+            'logz_std': logz_dict.get('std', np.nan)
         })
+    
+    def update_kl_divergences(self,
+                             iteration: int,
+                             kl_results: Dict[str, float],
+                             successive_kl: Optional[Dict[str, float]] = None):
+        """
+        Update KL divergence tracking for convergence analysis.
+        
+        Args:
+            iteration: Current iteration number
+            kl_results: Dictionary with KL divergence results between bounds
+            successive_kl: Optional KL divergence between successive iterations
+        """
+        self.kl_iterations.append(iteration)
+        self.kl_divergences.append(kl_results.copy())
+        
+        if successive_kl is not None:
+            self.successive_kl.append({
+                'iteration': iteration,
+                **successive_kl
+            })
+    
+    def get_last_iteration(self) -> int:
+        """
+        Get the last iteration number from the results history.
+        
+        Returns:
+            Last iteration number, or 0 if no iterations have been recorded
+        """
+        if self.convergence_history:
+            return self.convergence_history[-1].iteration
+        elif self.acquisition_iterations:
+            return max(self.acquisition_iterations)
+        elif self.gp_iterations:
+            return max(self.gp_iterations)
+        elif self.best_loglike_iterations:
+            return max(self.best_loglike_iterations)
+        else:
+            return 0
+    
+    def is_resuming(self) -> bool:
+        """
+        Check if this is a resumed run (has existing data).
+        
+        Returns:
+            True if this appears to be a resumed run
+        """
+        return (len(self.convergence_history) > 0 or 
+                len(self.acquisition_iterations) > 0 or
+                len(self.gp_iterations) > 0 or 
+                len(self.best_loglike_iterations) > 0)
     
     def start_timing(self, phase_name: str):
         """Start timing a specific phase."""
@@ -246,8 +484,21 @@ class BOBEResults:
         """
         return {
             'iterations': self.gp_iterations,
-            'lengthscales': self.gp_lengthscales,
-            'outputscales': self.gp_outputscales
+            'lengthscales': convert_jax_to_json_serializable(self.gp_lengthscales),
+            'outputscales': convert_jax_to_json_serializable(self.gp_outputscales)
+        }
+    
+    def get_acquisition_data(self) -> Dict[str, list]:
+        """
+        Get acquisition function evolution data for plotting.
+        
+        Returns:
+            Dictionary with 'iterations', 'values', and 'functions' keys
+        """
+        return {
+            'iterations': self.acquisition_iterations,
+            'values': self.acquisition_values,
+            'functions': self.acquisition_functions
         }
     
     def get_best_loglike_data(self) -> Dict[str, list]:
@@ -351,7 +602,34 @@ class BOBEResults:
             
             # === GP AND CLASSIFIER INFORMATION ===
             'gp_info': self.gp_info,
-            
+
+            # === ACQUISITION FUNCTION TRACKING ===
+            'acquisition_data': {
+                'iterations': self.acquisition_iterations,
+                'values': self.acquisition_values,
+                'functions': self.acquisition_functions
+            },
+
+            # === GP HYPERPARAMETER TRACKING ===
+            'gp_hyperparams': {
+                'iterations': self.gp_iterations,
+                'lengthscales': self.gp_lengthscales,
+                'outputscales': self.gp_outputscales
+            },
+
+            # === BEST LOGLIKELIHOOD TRACKING ===
+            'best_loglike_data': {
+                'iterations': self.best_loglike_iterations,
+                'best_loglike': self.best_loglike_values
+            },
+
+            # === KL DIVERGENCE TRACKING ===
+            'kl_data': {
+                'iterations': self.kl_iterations,
+                'kl_divergences': self.kl_divergences,
+                'successive_kl': self.successive_kl
+            },
+
             # === TIMING INFORMATION ===
             'timing': self.get_timing_summary(),
             
@@ -463,7 +741,6 @@ class BOBEResults:
                 "logz_lower": float(self.final_logz_dict.get('lower', np.nan)),
                 "logz_upper": float(self.final_logz_dict.get('upper', np.nan))
             },
-            "parameters": param_stats,
             "diagnostics": {
                 "n_samples": int(len(self.final_samples)),
                 "n_effective": int(np.sum(self.final_weights)**2 / np.sum(self.final_weights**2)) if len(self.final_weights) > 0 else 0,
@@ -472,13 +749,20 @@ class BOBEResults:
                 "termination_reason": str(self.termination_reason)
             },
             "gp_info": self.gp_info,
-            "convergence": {
-                "iterations": [int(conv.iteration) for conv in self.convergence_history],
-                "logz_values": [float(conv.logz_dict.get('mean', np.nan)) for conv in self.convergence_history],
-                "logz_errors": [float(conv.delta) for conv in self.convergence_history],
-                "thresholds": [float(conv.threshold) for conv in self.convergence_history],
-                "converged_flags": [bool(conv.converged) for conv in self.convergence_history]
-            } if self.convergence_history else {}
+            # "acquisition_function": {
+            #     "iterations": [int(x) for x in self.acquisition_iterations],
+            #     "values": [float(x) for x in self.acquisition_values],
+            #     "functions": self.acquisition_functions
+            # },
+            "final_convergence": {
+                "iteration": int(self.convergence_history[-1].iteration),
+                "logz_value": float(self.convergence_history[-1].logz_dict.get('mean', np.nan)),
+                "logz_error": float(self.convergence_history[-1].delta),
+                "threshold": float(self.convergence_history[-1].threshold),
+                "converged": bool(self.convergence_history[-1].converged)
+            } if self.convergence_history else {},
+            "parameters": param_stats,
+
         }
         
         stats_file = f"{self.output_file}_stats.json"
@@ -487,20 +771,49 @@ class BOBEResults:
         log.info(f"Saved summary statistics to {stats_file}")
     
     def save_intermediate(self):
-        """Save intermediate results for crash recovery."""
+        """Save intermediate results for crash recovery and resuming."""
         intermediate = {
             'convergence_history': [conv.to_dict() for conv in self.convergence_history],
             'logz_evolution': self.logz_evolution,
+            'acquisition_data': {
+                'iterations': self.acquisition_iterations,
+                'values': self.acquisition_values,
+                'functions': self.acquisition_functions
+            },
+            'gp_hyperparams': {
+                'iterations': self.gp_iterations,
+                'lengthscales': convert_jax_to_json_serializable(self.gp_lengthscales),
+                'outputscales': convert_jax_to_json_serializable(self.gp_outputscales)
+            },
+            'best_loglike_data': {
+                'iterations': self.best_loglike_iterations,
+                'best_loglike': self.best_loglike_values
+            },
+            'kl_data': {
+                'iterations': self.kl_iterations,
+                'kl_divergences': convert_jax_to_json_serializable(self.kl_divergences),
+                'successive_kl': convert_jax_to_json_serializable(self.successive_kl)
+            },
+            'timing': self.get_timing_summary(),
+            'gp_info': self.gp_info,
             'start_time': self.start_time,
             'param_names': self.param_names,
             'param_labels': self.param_labels,
             'param_bounds': self.param_bounds.tolist(),
-            'settings': self.settings
+            'settings': self.settings,
+            'run_info': {
+                'start_time': datetime.fromtimestamp(self.start_time).isoformat(),
+                'likelihood_name': self.likelihood_name,
+                'output_file': self.output_file
+            }
         }
         
         intermediate_file = f"{self.output_file}_intermediate.json"
         with open(intermediate_file, 'w') as f:
-            json.dump(intermediate, f, indent=2)
+            # Convert the entire intermediate dictionary to ensure all JAX arrays are handled
+            json_safe_intermediate = convert_jax_to_json_serializable(intermediate)
+            json.dump(json_safe_intermediate, f, indent=2)
+        log.info(f"Saved intermediate results to {intermediate_file}")
     
     def get_getdist_samples(self) -> Optional['MCSamples']:
         """
@@ -518,7 +831,7 @@ class BOBEResults:
             return None
         
         # Parameter ranges for GetDist
-        # param_bounds is shape (2, d): [lower_bounds, upper_bounds]
+        # param_bounds is shape (2, nparams)
         ranges = {name: [self.param_bounds[0, i], self.param_bounds[1, i]] 
                   for i, name in enumerate(self.param_names)}
         
@@ -619,3 +932,34 @@ def load_bobe_results(output_file: str) -> BOBEResults:
         BOBEResults object with loaded data
     """
     return BOBEResults.load_results(output_file)
+
+
+def create_resumable_results(output_file: str,
+                            param_names: List[str],
+                            param_labels: List[str],
+                            param_bounds: np.ndarray,
+                            settings: Optional[Dict[str, Any]] = None,
+                            likelihood_name: str = "unknown") -> BOBEResults:
+    """
+    Create a BOBEResults manager that automatically resumes from existing results if available.
+    
+    Args:
+        output_file: Base name for output files
+        param_names: List of parameter names
+        param_labels: List of parameter LaTeX labels
+        param_bounds: Parameter bounds array [n_params, 2]
+        settings: Dictionary of BOBE settings
+        likelihood_name: Name of the likelihood function
+        
+    Returns:
+        BOBEResults object, either fresh or resumed from existing data
+    """
+    return BOBEResults(
+        output_file=output_file,
+        param_names=param_names,
+        param_labels=param_labels,
+        param_bounds=param_bounds,
+        settings=settings,
+        likelihood_name=likelihood_name,
+        resume_from_existing=True
+    )

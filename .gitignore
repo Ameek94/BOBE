@@ -45,3 +45,4 @@ test_methods/
 *.pkl
 *.ini
 *.png
+*.ranges

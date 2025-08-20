@@ -144,6 +144,7 @@ class GP:
     """
     Base class for the GP with no hyperparameter priors.
     """
+    hyperparam_priors: str = 'uniform'
 
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam"
                  ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,outputscale=None):
@@ -241,7 +242,7 @@ class GP:
         x = jnp.atleast_2d(x)
         k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
         k22 = kernel_diag(x,self.outputscale,self.noise,include_noise=True)
-        mean = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean 
+        mean = jnp.einsum('ij,ji', k12.T, self.alphas)
         vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
         var = k22 - jnp.sum(vv*vv,axis=0) 
         var = jnp.clip(var, safe_noise_floor, None)
@@ -284,6 +285,7 @@ class GP:
             if refit:
                 self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
             else:
+                # self.fit(lr=lr,maxiter=100,n_restarts=1)
                 self.cholesky = fast_update_cholesky(self.cholesky,k,k_self)
                 self.alphas = cho_solve((self.cholesky, True), self.train_y)
             return False
@@ -301,27 +303,31 @@ class GP:
         log.info("Updated GP with new point.")
         log.info(f" GP training size = {self.npoints}")
 
-    def fantasy_var(self,new_x,mc_points):
+    def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
         Computes the variance of the GP at the mc_points assuming a single point new_x is added to the training set
         """
+
         new_x = jnp.atleast_2d(new_x)
-        new_train_x = jnp.concatenate([self.train_x,new_x])
+        # new_train_x = jnp.concatenate([self.train_x,new_x])
         k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
                         noise=self.noise,include_noise=False).flatten()           # shape (n,)
         k_self = kernel_diag(new_x,self.outputscale,self.noise,include_noise=True)[0]  # scalar
-        # k_self = self.kernel(new_x,new_x,self.lengthscales,
-        #                   self.outputscale,noise=self.noise,include_noise=True)[0, 0]  # scalar
         k11_cho = fast_update_cholesky(self.cholesky,k,k_self)
-        k12 = self.kernel(new_train_x,mc_points,self.lengthscales,
-                          self.outputscale,noise=self.noise,include_noise=False)
+
+        # Compute only the extra row for new_x
+        k_new_mc = self.kernel(
+            new_x, mc_points,
+            self.lengthscales, self.outputscale,
+        noise=self.noise, include_noise=False)  # shape (1, n_mc)
+        k12 = jnp.vstack([k_train_mc,k_new_mc])
+
+        # k12 = self.kernel(new_train_x,mc_points,self.lengthscales,
+        #                   self.outputscale,noise=self.noise,include_noise=False)
         k22 = kernel_diag(mc_points,self.outputscale,self.noise,include_noise=True) # (N_mc,)
         vv = solve_triangular(k11_cho, k12, lower=True) # shape (N_train,N_mc)
         var = k22 - jnp.sum(vv*vv,axis=0) 
-        # k22 = self.kernel(mc_points,mc_points,self.lengthscales,
-        #                   self.outputscale,noise=self.noise,include_noise=True) # precompute k22 instead
-        # var = get_var_from_cho(k11_cho,k12,k22)
-        return var
+        return var * self.y_std**2 # return to physical scale for better interpretability
         
     def get_phys_points(self,x_bounds):
         """
@@ -339,7 +345,7 @@ class GP:
         val = gp_mll(k,self.train_y,self.train_y.shape[0])
         return -val
 
-    def fit(self, init_params = None, lr=5e-3,maxiter=300,n_restarts=4,early_stop_patience=25):
+    def fit(self, lr=5e-3,maxiter=300,n_restarts=4,early_stop_patience=50):
         """ 
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
@@ -353,6 +359,9 @@ class GP:
             The number of restarts for the optax optimizer. Default is 2.
 
         """
+
+        # NEED TO HANDLE CASE WHERE ONLY 1 ADDED TO TRAINING SET
+
         outputscale = jnp.array([self.outputscale])
         init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
         log.info(f" Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
@@ -385,15 +394,19 @@ class GP:
         # display with progress bar
         r = jnp.arange(maxiter)
         for n in range(n_restarts):
+            patience_counter = early_stop_patience
             opt_state = optimizer.init(u_params)
-            progress_bar = tqdm.tqdm(r,desc=f'Training GP')
+            progress_bar = tqdm.tqdm(r,desc=f'Training GP, restart {n + 1}')
+            local_best_f = jnp.inf
             with logging_redirect_tqdm():
                 for i in progress_bar:
                     (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
                     progress_bar.set_postfix({"fval": float(fval)})
-                    if fval < best_f:
-                        best_f = fval
-                        best_params = u_params
+                    if fval < local_best_f:
+                        local_best_f = fval
+                        if local_best_f < best_f:
+                            best_f = local_best_f
+                            best_params = u_params
                         patience_counter = early_stop_patience
                     else:
                         patience_counter -= 1
@@ -416,8 +429,59 @@ class GP:
         """
         Saves the GP to a file
         """
-        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=self.train_y,noise=self.noise,
-         y_mean=self.y_mean,y_std=self.y_std,lengthscales=self.lengthscales,outputscale=self.outputscale)
+        train_y = self.train_y * self.y_std + self.y_mean  # unstandardize the training targets
+        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=train_y,noise=self.noise,
+         lengthscales=self.lengthscales,outputscale=self.outputscale,hyperparam_priors=self.hyperparam_priors)
+
+    @classmethod
+    def load(cls, filename, **kwargs):
+        """
+        Loads a GP from a file
+        
+        Arguments
+        ---------
+        filename: str
+            The name of the file to load the GP from (with or without .npz extension)
+        **kwargs: 
+            Additional keyword arguments to pass to the GP constructor
+            
+        Returns
+        -------
+        gp: GP
+            The loaded GP object
+        """
+        if not filename.endswith('.npz'):
+            filename += '.npz'
+            
+        try:
+            data = np.load(filename)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find file {filename}")
+        
+        # Extract data from the file
+        train_x = jnp.array(data['train_x'])
+        train_y = jnp.array(data['train_y'])  # This is unstandardized
+        noise = float(data['noise'])
+        lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
+        outputscale = float(data['outputscale']) if 'outputscale' in data.files else None
+        
+        # Create GP instance - it will automatically standardize train_y and compute cholesky/alphas
+        gp = cls(train_x=train_x, train_y=train_y, noise=noise, 
+                lengthscales=lengthscales, outputscale=outputscale, **kwargs)
+        
+        log.info(f"Loaded GP from {filename} with {train_x.shape[0]} training points")
+        return gp
+
+    def get_random_point(self):
+
+        # chosen_index = np.random.choice(self.npoints, size=1)
+    
+        # result = self.train_x[chosen_index]
+        # log.info(f"Random point sampled with value {self.train_y[chosen_index]}")
+
+        pt = np.random.uniform(0, 1, size=self.train_x.shape[1])
+
+        return pt
 
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
                        init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=2):
@@ -485,7 +549,8 @@ class GP:
         samples_dict = {
             'x': samples_x,
             'logp': logps,
-            'best': samples_x[jnp.argmax(logps)]
+            'best': samples_x[jnp.argmax(logps)],
+            'method': "MCMC"
         }
 
         return samples_dict
@@ -510,6 +575,8 @@ class GP:
 
 
 class DSLP_GP(GP):
+
+    hyperparam_priors: str = 'dslp'
 
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="adam",
                  outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,outputscale=None):
@@ -595,11 +662,16 @@ jax.tree_util.register_pytree_node(
     DSLP_GP.tree_unflatten,
 )
 
+#----- SAAS_GP -----
+
 class SAAS_GP(DSLP_GP):
+
+    hyperparam_priors: str = 'saas'
+
     def __init__(self,
                  train_x, train_y, noise=1e-8, kernel="rbf", optimizer="adam",
                  outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],
-                 tausq_bounds = [-4,4]):
+                 tausq_bounds = [-4,4],lengthscales=None,outputscale=None,tausq=None):
         """
         Class for the Gaussian Process with SAAS priors, using maximum likelihood hyperparameters. 
         The implementation is based on the paper "High-Dimensional Bayesian Optimization with Sparse Axis-Aligned Subspaces", 2021
@@ -626,7 +698,7 @@ class SAAS_GP(DSLP_GP):
             Default is [-4,4]. These are the bounds for the tausq parameter of the GP.
         """
         super().__init__(train_x, train_y, noise, kernel, optimizer,outputscale_bounds,lengthscale_bounds)
-        self.tausq = 1.
+        self.tausq = tausq if tausq is not None else 1.0
         self.hyperparam_bounds = [tausq_bounds] + self.hyperparam_bounds
 
     def tree_flatten(self):
@@ -778,11 +850,51 @@ class SAAS_GP(DSLP_GP):
         outfile: str
             The name of the file to save the GP to. Default is 'gp'.
         """
-        np.savez(f'{outfile}.npz', train_x=self.train_x, train_y=self.train_y, 
-                 noise=self.noise,y_mean=self.y_mean, y_std=self.y_std, 
-                 lengthscales=self.lengthscales, outputscale=self.outputscale,
-                 tausq=self.tausq)
-    
+        train_y = self.train_y * self.y_std + self.y_mean  # unstandardize the training targets
+        np.savez(f'{outfile}.npz', train_x=self.train_x, train_y=train_y, 
+                 noise=self.noise, lengthscales=self.lengthscales, outputscale=self.outputscale,
+                 tausq=self.tausq, hyperparam_priors=self.hyperparam_priors)
+
+    @classmethod
+    def load(cls, filename, **kwargs):
+        """
+        Loads a SAAS_GP from a file
+        
+        Arguments
+        ---------
+        filename: str
+            The name of the file to load the GP from (with or without .npz extension)
+        **kwargs: 
+            Additional keyword arguments to pass to the GP constructor
+            
+        Returns
+        -------
+        gp: SAAS_GP
+            The loaded SAAS_GP object
+        """
+        if not filename.endswith('.npz'):
+            filename += '.npz'
+            
+        try:
+            data = np.load(filename)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find file {filename}")
+        
+        # Extract data from the file
+        train_x = jnp.array(data['train_x'])
+        train_y = jnp.array(data['train_y'])  # This is unstandardized
+        noise = float(data['noise'])
+        lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
+        outputscale = float(data['outputscale']) if 'outputscale' in data.files else None
+        tausq = float(data['tausq']) if 'tausq' in data.files else None
+        
+        # Create SAAS_GP instance - it will automatically standardize train_y and compute cholesky/alphas
+        gp = cls(train_x=train_x, train_y=train_y, noise=noise, 
+                lengthscales=lengthscales, outputscale=outputscale, tausq=tausq, **kwargs)
+        
+        log.info(f"Loaded SAAS_GP from {filename} with {train_x.shape[0]} training points")
+        return gp
+
 jax.tree_util.register_pytree_node(
     SAAS_GP,
     SAAS_GP.tree_flatten,
@@ -798,7 +910,7 @@ def load_gp(filename, gp_type="auto", **kwargs):
     filename: str
         The name of the file to load the GP from (with or without .npz extension)
     gp_type: str
-        The type of GP to create. Can be 'auto', 'DSLP', 'SAAS'. If 'auto', attempts to detect
+        The type of GP to create. Can be 'auto', 'GP', 'DSLP', 'SAAS'. If 'auto', attempts to detect
         the type based on the saved parameters. Default is 'auto'.
     **kwargs: 
         Additional keyword arguments to pass to the GP constructor
@@ -806,7 +918,7 @@ def load_gp(filename, gp_type="auto", **kwargs):
     Returns
     -------
     gp: GP
-        The loaded GP object (DSLP_GP or SAAS_GP)
+        The loaded GP object (GP, DSLP_GP, or SAAS_GP)
     """
     if not filename.endswith('.npz'):
         filename += '.npz'
@@ -818,135 +930,35 @@ def load_gp(filename, gp_type="auto", **kwargs):
     
     if gp_type == "auto":
         # Try to detect GP type based on saved parameters
-        if 'tausq' in data.files:
+        if 'hyperparam_priors' in data.files:
+            hyperparam_priors = str(data['hyperparam_priors'].item()).lower()
+            if hyperparam_priors == 'saas':
+                gp_type = "SAAS"
+                log.info("Auto-detected SAAS_GP from hyperparam_priors")
+            elif hyperparam_priors == 'dslp':
+                gp_type = "DSLP"
+                log.info("Auto-detected DSLP_GP from hyperparam_priors")
+            elif hyperparam_priors == 'uniform':
+                gp_type = "GP"
+                log.info("Auto-detected GP (uniform priors) from hyperparam_priors")
+            else:
+                gp_type = "GP"
+                log.info(f"Unknown hyperparam_priors '{hyperparam_priors}', defaulting to GP")
+        elif 'tausq' in data.files:
+            # Fallback: if tausq exists but no hyperparam_priors, assume SAAS
             gp_type = "SAAS"
-            log.info("Auto-detected SAAS_GP from saved parameters")
+            log.info("Auto-detected SAAS_GP from presence of tausq parameter")
         else:
+            # Fallback: no clear indicators, default to DSLP for backward compatibility
             gp_type = "DSLP" 
-            log.info("Auto-detected DSLP_GP from saved parameters")
+            log.info("No clear indicators, defaulting to DSLP_GP for backward compatibility")
     
-    if gp_type.upper() == "SAAS":
-        return SAAS_GP.load(filename, **kwargs)
+    if gp_type.upper() == "GP":
+        return GP.load(filename, **kwargs)
     elif gp_type.upper() == "DSLP":
         return DSLP_GP.load(filename, **kwargs)
+    elif gp_type.upper() == "SAAS":
+        return SAAS_GP.load(filename, **kwargs)
     else:
-        raise ValueError(f"Unknown GP type: {gp_type}. Must be 'DSLP', 'SAAS', or 'auto'")
+        raise ValueError(f"Unknown GP type: {gp_type}. Must be 'GP', 'DSLP', 'SAAS', or 'auto'")
        
-
-    # def create_jitted_single_predict(self):
-    #     """Precompute constants and JIT-compile a fast single-point GP mean and variance."""
-    #     scaled_train_x = self.train_x / self.lengthscales
-    #     alphas = self.alphas
-    #     y_std, y_mean = self.y_std, self.y_mean
-    #     outputscale = self.outputscale
-
-    #     @jax.jit
-    #     def predict_one_mean(x):
-    #         x = jnp.atleast_1d(x)
-    #         scaled_x = x / self.lengthscales
-    #         sq_dist = jnp.sum((scaled_train_x - scaled_x) ** 2, axis=-1)
-    #         k12 = outputscale * jnp.exp(-0.5 * sq_dist)
-    #         mean = jnp.dot(k12, alphas).squeeze()
-    #         return mean * y_std + y_mean
-        
-    #     @jax.jit
-    #     def predict_one_var(x):
-    #         x = jnp.atleast_1d(x)
-    #         scaled_x = x / self.lengthscales
-    #         sq_dist = jnp.sum((scaled_train_x - scaled_x) ** 2, axis=-1)
-    #         k12 = outputscale * jnp.exp(-0.5 * sq_dist)
-    #         k22 = outputscale + self.noise
-    #         vv = solve_triangular(self.cholesky,k12,lower=True)
-    #         var = k22 - jnp.sum(vv * vv, axis=0)  # This is the variance
-    #         var = jnp.clip(var, safe_noise_floor, None)
-    #         return var * y_std ** 2
-
-    #     self.jitted_single_predict_mean = predict_one_mean
-    #     self.jitted_single_predict_var = predict_one_var
-
-
-    # def fit(self,
-    #         lr: float = 1e-2,
-    #         maxiter: int = 150,
-    #         n_restarts: int = 2,
-    #         early_stop_patience: int = 20):
-    #     """
-    #     Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
-
-    #     Arguments
-    #     ---------
-    #     lr: float
-    #         The learning rate for the optax optimizer. Default is 1e-2.
-    #     maxiter: int
-    #         The maximum number of iterations for the optax optimizer. Default is 250.
-    #     n_restarts: int
-    #         The number of restarts for the optax optimizer. Default is 2.
-
-    #     """
-    #     outputscale = jnp.array([self.outputscale])
-    #     init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
-    #     log.info(f" Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
-    #     bounds = jnp.array(self.hyperparam_bounds)
-    #     mins = bounds[:,0]
-    #     maxs = bounds[:,1]
-    #     scales = maxs - mins
-    #     optimizer = adam(learning_rate=lr)
-
-    #     @jax.jit
-    #     def step(carry):
-    #         """
-    #         Step function for the optimizer
-    #         """
-    #         u_params, opt_state = carry
-    #         params = scale_from_unit(u_params,bounds.T)
-    #         loss, grads = jax.value_and_grad(mll_optim)(params)
-    #         grads = grads * scales
-    #         updates, opt_state = optimizer.update(grads, opt_state)
-    #         u_params = apply_updates(u_params, updates)
-    #         u_params = jnp.clip(u_params, 0.,1.)
-    #         carry = u_params, opt_state
-    #         return carry, loss
-        
-    #     best_f = jnp.inf
-    #     best_params = None
-
-    #     init_params = jnp.atleast_2d(scale_to_unit(init_params,bounds.T))
-    #     if n_restarts > 1:
-    #         addn_restart_params = np.random.uniform(0, 1, size=(n_restarts-1,init_params.shape[1]))
-    #         init_params = jnp.vstack([init_params, addn_restart_params])
-
-    #     # display with progress bar
-    #     r = jnp.arange(maxiter)
-    #     for n in range(n_restarts):
-    #         local_best_f = jnp.inf
-    #         local_best_params = None
-    #         local_early_stopping = early_stop_patience
-    #         u_params = init_params[n]
-    #         opt_state = optimizer.init(u_params)
-    #         progress_bar = tqdm.tqdm(r,desc=f'Training GP')
-    #         with logging_redirect_tqdm():
-    #             for i in progress_bar:
-    #                 (u_params,opt_state), fval  = step((u_params,opt_state))#,None)
-    #                 progress_bar.set_postfix({"fval": float(fval)})
-    #                 if fval < best_f:
-    #                     best_f = fval
-    #                     best_params = u_params
-    #                 if fval < local_best_f:
-    #                     local_best_f = fval
-    #                     local_best_params = u_params
-    #                 else:
-    #                     local_early_stopping -= 1
-    #                     if local_early_stopping <= 0:
-    #                         log.info(f"Early stopping at iteration {i} with best fval {best_f}")
-    #                         break
-    #         # u_params = jnp.clip(u_params + 0.25*np.random.normal(size=init_params.shape),0,1)
-    #     params = scale_from_unit(best_params,bounds.T)
-    #     hyperparams = 10 ** params
-    #     self.lengthscales = hyperparams[0:-1]
-    #     self.outputscale = hyperparams[-1]
-    #     log.info(f" Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
-    #     self.K = self.kernel(self.train_x,self.train_x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
-    #     self.cholesky = jnp.linalg.cholesky(self.K)
-    #     self.alphas = cho_solve((self.cholesky, True), self.train_y)
-    #     self.fitted = True
-    #     self.create_jitted_single_predict()

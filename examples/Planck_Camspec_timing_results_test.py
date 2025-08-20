@@ -3,9 +3,8 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
 from jaxbo.bo import BOBE
-from jaxbo.summary_plots import plot_final_samples
+from jaxbo.utils.summary_plots import plot_final_samples,BOBESummaryPlotter 
 from jaxbo.loglike import CobayaLikelihood
-from jaxbo.summary_plots import BOBESummaryPlotter
 import matplotlib.pyplot as plt
 import time
 import sys
@@ -13,11 +12,11 @@ import sys
 cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
 
 
-clf = str(sys.argv[1]) if len(sys.argv) > 1 else 'nn'
+clf = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
 clf_update_step = 1 if clf == 'svm' else 5
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_{clf}')
+        minus_inf=-1e5, noise_std=0.0,name=f'Camspec_{clf}_KL_LogEImix_mcacq')
 
 
 print("="*60)
@@ -31,22 +30,22 @@ print("="*60)
 
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
-        miniters=750, maxiters=2500, max_gp_size=1500,
+sampler = BOBE(n_cobaya_init=16, n_sobol_init=16,
+        min_iters=750, max_eval_budget=2500, max_gp_size=1400,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
         fit_step=25, update_mc_step=5, ns_step=25,
-        num_hmc_warmup=512, num_hmc_samples=2048, mc_points_size=96,
+        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=256,
         lengthscale_priors='DSLP',
-        use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
+        use_clf=True, clf_type=clf, clf_use_size=200, clf_update_step=clf_update_step,
         clf_threshold=300, gp_threshold=500,
         minus_inf=-1e5, logz_threshold=1.)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run()
+results = sampler.run(n_log_ei_iters=200)
 
 end = time.time()
 manual_timing = end - start
@@ -124,7 +123,7 @@ fig_dashboard = plotter.create_summary_dashboard(
     gp_data=gp_data,
     best_loglike_data=best_loglike_data,
     timing_data=timing_data,
-    save_path=f"{likelihood.name}_dashboard.png"
+    save_path=f"{likelihood.name}_dashboard.pdf"
 )
 # plt.show()
 
@@ -134,7 +133,7 @@ fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
 plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
 ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
 plt.tight_layout()
-plt.savefig(f"{likelihood.name}_timing_detailed.png", dpi=300, bbox_inches='tight')
+plt.savefig(f"{likelihood.name}_timing_detailed.pdf",  bbox_inches='tight')
 # plt.show()
 
 # Create evidence evolution plot if available
@@ -144,8 +143,21 @@ if comprehensive_results.get('logz_history'):
     plotter.plot_evidence_evolution(ax=ax_evidence)
     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
     plt.tight_layout()
-    plt.savefig(f"{likelihood.name}_evidence.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
     # plt.show()
+
+# Create acquisition function evolution plot
+print("Creating acquisition function evolution plot...")
+acquisition_data = results['results_manager'].get_acquisition_data()
+if acquisition_data and acquisition_data.get('iterations'):
+    fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
+    plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
+    ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
+    plt.tight_layout()
+    plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
+    # plt.show()
+else:
+    print("No acquisition function data available for plotting.")
 
 # Create parameter samples plot
 print("Creating parameter samples plot...")
@@ -181,9 +193,9 @@ print("="*60)
 print(f"✓ Main results: {likelihood.name}_results.pkl")
 print(f"✓ Timing data: {likelihood.name}_timing.json")
 print(f"✓ Legacy samples: {likelihood.name}_samples.npz")
-print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
-print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
-print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
+print(f"✓ Summary dashboard: {likelihood.name}_dashboard.pdf")
+print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.pdf")
+print(f"✓ Evidence evolution: {likelihood.name}_evidence.pdf")
 print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
 
 
