@@ -334,7 +334,7 @@ class BOBE:
                 maxiter = 200
                 early_stop_patience = 25
             else:
-                acq_kwargs = {'zeta': 0.2, 'best_y': max(self.gp.train_y.flatten())}
+                acq_kwargs = {'zeta': 0.1, 'best_y': max(self.gp.train_y.flatten())}
                 n_restarts = 8
                 maxiter = 500
                 early_stop_patience = 50
@@ -384,7 +384,6 @@ class BOBE:
                     self.gp, warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples,
                     thinning=4, method=self.mc_points_method)
                 self.results_manager.end_timing('MCMC Sampling')
-                self.mc_samples['method'] = 'MCMC'
 
             if float(new_val) > self.best_f:
                 self.best_f = float(new_val)
@@ -438,7 +437,7 @@ class BOBE:
                 self.termination_reason = "Max GP size reached"
                 log.info(f" {self.termination_reason}")
                 break
-            if self.gp.train_x.shape[0] > 1600:
+            if self.gp.train_x.shape[0] > 1800:
                 self.ns_step = 25
 
 

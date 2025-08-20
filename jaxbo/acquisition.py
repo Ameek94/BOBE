@@ -352,11 +352,11 @@ def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS
         except Exception as e:
             log.error(f"Error in sampling GP NUTS: {e}")
             mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.5,equal_weights=True,
+                                            , dynamic=False, dlogz=0.05,equal_weights=True,
             )
     elif method=='NS':
         mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.5,equal_weights=True,
+                                            , dynamic=False, dlogz=0.05,equal_weights=True,
         )
     elif method=='uniform':
         mc_samples = {}

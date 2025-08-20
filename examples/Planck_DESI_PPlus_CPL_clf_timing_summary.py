@@ -14,30 +14,30 @@ clf = sys.argv[1] if len(sys.argv) > 1 else 'svm'
 cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_CPL.yaml'
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_CPL_{clf}_mix_mcacq')
+        minus_inf=-1e5, noise_std=0.0,name=f'Planck_Camspec_CPL_{clf}_mix_mcacq_mixmc')
 
 if clf == 'svm':
     clf_update_step = 1
 else:
-    clf_update_step = 5
+    clf_update_step = 2
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=32, n_sobol_init=32,
-        min_iters=1000, max_eval_budget=3000, max_gp_size=2000,
+        min_iters=1000, max_eval_budget=5000, max_gp_size=2100,
         loglikelihood=likelihood,
         resume=False,
-        resume_file=f'{likelihood.name}.npz',
+        resume_file=f'{likelihood.name}',
         save=True,
-        fit_step=50, update_mc_step=5, ns_step=50,
-        num_hmc_warmup=512, num_hmc_samples=6000, mc_points_size=512,
-        lengthscale_priors='DSLP',
-        use_clf=True, clf_type=clf, clf_use_size=300, clf_update_step=clf_update_step,
-        clf_threshold=400, gp_threshold=400,
+        fit_step=60, update_mc_step=15, ns_step=30,
+        num_hmc_warmup=512, num_hmc_samples=9000, mc_points_size=512,
+        lengthscale_priors='DSLP', mc_points_method='NUTS',
+        use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
+        clf_threshold=300, gp_threshold=500,
         minus_inf=-1e5, logz_threshold=10.)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=300)
+results = sampler.run(n_log_ei_iters=750)
 
 end = time.time()
 manual_timing = end - start

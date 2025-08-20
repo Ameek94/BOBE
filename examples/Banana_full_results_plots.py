@@ -34,7 +34,7 @@ sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8,
         loglikelihood=likelihood,
         fit_step = 2, update_mc_step = 2, ns_step = 10,
         num_hmc_warmup = 256,num_hmc_samples = 1024, mc_points_size = 64,
-        logz_threshold=0.05,resume=False,
+        logz_threshold=0.05,resume=False,mc_points_method='NS',
         lengthscale_priors='DSLP', use_clf=False,minus_inf=-1e5,)
 
 # Run BOBE with automatic timing collection

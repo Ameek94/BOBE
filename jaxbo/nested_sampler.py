@@ -204,13 +204,17 @@ def nested_sampling_Dy(gp: GP
     samples_dict = {}
     best_pt = samples_x[np.argmax(logl)]
     samples_dict['best'] = best_pt
-    samples_dict['x'] = samples_x
     weights = renormalise_log_weights(res['logwt'])
+    if equal_weights: #for MC points
+        samples_x, logl = resample_equal(samples_x, logl, weights=weights)
+        weights = np.ones(samples_x.shape[0])  # Equal weights after resampling
+    samples_dict['x'] = samples_x
     samples_dict['weights'] = weights    
     samples_dict['logl'] = logl
     samples_dict['logl_upper'] = logl_upper
     samples_dict['logl_lower'] = logl_lower
     samples_dict['logvol'] = logvol
+    samples_dict['method']= 'NS'
     return (samples_dict, logz_dict, success)
 
 #-------------JAXNS functions---------------------

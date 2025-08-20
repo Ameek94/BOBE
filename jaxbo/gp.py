@@ -550,7 +550,8 @@ class GP:
         samples_dict = {
             'x': samples_x,
             'logp': logps,
-            'best': samples_x[jnp.argmax(logps)]
+            'best': samples_x[jnp.argmax(logps)],
+            'method': "MCMC"
         }
 
         return samples_dict
