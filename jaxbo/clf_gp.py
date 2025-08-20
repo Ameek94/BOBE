@@ -451,8 +451,8 @@ class GPwithClassifier:
 
         rng_mcmc = get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1.33, 3.) ** 2
-        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        high_temp = rng_mcmc.uniform(1., 2.) ** 2
+        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
@@ -512,7 +512,8 @@ class GPwithClassifier:
         samples_dict = {
             'x': samples_x,
             'logp': logps,
-            'best': samples_x[jnp.argmax(logps)]
+            'best': samples_x[jnp.argmax(logps)],
+            'method': "MCMC"
         }
 
         log.info(f"Max logl found = {np.max(logps):.4f}")

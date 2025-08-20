@@ -19,8 +19,8 @@ from .loglike import ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, compute_kl_divergences, compute_successive_kl
-from .utils.seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
-from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
+from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
+from .nested_sampler import nested_sampling_Dy
 from .optim import optimize
 from .utils.logging_utils import get_logger
 from .utils.results import BOBEResults
@@ -335,7 +335,7 @@ class BOBE:
                 maxiter = 200
                 early_stop_patience = 25
             else:
-                acq_kwargs = {'zeta': 0.2, 'best_y': max(self.gp.train_y.flatten())}
+                acq_kwargs = {'zeta': 0.1, 'best_y': max(self.gp.train_y.flatten())}
                 n_restarts = 8
                 maxiter = 500
                 early_stop_patience = 50
@@ -385,7 +385,6 @@ class BOBE:
                     self.gp, warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples,
                     thinning=4, method=self.mc_points_method)
                 self.results_manager.end_timing('MCMC Sampling')
-                self.mc_samples['method'] = 'MCMC'
 
             if float(new_val) > self.best_f:
                 self.best_f = float(new_val)
@@ -414,18 +413,17 @@ class BOBE:
                     self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01,equal_weights=False
                 )
                 self.results_manager.end_timing('Nested Sampling')
-
                 log.info(f" NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-                # now get equally weighted samples for mc points
-                equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
-                self.mc_samples = {
-                    'x': equal_samples,
-                    'logl': equal_logl,
-                    'weights': np.ones(equal_samples.shape[0]),
-                    'method': 'NS',
-                    'best': ns_samples['best']
-                }
                 if ns_success:
+                    # now get equally weighted samples for mc points
+                    equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
+                    self.mc_samples = {
+                        'x': equal_samples,
+                        'logl': equal_logl,
+                        'weights': np.ones(equal_samples.shape[0]),
+                        'method': 'NS',
+                        'best': ns_samples['best']
+                        }
                     self.converged = self.check_convergence(ii, self.gp, logz_dict, ns_samples, threshold=self.logz_threshold)
                     if self.converged:
                         self.termination_reason = "LogZ converged"
@@ -540,12 +538,6 @@ class BOBE:
                 percentage = timing_summary['percentages'].get(phase, 0)
                 log.info(f"{phase}: {time_spent:.2f}s ({percentage:.1f}%)")
         log.info(f"{'='*50}")
-
-        # Legacy save for backward compatibility
-        if self.save:
-            np.savez(f'{self.output_file}_samples.npz',
-                     samples=samples,param_bounds=self.loglikelihood.param_bounds,
-                     weights=weights,loglikes=loglikes)
 
         if self.return_getdist_samples:
             # Use the results manager to create GetDist samples

@@ -217,7 +217,7 @@ class BOBESummaryPlotter:
         # Plot evolution with uncertainty
         ax.plot(iterations, logz_values, 'b-', linewidth=2, label='Mean log Z', alpha=0.9)
         ax.fill_between(iterations, logz_values - logz_std, logz_values + logz_std, 
-                       alpha=0.2, color='red', label='1$\sigma$ region')
+                       alpha=0.2, color='red', label='2$\sigma$ region')
         ax.plot(iterations, logz_upper, 'r--', linewidth=1.5, alpha=0.7, label='Upper bound')
         ax.plot(iterations, logz_lower, 'g--', linewidth=1.5, alpha=0.7, label='Lower bound')
         ax.fill_between(iterations, logz_lower, logz_upper, 

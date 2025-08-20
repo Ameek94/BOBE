@@ -219,7 +219,7 @@ class WIPV(AcquisitionFunction):
                  early_stop_patience: int = 25,):
         
         mc_samples = acq_kwargs.get('mc_samples')
-        mc_points_size = acq_kwargs.get('mc_points_size', 128)
+        mc_points_size = acq_kwargs.get('mc_points_size', 256)
         mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size)
         k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.outputscale, gp.noise, include_noise=False)
 
@@ -266,11 +266,11 @@ def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS
         except Exception as e:
             log.error(f"Error in sampling GP NUTS: {e}")
             mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.5,equal_weights=True,
+                                            , dynamic=False, dlogz=0.05,equal_weights=True,
             )
     elif method=='NS':
         mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.5,equal_weights=True,
+                                            , dynamic=False, dlogz=0.05,equal_weights=True,
         )
     elif method=='uniform':
         mc_samples = {}

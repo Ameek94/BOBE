@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from jax import vmap
 from scipy.special import logsumexp
 from scipy import stats
+from scipy.stats import chi2, erfc
 from .logging_utils import get_logger
 from .seed_utils import get_numpy_rng
 import math
@@ -68,58 +69,11 @@ def resample_equal(samples, aux, weights=None, logwts=None):
     return resampled_samples, resampled_aux
 
 #----Convergence KL----
-
-def compute_kl_divergences(mean_ll, upper_ll, lower_ll, log_weights):
-    """
-    Compute KL divergences between all combinations.
-        
-    Returns:
-    --------
-    dict with KL divergence results
-    """
-    # Convert to probability distributions
-    # Normalize using log weights
-    weights = np.exp(log_weights - np.max(log_weights))
-    weights = weights / np.sum(weights)
-        
-    # Normalize likelihoods relative to their max for numerical stability
-    mean_norm = mean_ll - np.max(mean_ll)
-    upper_norm = upper_ll - np.max(upper_ll)
-    lower_norm = lower_ll - np.max(lower_ll)
-        
-    # Convert to probabilities
-    p_mean = np.exp(mean_norm) * weights
-    p_upper = np.exp(upper_norm) * weights
-    p_lower = np.exp(lower_norm) * weights
-        
-    # Normalize probability distributions
-    p_mean = p_mean / np.sum(p_mean)
-    p_upper = p_upper / np.sum(p_upper)
-    p_lower = p_lower / np.sum(p_lower)
-        
-    # Compute KL divergences
-    kl_results = {}
-        
-    # KL between mean and bounds
-    kl_results['mean_upper'] = stats.entropy(p_mean, p_upper)
-    kl_results['mean_lower'] = stats.entropy(p_mean, p_lower)
-    kl_results['upper_mean'] = stats.entropy(p_upper, p_mean)
-    kl_results['lower_mean'] = stats.entropy(p_lower, p_mean)
-        
-    # KL between bounds
-    kl_results['upper_lower'] = stats.entropy(p_upper, p_lower)
-    kl_results['lower_upper'] = stats.entropy(p_lower, p_upper)
-        
-    # Symmetrized versions
-    kl_results['sym_mean_upper'] = 0.5 * (kl_results['mean_upper'] + kl_results['upper_mean'])
-    kl_results['sym_mean_lower'] = 0.5 * (kl_results['mean_lower'] + kl_results['lower_mean'])
-    kl_results['sym_upper_lower'] = 0.5 * (kl_results['upper_lower'] + kl_results['lower_upper'])
-        
-    return kl_results
     
 def compute_successive_kl(prev_loglike, curr_loglike, log_weights):
     """Compute KL divergence between successive iterations."""
-    # Convert to probability distributions
+    
+    # Convert to normalised probability distributions
     weights = np.exp(log_weights - np.max(log_weights))
     weights = weights / np.sum(weights)
         
@@ -144,6 +98,26 @@ def compute_successive_kl(prev_loglike, curr_loglike, log_weights):
     }
 
 #----Misc----
+
+# Classifier threshold util
+def get_threshold_for_nsigma(nsigma,d):
+    """
+    Difference between peak of Gaussian and logprob level for nsigma (taken from GPry).
+
+    Arguments
+    ---------
+    nsigma : float
+        The number of standard deviations to consider.
+    d : int
+        The dimensionality of the space.
+
+    Returns
+    -------
+    float
+        The threshold value.
+    """
+    nstd = np.sqrt(chi2.isf(erfc(nsigma / np.sqrt(2)), d))
+    return 0.5 * nstd ** 2
 
 # this will mainly be used for the GP prediction so func will return mean and var, each with shape num_samples x num_test_points
 # minor modifications of https://github.com/martinjankowiak/saasbo/blob/main/util.py
