@@ -15,7 +15,7 @@ clf_type = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
 clf_update_step = 1 if clf_type == 'svm' else 2
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Planck_DESI_Omk_{clf_type}_mix_acq')
+        minus_inf=-1e5, noise_std=0.0,name=f'Planck_DESI_Omk_{clf_type}_mix_mcacq')
 
 
 print("="*60)
@@ -36,8 +36,8 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step=50, update_mc_step=5, ns_step=50,
-        num_hmc_warmup=512, num_hmc_samples=4000, mc_points_size=160,
+        fit_step=50, update_mc_step=10, ns_step=50,
+        num_hmc_warmup=512, num_hmc_samples=5000, mc_points_size=512,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf_type, clf_use_size=50, clf_update_step=clf_update_step,
         clf_threshold=300, gp_threshold=500,
@@ -45,7 +45,7 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=250)
+results = sampler.run(n_log_ei_iters=300)
 
 end = time.time()
 manual_timing = end - start
