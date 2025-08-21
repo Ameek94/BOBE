@@ -257,10 +257,15 @@ class GPwithClassifier:
                 return True 
             
             # # can we not add point to GP if it is below threshold and correctly classified, only add to classifier data in that case?
-            # if self.use_clf:
-            #     correct_classification = (self.predict_mean(new_x) >= self.train_y_clf.max() - self.clf_threshold)
-            #     predicted_classification = (self._clf_predict_func(new_x) >= self.probability_threshold)
-            #     correctly_classified = correct_classification==predicted_classification
+            is_above_threshold = new_y.item() >= self.train_y_clf.max() - self.gp_threshold
+            if not is_above_threshold:
+                # check if prediction is correct
+                if self._clf_predict_func is not None:
+                    clf_prob = self._clf_predict_func(new_x)
+                    if clf_prob < self.probability_threshold:
+                        log.info(f"Point below GP threshold and already classified as infeasible, not added to training and classifier data.")
+                        return True
+
 
             # Update classifier data
             self.train_x_clf = jnp.concatenate([self.train_x_clf, new_x], axis=0)
@@ -451,7 +456,8 @@ class GPwithClassifier:
 
         rng_mcmc = get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1.,2.) ** 2
+        high_temp = rng_mcmc.uniform(1.25,2.5) ** 2
+        # high_temp = rng_mcmc.uniform(1.,2.) ** 2
         temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")

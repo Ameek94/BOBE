@@ -337,7 +337,7 @@ def train_ellipsoid(
     n_epochs: int = 1000,
     batch_size: int = 32,
     seed: int = 0,
-    patience: int = 250,
+    patience: int = 50,
     init_params=None,  # Add this parameter
     **kwargs
 ):

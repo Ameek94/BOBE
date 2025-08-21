@@ -31,7 +31,7 @@ except ImportError as e:
     log.warning("Jaxns and TensorFlow Probability not available")
 
 # dynesty utility function for computing evidence
-def compute_integrals(logl=None, logvol=None, reweight=None):
+def compute_integrals(logl=None, logvol=None, reweight=None,squared=False):
     assert logl is not None
     assert logvol is not None
     loglstar_pad = np.concatenate([[-1.e300], logl])
@@ -42,6 +42,8 @@ def compute_integrals(logl=None, logvol=None, reweight=None):
     # = LV_{i+1} - (LV_{i+1} -LV_i) + log(1-exp(LV_{i+1}-LV{i}))
     dlogvol = np.diff(logvol, prepend=0)
     logdvol = logvol - dlogvol + np.log1p(-np.exp(dlogvol))
+    if squared:
+        logdvol = 2 * logdvol
     # logdvol is log(delta(volumes)) i.e. log (X_i-X_{i-1})
     logdvol2 = logdvol + math.log(0.5)
     # These are log(1/2(X_(i+1)-X_i))
@@ -184,15 +186,14 @@ def nested_sampling_Dy(gp: GP
     log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
     log.info(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
 
-    var = jax.lax.map(gp.predict_var,samples_x,batch_size=100)
-    var = var.squeeze(-1)
+    var = jax.lax.map(gp.predict_var_single,samples_x,batch_size=100)
     std = np.sqrt(var)
     logl_lower,logl_upper = logl - std, logl + std
     logvol = res['logvol']
     upper = compute_integrals(logl=logl_upper,logvol=logvol)
     lower = compute_integrals(logl=logl_lower,logvol=logvol)
     varintegrand = 2*logl + np.log(var+1e-300)
-    log_var_delta = compute_integrals(logl=varintegrand,logvol=2*logvol)[-1]
+    log_var_delta = compute_integrals(logl=varintegrand,logvol=logvol)[-1]
     log_var_logz = log_var_delta - 2*mean 
     log_var_logz = np.clip(log_var_logz, a_min=-100, a_max=100)  # Avoid numerical issues with very small variances
     log.info(f"Log variance of logZ: {log_var_logz:.4f}, log_var_delta: {log_var_delta:.4f}, mean: {mean:.4f}")
