@@ -20,8 +20,11 @@ def summary_plot(sampler, save_file=None, avg_lengthscales=False):
     data_dict['acq'] = np.array(sampler.acq_data['pt_and_val'])[:, -1]
     logz_data = {k: [d[k] for d in sampler.logz_data] for k in sampler.logz_data[0]}
     data_dict['logz'] = logz_data
-                                   
-    logz_step = (int(len(data_dict['hp']['lengthscales'])/len(data_dict['logz']['mean'][:-1])))
+    
+    if len(data_dict['logz']['mean'][:-1]) != 0:
+        logz_step = (int(len(data_dict['hp']['lengthscales'])/len(data_dict['logz']['mean'][:-1])))
+    else:
+        logz_step = (int(len(data_dict['hp']['lengthscales'])/len(data_dict['logz']['mean'])))
 
     print(logz_step)
     

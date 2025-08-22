@@ -28,8 +28,8 @@ def WIPV(x, gp, mc_points=None):
         Mean of the posterior variance at the input points.
     """
     var = gp.fantasy_var(x, mc_points=mc_points['x'])
-    return jnp.average(var, weights=mc_points['weights'])
-
+    #return np.average(var, weights=mc_points['weights'])
+    return np.sum(var*mc_points['weights'])/np.sum(mc_points['weights'])
 
 def _scaled_improvement(mean, sigma, best_f, maximize=True):
     """Returns `u = (mean - best_f) / sigma`, -u if maximize == True."""

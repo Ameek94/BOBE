@@ -3,7 +3,7 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-from .gp import GP, DSLP_GP, SAAS_GP
+from .gp import GP, DSLP_GP, SAAS_GP, Uniform_GP
 from .clf import train_svm, svm_predict_proba, train_nn, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
 import numpyro
 # numpyro.set_host_device_count(4) ?
@@ -96,13 +96,16 @@ class ClassifierGP:
 
         # Initialize GP 
         self.ndim = train_x_gp.shape[1] 
-        if lengthscale_priors not in ['DSLP', 'SAAS']:
-            raise ValueError("lengthscale_priors must be either 'DSLP' or 'SAAS'")
+        if lengthscale_priors not in ['DSLP', 'SAAS', 'Uniform']:
+            raise ValueError("lengthscale_priors must be either 'DSLP', 'SAAS' or 'Uniform'")
         if lengthscale_priors == 'DSLP':
             self.gp = DSLP_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
                               outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
-        else:
+        elif lengthscale_priors == 'SAAS':
             self.gp = SAAS_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
+                              outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
+        else:
+             self.gp = Uniform_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
                               outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
 
         self.train_x = self.gp.train_x
@@ -134,6 +137,11 @@ class ClassifierGP:
         )
 
         # Add method to handle if only class is present
+        if np.all(labels == labels[0]):
+            # If all labels are the same, we make sure not to use the classifier
+            log.info("All labels are identical. Not using classifier for the moment")
+            self.use_clf = False
+            return 
 
         # Get training function and parameters
         train_func = available_classifiers[self.clf_type]['train']
@@ -156,7 +164,7 @@ class ClassifierGP:
 
     def fit(self, lr=1e-2, maxiter=150, n_restarts=4):
         """Fits the GP hyperparameters."""
-        self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts)
+        return self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts)
 
     def predict_mean(self, x):
         """
@@ -184,6 +192,19 @@ class ClassifierGP:
         res = jnp.where(clf_probs >= self.probability_threshold, var, 0.0)
         return res
 
+    def predict(self, x):
+        """
+        Predicts the mean and variance of the GP at x but does not unstandardize it adjusted by the classifier.
+        If classifier predicts infeasible (prob < threshold), return 0 variance and minus_inf mean
+        """
+        mean, var = self.gp.predict(x)
+        if not self.use_clf or self._clf_predict_func is None:
+            return mean, var
+        clf_probs = self._clf_predict_func(x)
+        mean_res = jnp.where(clf_probs >= self.probability_threshold, mean, 0.0)
+        var_res = jnp.where(clf_probs >= self.probability_threshold, var, 0.0)
+        return mean_res, var_res
+
     def fantasy_var(self, x_new, mc_points):
         """
         Computes the fantasy variance, see gp.py for more details.
@@ -198,7 +219,7 @@ class ClassifierGP:
         """
         new_x = jnp.atleast_2d(new_x)
         new_y = jnp.atleast_2d(new_y)
-
+        mll_val = np.nan
         if not self.clf_flag:
             gp_not_updated = self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
         else:
@@ -206,7 +227,7 @@ class ClassifierGP:
             is_duplicate = jnp.any(jnp.all(jnp.isclose(self.train_x_clf, new_x, atol=1e-6, rtol=1e-4), axis=1))
             if is_duplicate:
                 log.info(f"Point already exists in the classifier training set, not updating.")
-                return True 
+                return True, mll_val
 
             # Update classifier data
             self.train_x_clf = jnp.concatenate([self.train_x_clf, new_x], axis=0)
@@ -218,13 +239,13 @@ class ClassifierGP:
             gp_not_updated = False
             if new_y.flatten()[0] > (self.train_y_clf.max() - self.gp_threshold):
                 # Update GP
-                self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
+                _, mll_val = self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
                 self.train_x = self.gp.train_x
                 self.train_y = self.gp.train_y
             else:
                 log.info("Point not within GP threshold, not updating GP.")
                 if refit:
-                    self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
+                    mll_val = self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
                 gp_not_updated = True
 
             # Check if classifier data size has reached the threshold
@@ -238,7 +259,7 @@ class ClassifierGP:
                 self._train_classifier()
 
         # Return whether GP was updated, classifier is always updated
-        return gp_not_updated
+        return gp_not_updated, mll_val
 
     def get_random_point(self):
         pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold/2.

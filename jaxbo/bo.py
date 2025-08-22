@@ -120,7 +120,7 @@ def get_mc_samples(gp, rng_key, warmup_steps=512, num_samples=512, thinning=1,me
             )
     elif method=='NS':
         mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.5,equal_weights=False,
+                                            , dynamic=False, dlogz=0.5,equal_weights=True,
         )
     elif method=='uniform':
         mc_samples = {}
@@ -330,11 +330,11 @@ class BOBE:
     def check_convergence(self, step, logz_dict, threshold=2.0,ndim=1):
         """
         Check if the nested sampling has converged.
-        """
-        if ndim > 10:
-            delta = logz_dict['mean'] - logz_dict['lower'] # for now just to speed up results
-        else:
-            delta = logz_dict['upper'] - logz_dict['lower']
+        # """
+        # if ndim > 10:
+        #     delta = logz_dict['mean'] - logz_dict['lower'] # for now just to speed up results
+        # else:
+        delta = logz_dict['upper'] - logz_dict['lower']
         mean = logz_dict['mean']
         if (delta < threshold and mean>self.minus_inf+10)  and step > self.miniters:
             log.info(f" Convergence check: delta = {delta:.4f}, step = {step}")
@@ -422,10 +422,10 @@ class BOBE:
             if self.ndim == 1 or self.ndim == 2:
                 self.acq_data['xs'].append(acq_plot_xs)
                 self.acq_data['ys'].append(acq_plot_ys)
-                self.acq_data['mc_points'].append(self.mc_points)
-                acq_pt = new_pt_u.tolist()[0]
-                #log.info(f"{acq_pt}")
-                self.acq_data['pt_and_val'].append([*acq_pt, acq_val])
+            acq_pt = new_pt_u.tolist()[0]
+            #log.info(f"{acq_pt}")
+            self.acq_data['mc_points'].append(self.mc_points)
+            self.acq_data['pt_and_val'].append([*acq_pt, acq_val])
             #################
 
             log.info(f" Acquisition value {acq_val:.4e} at new point")
@@ -497,7 +497,7 @@ class BOBE:
             if ns_flag:
                 log.info(" Running Nested Sampling")
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1
+                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.1, equal_weights=False
                 )
                 log.info(" LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
                 self.logz_data.append(logz_dict)
@@ -539,7 +539,7 @@ class BOBE:
         if self.do_final_ns and not self.converged:
             log.info(" Final Nested Sampling")
             ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                self.gp, self.ndim, maxcall=int(1e7), dynamic=True, dlogz=0.01
+                self.gp, self.ndim, maxcall=int(1e7), dynamic=True, dlogz=0.01, equal_weights=False
             )
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
             self.logz_data.append(logz_dict)
@@ -573,7 +573,7 @@ class BOBE:
                      logz_data=self.logz_data,
                      train_x=self.gp.train_x,
                      train_y=self.gp.train_y,
-                     train_y_unstd=self.gp.train_y*self.gp.y_std + self.gp.y_mean,
+                     train_y_unstd=self.gp.train_y*self.gp.gp.y_std + self.gp.gp.y_mean if self.use_clf else self.gp.train_y*self.gp.y_std + self.gp.y_mean,
                      lengthscales=self.hyperparameter_data['lengthscales'],
                      outputscales=self.hyperparameter_data['outputscale'],
                      mll=self.hyperparameter_data['mll'],
@@ -583,6 +583,7 @@ class BOBE:
                      acq_point_val = self.acq_data['pt_and_val'],
                      acq_opt_path = self.acq_data['opt_path'],
                      sobol_samples=self.n_sobol_init,
+                     sample_point_data = self.sample_point_data,
                      allow_pickle=True)
 
         if self.return_getdist_samples:

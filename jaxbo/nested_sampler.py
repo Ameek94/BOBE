@@ -68,7 +68,7 @@ def nested_sampling_Dy(gp: GP
                        ,maxcall: Optional[int] = None
                         ,boost_maxcall: Optional[int] = 1
                         ,print_progress : bool = True
-                        ,equal_weights: bool = False
+                        ,equal_weights: bool = True
                         ,sample_method='rwalk'
                        ,) -> tuple[np.ndarray,Dict]:
     """
@@ -161,13 +161,15 @@ def nested_sampling_Dy(gp: GP
     best_pt = res['samples'][np.argmax(res['logl'])]
     samples['best'] = best_pt
     if equal_weights:
+        print("Equal Weights")
         samples['x'] = res.samples_equal()
         weights = np.ones(samples['x'].shape[0])
         samples['weights'] = weights
     else:
+        print("Un-Equal Weights")
         samples['x'] = res['samples']
         weights = renormalise_log_weights(res['logwt'])
-        samples['weights'] = weights    
+        samples['weights'] = weights
         samples['logl'] = res['logl']
     return samples, logz_dict, success
 

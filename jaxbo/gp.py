@@ -291,7 +291,7 @@ class GP(ABC):
         k22 = self.kernel(mc_points,mc_points,self.lengthscales,
                           self.outputscale,noise=self.noise,include_noise=True) # precompute k22 instead
         var = get_var_from_cho(k11_cho,k12,k22)
-        return var #weighted mean
+        return var*self.y_std**2
     
     def get_phys_points(self,x_bounds):
         """
@@ -661,7 +661,7 @@ class SAAS_GP(DSLP_GP):
     def __init__(self,
                  train_x, train_y, noise=1e-8, kernel="rbf", optimizer="adam",
                  outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],
-                 tausq_bounds = [-4,4]):
+                 tausq_bounds = [-4,4], lengthscales=None,outputscale=None):
         """
         Class for the Gaussian Process with SAAS priors, using maximum likelihood hyperparameters. 
         The implementation is based on the paper "High-Dimensional Bayesian Optimization with Sparse Axis-Aligned Subspaces", 2021
@@ -687,7 +687,7 @@ class SAAS_GP(DSLP_GP):
         tausq_bounds: Bounds for the tausq parameter of the GP (in log10 space)
             Default is [-4,4]. These are the bounds for the tausq parameter of the GP.
         """
-        super().__init__(train_x, train_y, noise, kernel, optimizer,outputscale_bounds,lengthscale_bounds)
+        super().__init__(train_x, train_y, noise, kernel, optimizer,outputscale_bounds,lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
         self.tausq = 1.
         self.hyperparam_bounds = [tausq_bounds] + self.hyperparam_bounds
 
@@ -883,7 +883,7 @@ jax.tree_util.register_pytree_node(
 class Uniform_GP(DSLP_GP):
     def __init__(self,
                  train_x, train_y, noise=1e-8, kernel="rbf", optimizer="adam",
-                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2]):
+                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2], lengthscales=None,outputscale=None):
         """
         Class for the Gaussian Process with no priors, using maximum likelihood hyperparameters. 
 
@@ -904,7 +904,7 @@ class Uniform_GP(DSLP_GP):
         lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
             Default is [np.log10(0.05),2]. These are the bounds for the length scale of the GP.
         """
-        super().__init__(train_x, train_y, noise, kernel, optimizer,outputscale_bounds,lengthscale_bounds)
+        super().__init__(train_x, train_y, noise, kernel, optimizer,outputscale_bounds,lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
 
     def tree_flatten(self):
         # use the parent class tree_flatten to simplify
