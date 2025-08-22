@@ -23,22 +23,22 @@ else:
     clf_update_step = 2
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
-        min_iters=1000, max_eval_budget=5000, max_gp_size=2200,
+sampler = BOBE(n_cobaya_init=32, n_sobol_init=128,
+        min_iters=500, max_eval_budget=2500, max_gp_size=2100,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
         fit_step=50, update_mc_step=5, ns_step=50,
-        num_hmc_warmup=512, num_hmc_samples=6000, mc_points_size=512,
+        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=300,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=50, clf_update_step=clf_update_step,
-        clf_threshold=350, gp_threshold=350,
+        clf_threshold=350, gp_threshold=500,
         minus_inf=-1e5, logz_threshold=30.)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=750)
+results = sampler.run(n_log_ei_iters=300)
 
 end = time.time()
 manual_timing = end - start
@@ -116,7 +116,7 @@ fig_dashboard = plotter.create_summary_dashboard(
     gp_data=gp_data,
     best_loglike_data=best_loglike_data,
     timing_data=timing_data,
-    save_path=f"{likelihood.name}_dashboard.pdf"
+    save_path=f"{likelihood.name}_dashboard.png"
 )
 # plt.show()
 
@@ -126,7 +126,7 @@ fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
 plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
 ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
 plt.tight_layout()
-plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
+plt.savefig(f"{likelihood.name}_timing_detailed.png", dpi=300, bbox_inches='tight')
 # plt.show()
 
 # Create evidence evolution plot if available
@@ -136,7 +136,7 @@ if comprehensive_results.get('logz_history'):
     plotter.plot_evidence_evolution(ax=ax_evidence)
     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
     plt.tight_layout()
-    plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
+    plt.savefig(f"{likelihood.name}_evidence.png", dpi=300, bbox_inches='tight')
     # plt.show()
 
 # Create acquisition function evolution plot
@@ -147,7 +147,7 @@ if acquisition_data and acquisition_data.get('iterations'):
     plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
     plt.tight_layout()
-    plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
+    plt.savefig(f"{likelihood.name}_acquisition_evolution.png", dpi=300, bbox_inches='tight')
     # plt.show()
 else:
     print("No acquisition function data available for plotting.")
@@ -199,9 +199,9 @@ print("="*60)
 print(f"✓ Main results: {likelihood.name}_results.pkl")
 print(f"✓ Timing data: {likelihood.name}_timing.json")
 print(f"✓ Legacy samples: {likelihood.name}_samples.npz")
-print(f"✓ Summary dashboard: {likelihood.name}_dashboard.pdf")
-print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.pdf")
-print(f"✓ Evidence evolution: {likelihood.name}_evidence.pdf")
+print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
+print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
+print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
 print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
 
 
