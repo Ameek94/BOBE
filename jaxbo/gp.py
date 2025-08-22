@@ -278,16 +278,18 @@ class GP:
             log.info(f"Point {new_x} already exists in the training set, not updating")
             return True
         else:
-            k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
-                        noise=self.noise,include_noise=False).flatten()           # shape (n,)
-            k_self = self.kernel(new_x,new_x,self.lengthscales,
-                          self.outputscale,noise=self.noise,include_noise=True)[0, 0]  # scalar            
+            # k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
+            #             noise=self.noise,include_noise=False).flatten()           # shape (n,)
+            # k_self = self.kernel(new_x,new_x,self.lengthscales,
+            #               self.outputscale,noise=self.noise,include_noise=True)[0, 0]  # scalar            
             self.add(new_x,new_y)
             if refit:
                 self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
             else:
                 # self.fit(lr=lr,maxiter=100,n_restarts=1)
-                self.cholesky = fast_update_cholesky(self.cholesky,k,k_self)
+                K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True)
+                self.cholesky = jnp.linalg.cholesky(K)
+                # self.cholesky = fast_update_cholesky(self.cholesky,k,k_self)
                 self.alphas = cho_solve((self.cholesky, True), self.train_y)
             return False
 
