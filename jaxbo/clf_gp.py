@@ -34,7 +34,7 @@ class GPwithClassifier:
                  clf_type='svm', clf_settings={},
                  clf_use_size=400, clf_update_step=5,
                  probability_threshold=0.5, minus_inf=-1e5,
-                 clf_threshold=250, gp_threshold=1000,
+                 clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", optimizer="adam", 
                  outputscale_bounds=[-4, 4], lengthscale_bounds=[np.log10(0.05), 2],
                  lengthscale_priors='DSLP', lengthscales=None, outputscale=1.0,
@@ -255,22 +255,21 @@ class GPwithClassifier:
             if is_duplicate:
                 log.info(f"Point already exists in the classifier training set, not updating.")
                 return True 
-            
-            # # can we not add point to GP if it is below threshold and correctly classified, only add to classifier data in that case?
-            is_above_threshold = new_y.item() >= self.train_y_clf.max() - self.gp_threshold
-            if not is_above_threshold:
-                # check if prediction is correct
-                if self._clf_predict_func is not None:
-                    clf_prob = self._clf_predict_func(new_x)
-                    if clf_prob < self.probability_threshold:
-                        log.info(f"Point below GP threshold and already classified as infeasible, not added to training and classifier data.")
-                        return True
-
 
             # Update classifier data
             self.train_x_clf = jnp.concatenate([self.train_x_clf, new_x], axis=0)
             self.train_y_clf = jnp.concatenate([self.train_y_clf, new_y], axis=0)
             log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
+            
+            # Not add point to GP if it is below threshold and correctly classified, only add to classifier data in that case
+            is_above_threshold = new_y.item() >= self.train_y_clf.max() - self.clf_threshold
+            if not is_above_threshold:
+                # check if prediction is correct
+                if self._clf_predict_func is not None:
+                    clf_prob = self._clf_predict_func(new_x)
+                    if clf_prob < self.probability_threshold:
+                        log.info(f"Point below GP threshold and already classified as infeasible, not added to GP trainingdata.")
+                        return True
 
             # Update GP data if within threshold
             gp_not_updated = False
@@ -455,10 +454,10 @@ class GPwithClassifier:
         """        
 
         rng_mcmc = get_numpy_rng()
-        prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1.25,2.5) ** 2
-        # high_temp = rng_mcmc.uniform(1.,2.) ** 2
-        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        prob = rng_mcmc.uniform(0., 1.)
+        # high_temp = rng_mcmc.uniform(1.5,6.) 
+        high_temp = rng_mcmc.uniform(1.,2.) ** 2
+        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 

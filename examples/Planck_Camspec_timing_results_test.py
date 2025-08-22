@@ -33,17 +33,17 @@ print("="*60)
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init=16,
-        min_iters=750, max_eval_budget=2500, max_gp_size=1800,
+        min_iters=750, max_eval_budget=2500, max_gp_size=1500,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}',
         save=True,
         fit_step=50, update_mc_step=5, ns_step=25,
-        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=256,
+        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=512,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=30, clf_update_step=clf_update_step,
-        clf_threshold=350, gp_threshold=350,
-        minus_inf=-1e5, logz_threshold=0.2, seed=100)
+        clf_threshold=300, gp_threshold=400,
+        minus_inf=-1e5, logz_threshold=1., seed=100)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
@@ -172,10 +172,11 @@ else:  # Dictionary format
 
 
 
-param_list_LCDM = ['omch2','logA','ns','H0','ombh2','tau']
+param_list_LCDM = ['omch2','ombh2','logA','ns','H0','tau']
 plot_final_samples(
     gp, 
     {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+    plot_params=param_list_LCDM,
     param_list=likelihood.param_list,
     param_bounds=likelihood.param_bounds,
     param_labels=likelihood.param_labels,

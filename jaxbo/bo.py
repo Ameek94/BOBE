@@ -468,7 +468,17 @@ class BOBE:
             )
             self.results_manager.end_timing('Nested Sampling')
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
+            if ns_success:
+                log.info(f"Using nested sampling results")
+                self.check_convergence(ii+1, self.gp, logz_dict, ns_samples, threshold=self.logz_threshold)
+                if self.converged:
+                    self.termination_reason = "LogZ converged"
+                    results_dict['logz'] = logz_dict
+                    results_dict['termination_reason'] = self.termination_reason
 
+        samples = ns_samples['x']
+        weights = ns_samples['weights']
+        loglikes = ns_samples['logl']
 
         if not ns_success:
         # if not self.do_final_ns:
@@ -481,12 +491,7 @@ class BOBE:
             samples = mc_samples['x']
             weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
             loglikes = mc_samples['logp']
-        else:
-            samples = ns_samples['x']
-            weights = ns_samples['weights']
-            loglikes = ns_samples['logl']
-            log.info(f"Using nested sampling results")
-
+                
         samples = scale_from_unit(samples, self.loglikelihood.param_bounds)
         samples_dict = {
             'x': samples,
@@ -590,7 +595,7 @@ class BOBE:
             bool: Whether convergence is achieved based on logz only
         """
         # Standard logz convergence check
-        delta =  logz_dict['std'] # logz_dict['upper'] - logz_dict['lower'] #
+        delta = logz_dict['upper'] - logz_dict['lower'] # logz_dict['std'] # 
         converged = delta < threshold
         
         # Compute KL divergences if we have nested sampling samples

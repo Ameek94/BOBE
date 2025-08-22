@@ -1,6 +1,7 @@
 from typing import Any, List, Optional, Dict, Tuple
+import jax
 import jax.numpy as jnp
-from jax import lax
+from jax import lax,jit
 import numpy as np
 from scipy.stats import qmc
 from jax.scipy.stats import norm
@@ -312,7 +313,10 @@ class WIPV(AcquisitionFunction):
         mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size)
         k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.outputscale, gp.noise, include_noise=False)
 
-        acq_vals = lax.map(lambda x: self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc), mc_points)
+        # @jax.jit
+        def mapped_fn(x):
+            return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
+        acq_vals = lax.map(mapped_fn, mc_points)
         acq_val_min = jnp.min(acq_vals)
         best_x = mc_points[jnp.argmin(acq_vals)]
 
