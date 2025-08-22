@@ -51,6 +51,7 @@ class BOBE:
                  mc_points_method='NUTS',
                  lengthscale_priors='DSLP',
                  acq = 'WIPV',
+                 zeta_ei = 0.1,
                  use_clf=True,
                  clf_type = "svm",
                  clf_use_size = 300,
@@ -235,6 +236,7 @@ class BOBE:
         self.mc_points_size = mc_points_size
         self.minus_inf = minus_inf
         self.mc_points_method = mc_points_method
+        self.zeta = zeta_ei
 
         if self.save:
             self.gp.save(outfile=f"{self.output_file}_gp")
@@ -329,7 +331,7 @@ class BOBE:
                 maxiter = 200
                 early_stop_patience = 25
             else:
-                acq_kwargs = {'zeta': 0.1, 'best_y': max(self.gp.train_y.flatten())}
+                acq_kwargs = {'zeta': self.zeta, 'best_y': max(self.gp.train_y.flatten())}
                 n_restarts = 8
                 maxiter = 500
                 early_stop_patience = 50
