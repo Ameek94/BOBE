@@ -433,7 +433,7 @@ class BOBE:
                 break
             if self.gp.train_x.shape[0] > 1600:
                 self.ns_step = 25
-                self.fit_step = 50
+                self.fit_step = 75
 
 
         #-------End of BO loop-------
@@ -463,17 +463,7 @@ class BOBE:
             )
             self.results.end_timing('Nested Sampling')
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-            if ns_success:
-                log.info(f"Using nested sampling results")
-                self.check_convergence(ii+1, self.gp, logz_dict, ns_samples, threshold=self.logz_threshold)
-                if self.converged:
-                    self.termination_reason = "LogZ converged"
-                    results_dict['logz'] = logz_dict
-                    results_dict['termination_reason'] = self.termination_reason
 
-        samples = ns_samples['x']
-        weights = ns_samples['weights']
-        loglikes = ns_samples['logl']
 
         if not ns_success:
         # if not self.do_final_ns:
@@ -486,7 +476,12 @@ class BOBE:
             samples = mc_samples['x']
             weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
             loglikes = mc_samples['logp']
-                
+        else:
+            samples = ns_samples['x']
+            weights = ns_samples['weights']
+            loglikes = ns_samples['logl']
+            log.info(f"Using nested sampling results")
+
         samples = scale_from_unit(samples, self.loglikelihood.param_bounds)
         samples_dict = {
             'x': samples,
@@ -539,12 +534,6 @@ class BOBE:
                 log.info(f"{phase}: {time_spent:.2f}s ({percentage:.1f}%)")
         log.info(f"{'='*50}")
 
-        # Legacy save for backward compatibility
-        if self.save:
-            np.savez(f'{self.output_file}_samples.npz',
-                     samples=samples,param_bounds=self.loglikelihood.param_bounds,
-                     weights=weights,loglikes=loglikes)
-
         if self.return_getdist_samples:
             # Use the results manager to create GetDist samples
             output_samples = self.results.get_getdist_samples()
@@ -590,7 +579,7 @@ class BOBE:
             bool: Whether convergence is achieved based on logz only
         """
         # Standard logz convergence check
-        delta = logz_dict['upper'] - logz_dict['lower'] # logz_dict['std'] # 
+        delta = logz_dict['upper'] - logz_dict['lower'] # logz_dict['std'] #
         converged = delta < threshold
         
         # Compute KL divergences if we have nested sampling samples
@@ -602,6 +591,8 @@ class BOBE:
                 # Get the three likelihood estimates from logz bounds
                 log_weights = np.log(ns_samples['weights'] + 1e-300)  # Avoid log(0)
                 logl = ns_samples['logl']
+                upper_logl = ns_samples['logl_upper']
+                lower_logl = ns_samples['logl_lower']
 
                 # Compute successive KL if we have previous samples
                 if self.prev_samples is not None:
@@ -611,13 +602,14 @@ class BOBE:
                     new_logl = jax.lax.map(gp.predict_mean_single,prev_samples_x,batch_size=200)
                     log_weights = np.zeros_like(new_logl)
                     successive_kl = compute_successive_kl(prev_logl, new_logl, log_weights)
+                    log.info(f" Successive KL divergences computed: {successive_kl}")
 
                 # Store current samples for next iteration
                 equal_prev_samples, equal_prev_logl = resample_equal(ns_samples['x'], logl, ns_samples['weights'])
                 self.prev_samples = {'x': equal_prev_samples, 'logl': equal_prev_logl}
 
                 if successive_kl:
-                    log.debug(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
+                    log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
 
             except Exception as e:
                 log.warning(f"Could not compute KL divergences: {e}")
