@@ -38,6 +38,7 @@ class BOBE:
                  min_iters=200,
                  max_eval_budget=1500,
                  max_gp_size=1200,
+                 noise=1e-10,
                  resume=False,
                  resume_file=None,
                  save=True,
@@ -210,7 +211,7 @@ class BOBE:
                     'SAAS': SAAS_GP
                 }[lengthscale_priors.upper()](
                 train_x=train_x, train_y=train_y,
-                noise=1e-8, kernel='rbf',)
+                noise=noise, kernel='rbf',)
             self.results.start_timing('GP Training')
             self.gp.fit(maxiter=200,n_restarts=4)
             self.results.end_timing('GP Training')
@@ -351,7 +352,7 @@ class BOBE:
 
             new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pt.flatten())}
             log.info(f" New point {new_pt_vals}")
-            log.info(f" Objective function value = {new_val.item():.4f}, GP predicted value = {self.gp.predict_mean(new_pt_u).item():.4f}")
+            log.info(f" Objective function value = {new_val.item():.4f}, GP predicted value = {self.gp.predict_mean_single(new_pt_u).item():.4f}")
 
             # Extract GP hyperparameters for tracking
             lengthscales = list(self.gp.lengthscales)
@@ -432,6 +433,7 @@ class BOBE:
                 break
             if self.gp.train_x.shape[0] > 1600:
                 self.ns_step = 25
+                self.fit_step = 75
 
 
         #-------End of BO loop-------

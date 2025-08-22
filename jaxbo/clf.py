@@ -132,7 +132,7 @@ def train_with_restarts(
     """
     # Create consistent train/val split
     (x_train, y_train), (x_val, y_val) = create_train_val_split(x, y, 
-                                                               train_kwargs.get('val_frac', 0.2), 
+                                                               train_kwargs.get('val_frac', 0.1), 
                                                                split_seed)
     
     best_val_loss = jnp.inf
