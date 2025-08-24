@@ -139,7 +139,7 @@ def optimize(
             global_best_params_unit = current_params
             
         if verbose:
-            log.info(f"Restart {restart_idx + 1} completed. Best value: {float(best_f_for_restart):.6f}")
+            log.info(f"Restart {restart_idx + 1} completed. Best value: {float(best_f_for_restart):.4e}")
     
     # Final best in original space
     best_params_original = scale_from_unit(global_best_params_unit, bounds_arr)
@@ -147,7 +147,7 @@ def optimize(
 
     if verbose:
         desc = f'Completed optimization with {n_restarts} restarts ({optimizer_name})'
-        log.info(f"{desc}: Final best_f = {float(best_f_original):.6f}")
+        log.info(f"{desc}: Final best_f = {float(best_f_original):.4e}")
 
     return best_params_original, float(best_f_original)
 

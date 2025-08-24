@@ -262,14 +262,14 @@ class GPwithClassifier:
             log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
             
             # Not add point to GP if it is below threshold and correctly classified, only add to classifier data in that case
-            is_above_threshold = new_y.item() >= self.train_y_clf.max() - self.clf_threshold
-            if not is_above_threshold:
-                # check if prediction is correct
-                if self._clf_predict_func is not None:
-                    clf_prob = self._clf_predict_func(new_x)
-                    if clf_prob < self.probability_threshold:
-                        log.info(f"Point below GP threshold and already classified as infeasible, not added to GP trainingdata.")
-                        return True
+            # is_above_threshold = new_y.item() >= self.train_y_clf.max() - self.clf_threshold
+            # if not is_above_threshold:
+            #     # check if prediction is correct
+            #     if self._clf_predict_func is not None:
+            #         clf_prob = self._clf_predict_func(new_x)
+            #         if clf_prob < self.probability_threshold:
+            #             log.info(f"Point below GP threshold and already classified as infeasible, not added to GP trainingdata.")
+            #             return True
 
             # Update GP data if within threshold
             gp_not_updated = False
@@ -455,8 +455,8 @@ class GPwithClassifier:
 
         rng_mcmc = get_numpy_rng()
         prob = rng_mcmc.uniform(0., 1.)
-        # high_temp = rng_mcmc.uniform(1.5,6.) 
-        high_temp = rng_mcmc.uniform(1.,2.) ** 2
+        high_temp = rng_mcmc.uniform(1.5,6.) 
+        # high_temp = rng_mcmc.uniform(1.,2.) ** 2
         temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")

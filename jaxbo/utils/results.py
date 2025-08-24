@@ -363,7 +363,7 @@ class BOBEResults:
             converged: Whether convergence was achieved
             threshold: Convergence threshold used
         """
-        delta = 2 * logz_dict['std'] #logz_dict.get('upper', 0) - logz_dict.get('lower', 0)
+        delta = logz_dict['std'] #logz_dict.get('upper', 0) - logz_dict.get('lower', 0)
         
         conv_info = ConvergenceInfo(
             iteration=iteration,
@@ -388,18 +388,15 @@ class BOBEResults:
     
     def update_kl_divergences(self,
                              iteration: int,
-                             kl_results: Dict[str, float],
                              successive_kl: Optional[Dict[str, float]] = None):
         """
         Update KL divergence tracking for convergence analysis.
         
         Args:
             iteration: Current iteration number
-            kl_results: Dictionary with KL divergence results between bounds
             successive_kl: Optional KL divergence between successive iterations
         """
         self.kl_iterations.append(iteration)
-        self.kl_divergences.append(kl_results.copy())
         
         if successive_kl is not None:
             self.successive_kl.append({

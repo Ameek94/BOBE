@@ -16,13 +16,14 @@ import time
 logz_std_threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 0.01
 
 
-cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_Omk.yaml'
+cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_Omk_PPlus.yaml'
+
 
 clf_type = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
 clf_update_step = 1 if clf_type == 'svm' else 2
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'CMB_DESI_Omk_{clf_type}_mix_mcacq')
+        minus_inf=-1e5, noise_std=0.0,name=f'CMB_DESI_PP_Omk_{clf_type}_logz_th_{str(logz_std_threshold)}')
 
 
 print("="*60)
@@ -38,7 +39,7 @@ print("="*60)
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init=64,
-        min_iters=750, max_eval_budget=2500, max_gp_size=1400,
+        min_iters=900, max_eval_budget=2500, max_gp_size=1800,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}',
@@ -46,7 +47,7 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init=64,
         fit_step=50, update_mc_step=5, ns_step=25,
         noise = 1e-6,
         zeta_ei=0.1,
-        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=300,
+        num_hmc_warmup=512, num_hmc_samples=500, mc_points_size=400,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=30, clf_update_step=clf_update_step,
         clf_threshold=300, gp_threshold=500,
@@ -54,7 +55,7 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init=64,
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=0)
+results = sampler.run(n_log_ei_iters=150)
 
 end = time.time()
 manual_timing = end - start
@@ -155,19 +156,6 @@ if comprehensive_results.get('logz_history'):
     plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
     # plt.show()
 
-# Create acquisition function evolution plot
-print("Creating acquisition function evolution plot...")
-acquisition_data = results['results_manager'].get_acquisition_data()
-if acquisition_data and acquisition_data.get('iterations'):
-    fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
-    plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
-    ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
-    plt.tight_layout()
-    plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
-    # plt.show()
-else:
-    print("No acquisition function data available for plotting.")
-
 # Create parameter samples plot
 print("Creating parameter samples plot...")
 if hasattr(samples, 'samples'):  # GetDist samples
@@ -183,14 +171,14 @@ param_list_LCDM = ['omk','omch2','ombh2','logA','ns','H0','tau']
 plot_final_samples(
     gp, 
     {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-    plot_params=param_list_LCDM,
     param_list=likelihood.param_list,
     param_bounds=likelihood.param_bounds,
+    plot_params=param_list_LCDM,
     param_labels=likelihood.param_labels,
     output_file=f"{likelihood.name}_cosmo",
-    reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
-    reference_ignore_rows=0.0,
-    reference_label='PolyChord',
+    reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
+    reference_ignore_rows=0.3,
+    reference_label='MCMC',
     scatter_points=False,
 )
 
@@ -201,11 +189,12 @@ plot_final_samples(
     param_bounds=likelihood.param_bounds,
     param_labels=likelihood.param_labels,
     output_file=f"{likelihood.name}_full",
-    reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
-    reference_ignore_rows=0.0,
-    reference_label='PolyChord',
+    reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
+    reference_ignore_rows=0.3,
+    reference_label='MCMC',
     scatter_points=False,
 )
+
 
 # Save comprehensive results
 print("\n" + "="*60)
@@ -218,7 +207,8 @@ print(f"✓ Timing data: {likelihood.name}_timing.json")
 print(f"✓ Legacy samples: {likelihood.name}_samples.npz")
 print(f"✓ Summary dashboard: {likelihood.name}_dashboard.pdf")
 print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.pdf")
-print(f"✓ Evidence evolution: {likelihood.name}_evidence.pdf")
+if comprehensive_results.get('logz_history'):
+    print(f"✓ Evidence evolution: {likelihood.name}_evidence.pdf")
 print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
 
 

@@ -318,9 +318,11 @@ class WIPV(AcquisitionFunction):
             return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
         acq_vals = lax.map(mapped_fn, mc_points)
         acq_val_min = jnp.min(acq_vals)
+        log.info(f"WIPV acquisition min value on MC points: {float(acq_val_min):.4e}")
         best_x = mc_points[jnp.argmin(acq_vals)]
+        x0_acq = best_x
 
-        return best_x, float(acq_val_min)
+        # return best_x, float(acq_val_min)
 
         # x0_acq1 = mc_samples['best']
         # vars = lax.map(gp.predict_var,mc_points,batch_size=25)
@@ -332,20 +334,20 @@ class WIPV(AcquisitionFunction):
         # else:
         #     x0_acq = x0_acq[:n_restarts]
         # k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.outputscale, gp.noise, include_noise=False)
-        # fun_kwargs = {'mc_points': mc_points, 'k_train_mc': k_train_mc}
+        fun_kwargs = {'mc_points': mc_points, 'k_train_mc': k_train_mc}
 
-        # return optimize(fun=self.fun,
-        #                 fun_args=(gp,),
-        #                 fun_kwargs=fun_kwargs,
-        #                 ndim=gp.ndim,
-        #                 x0=x0_acq,
-        #                 lr=lr,
-        #                 optimizer_name=optimizer_name,
-        #                 optimizer_kwargs=optimizer_kwargs,
-        #                 maxiter=maxiter,
-        #                 n_restarts=n_restarts,
-        #                 verbose=verbose,
-        #                 early_stop_patience=early_stop_patience)
+        return optimize(fun=self.fun,
+                        fun_args=(gp,),
+                        fun_kwargs=fun_kwargs,
+                        ndim=gp.ndim,
+                        x0=x0_acq,
+                        lr=lr,
+                        optimizer_name=optimizer_name,
+                        optimizer_kwargs=optimizer_kwargs,
+                        maxiter=maxiter,
+                        n_restarts=n_restarts,
+                        verbose=verbose,
+                        early_stop_patience=early_stop_patience)
 
 def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",init_params=None):
     if method=='NUTS':

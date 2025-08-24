@@ -174,10 +174,12 @@ class GP:
         log.info(f"GP training size = {self.train_x.shape[0]}")
 
         self.ndim = train_x.shape[1]
-        self.y_mean = jnp.mean(train_y.flatten(),axis=0)
-        self.y_std = jnp.std(train_y.flatten(),axis=0)
+        self.y_mean = jnp.mean(train_y)
+        self.y_std = jnp.std(train_y)
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
         self.noise = noise
+
+        log.info(f"GP y_mean: {self.y_mean:.4f}, y_std: {self.y_std:.4f}, noise: {self.noise:.2e}")
 
         self.train_y = (train_y - self.y_mean) / self.y_std
         self.lengthscales = jnp.ones(self.ndim) if lengthscales is None else jnp.array(lengthscales)
@@ -303,6 +305,7 @@ class GP:
         self.y_mean = jnp.mean(self.train_y.flatten(),axis=0)
         self.y_std = jnp.std(self.train_y.flatten(),axis=0)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
+        log.info(f"New GP y_mean: {self.y_mean:.4f}, y_std: {self.y_std:.4f}")
         log.info("Updated GP with new point.")
         log.info(f" GP training size = {self.npoints}")
 

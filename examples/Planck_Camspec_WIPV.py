@@ -1,8 +1,8 @@
 import sys
 clf = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
 clf_update_step = 1 if clf == 'svm' else 5
-import os
 num_devices = int(sys.argv[2]) if len(sys.argv) > 2 else 8
+import os
 os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(num_devices)
 # os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
 #     os.cpu_count()
@@ -13,48 +13,44 @@ from jaxbo.loglike import CobayaLikelihood
 import matplotlib.pyplot as plt
 import time
 
-logz_std_threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 0.01
+cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
 
+log10_noise_level = float(sys.argv[3]) if len(sys.argv) > 3 else -6.0
 
-cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_Omk.yaml'
-
-clf_type = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
-clf_update_step = 1 if clf_type == 'svm' else 2
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'CMB_DESI_Omk_{clf_type}_mix_mcacq')
+        minus_inf=-1e5, noise_std=0.0,name=f'Camspec_{clf}_mcacq_WIPV_stdlgnconv')
 
 
 print("="*60)
-print("PLANCK DESI OMK CLF TEST")
+print("PLANCK CAMSPEC CLF TEST")
 print("="*60)
 print(f"Likelihood: {likelihood.name}")
 print(f"Parameters: {likelihood.param_list}")
 print(f"Dimensions: {len(likelihood.param_list)}")
-print(f"Classifier type: {clf_type}")
 print("="*60)
 
 
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init=64,
-        min_iters=750, max_eval_budget=2500, max_gp_size=1400,
+        min_iters=0, max_eval_budget=2500, max_gp_size=1400,
         loglikelihood=likelihood,
-        resume=False,
+        resume=True,
         resume_file=f'{likelihood.name}',
         save=True,
         fit_step=50, update_mc_step=5, ns_step=25,
-        noise = 1e-6,
+        noise = 10**log10_noise_level,
         zeta_ei=0.1,
         num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=300,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=30, clf_update_step=clf_update_step,
         clf_threshold=300, gp_threshold=500,
-        minus_inf=-1e5, logz_threshold=logz_std_threshold, seed=200)
+        minus_inf=-1e5, logz_threshold=0.01, seed=200)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=0)
+results = sampler.run(n_log_ei_iters=100)
 
 end = time.time()
 manual_timing = end - start
@@ -179,7 +175,7 @@ else:  # Dictionary format
 
 
 
-param_list_LCDM = ['omk','omch2','ombh2','logA','ns','H0','tau']
+param_list_LCDM = ['omch2','ombh2','logA','ns','H0','tau']
 plot_final_samples(
     gp, 
     {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},

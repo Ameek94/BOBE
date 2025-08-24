@@ -48,6 +48,7 @@ class BOBE:
                  resume=False,
                  resume_file=None,
                  save=True,
+                 noise = 1e-8,
                  fit_step=10,
                  update_mc_step=10,
                  ns_step=10,
@@ -57,6 +58,7 @@ class BOBE:
                  mc_points_method='NUTS',
                  lengthscale_priors='DSLP',
                  acq = 'WIPV',
+                 zeta_ei = 0.1,
                  use_clf=True,
                  clf_type = "svm",
                  clf_use_size = 300,
@@ -205,7 +207,7 @@ class BOBE:
             # GP setup
             if use_clf:
                 self.gp = GPwithClassifier(
-                train_x=train_x, train_y=train_y,
+                train_x=train_x, train_y=train_y,noise=noise,
                 minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
                 clf_type=clf_type, clf_use_size=clf_use_size, clf_update_step=clf_update_step,
                 clf_threshold=clf_threshold, gp_threshold=gp_threshold,)
@@ -216,7 +218,7 @@ class BOBE:
                     'SAAS': SAAS_GP
                 }[lengthscale_priors.upper()](
                 train_x=train_x, train_y=train_y,
-                noise=1e-8, kernel='rbf',)
+                noise=noise, kernel='rbf',)
             self.results_manager.start_timing('GP Training')
             self.gp.fit(maxiter=200,n_restarts=4)
             self.results_manager.end_timing('GP Training')
@@ -240,6 +242,7 @@ class BOBE:
         self.mc_points_size = mc_points_size
         self.minus_inf = minus_inf
         self.mc_points_method = mc_points_method
+        self.zeta_ei = zeta_ei
 
         if self.save:
             self.gp.save(outfile=f"{self.output_file}_gp")
@@ -330,12 +333,12 @@ class BOBE:
             self.results_manager.start_timing('Acquisition Optimization')
             if acq_str == 'WIPV':
                 acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
-                n_restarts = 4
+                n_restarts = 1
                 maxiter = 200
                 early_stop_patience = 25
             else:
-                acq_kwargs = {'zeta': 0.1, 'best_y': max(self.gp.train_y.flatten())}
-                n_restarts = 8
+                acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten())}
+                n_restarts = 10
                 maxiter = 500
                 early_stop_patience = 50
             new_pt_u, acq_val = self.acquisition.get_next_point(gp = self.gp, acq_kwargs=acq_kwargs,
@@ -595,11 +598,10 @@ class BOBE:
             bool: Whether convergence is achieved based on logz only
         """
         # Standard logz convergence check
-        delta = logz_dict['upper'] - logz_dict['lower'] # logz_dict['std'] # 
+        delta = logz_dict['std'] #logz_dict['upper'] - logz_dict['lower'] # # 
         converged = delta < threshold
         
         # Compute KL divergences if we have nested sampling samples
-        kl_results = None
         successive_kl = None
         
         if ns_samples is not None:
@@ -607,11 +609,6 @@ class BOBE:
                 # Get the three likelihood estimates from logz bounds
                 log_weights = np.log(ns_samples['weights'] + 1e-300)  # Avoid log(0)
                 logl = ns_samples['logl']
-                upper_logl = ns_samples['logl_upper']
-                lower_logl = ns_samples['logl_lower']
-
-                # Compute KL divergences between all combinations
-                kl_results = compute_kl_divergences(logl, upper_logl, lower_logl, log_weights)
 
                 # Compute successive KL if we have previous samples
                 if self.prev_samples is not None:
@@ -626,14 +623,11 @@ class BOBE:
                 equal_prev_samples, equal_prev_logl = resample_equal(ns_samples['x'], logl, ns_samples['weights'])
                 self.prev_samples = {'x': equal_prev_samples, 'logl': equal_prev_logl}
 
-                log.debug(f" KL divergences: sym_mean_upper={kl_results.get('sym_mean_upper', 0):.4f}, "
-                        f"sym_upper_lower={kl_results.get('sym_upper_lower', 0):.4f}")
                 if successive_kl:
-                    log.debug(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
+                    log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
 
             except Exception as e:
                 log.warning(f"Could not compute KL divergences: {e}")
-                kl_results = None
                 successive_kl = None
         
         # Update results manager with convergence info and KL divergences
@@ -645,10 +639,9 @@ class BOBE:
         )
         
         # Store KL divergences if computed
-        if kl_results is not None:
+        if successive_kl is not None:
             self.results_manager.update_kl_divergences(
                 iteration=step,
-                kl_results=kl_results,
                 successive_kl=successive_kl
             )
 

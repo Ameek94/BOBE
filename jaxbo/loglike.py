@@ -139,20 +139,21 @@ class CobayaLikelihood(ExternalLikelihood):
     def get_initial_points(self, n_cobaya_init=4,n_init_sobol=16):
         points, logpost = [], []
         progress_bar = tqdm.tqdm(range(n_cobaya_init), desc='Evaluating Cobaya reference points')
+        try:
+            rng = get_numpy_rng()
+        except Exception as e:
+            log.warning(f"Failed to get numpy RNG from seed utils: {e}, using default RNG.")
+            rng = np.random.default_rng()
         for _ in progress_bar:
             pt, res = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False,
-                                               logposterior_as_dict=True)
+                                               logposterior_as_dict=True,random_state=rng)
             points.append(pt)
             lp = res['logpost']
             logpost.append(self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol)
         
         r = np.arange(n_init_sobol)
         progress_bar = tqdm.tqdm(r, desc="Evaluating Sobol points")
-        try:
-            rng = get_numpy_rng()
-        except Exception as e:
-            log.warning(f"Failed to get numpy RNG from seed utils: {e}, using default RNG.")
-            rng = np.random.default_rng()
+
         sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=rng).random(n_init_sobol)
         sobol_points = scale_from_unit(sobol,self.param_bounds)
         for i in progress_bar:
