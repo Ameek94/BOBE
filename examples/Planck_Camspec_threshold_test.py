@@ -33,19 +33,19 @@ print("="*60)
 
 
 start = time.time()
-sampler = BOBE(n_cobaya_init=16, n_sobol_init=64,
-        min_iters=750, max_eval_budget=2500, max_gp_size=1400,
+sampler = BOBE(n_cobaya_init=16, n_sobol_init=16,
+        min_iters=750, max_eval_budget=2500, max_gp_size=1500,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}',
         save=True,
         fit_step=50, update_mc_step=5, ns_step=25,
         noise = 1e-6,
-        zeta_ei=0.1,
+        zeta_ei=0.01,
         num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=300,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=30, clf_update_step=clf_update_step,
-        clf_threshold=300, gp_threshold=500,
+        clf_threshold=300, gp_threshold=1000,
         minus_inf=-1e5, logz_threshold=logz_std_threshold, seed=200)
 
 # Run BOBE with automatic timing collection
