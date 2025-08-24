@@ -318,7 +318,7 @@ class BOBE:
             ii+=1
             refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and ii >= self.min_iters
-            update_mc = (ii % self.update_mc_step == 0) and not ns_flag
+            update_mc = not ns_flag # (ii % self.update_mc_step == 0) and
 
             if (ii - start_iteration > n_log_ei_iters) and self.acquisition.name in ['EI','LogEI']:
                 # change acquisition function to WIPV after a minimum of n_log_ei_iters EI, LogEI
@@ -336,31 +336,52 @@ class BOBE:
                 n_restarts = 1
                 maxiter = 200
                 early_stop_patience = 25
+                n_batch = self.update_mc_step # since we only need to update true GP before doing the next MCMC
             else:
                 acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten())}
                 n_restarts = 10
                 maxiter = 500
                 early_stop_patience = 50
-            new_pt_u, acq_val = self.acquisition.get_next_point(gp = self.gp, acq_kwargs=acq_kwargs,
-                                                                n_restarts=n_restarts, maxiter=maxiter, early_stop_patience=early_stop_patience)
+                n_batch = 1
+
+            new_pts_u, acq_vals = self.acquisition.get_next_batch(gp = self.gp, 
+                                                                  n_batch = n_batch,
+                                                                  acq_kwargs=acq_kwargs,
+                                                                  n_restarts=n_restarts, 
+                                                                  maxiter=maxiter, 
+                                                                  early_stop_patience=early_stop_patience)
             self.results_manager.end_timing('Acquisition Optimization')
-            new_pt_u = jnp.atleast_2d(new_pt_u)  # Ensure new_pt_u is at least 2D
+            new_pts_u = jnp.atleast_2d(new_pts_u)  # Ensure new_pt_u is at least 2D
             
-            new_pt = scale_from_unit(new_pt_u, self.loglikelihood.param_bounds)
+            new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
+
+            acq_val = float(np.mean(acq_vals))
 
             log.info(f" Acquisition value {acq_val:.4e} at new point")
             self.results_manager.update_acquisition(ii, acq_val, acq_str)
 
             self.results_manager.start_timing('True Objective Evaluations')
-            new_val = self.loglikelihood(
-                new_pt, logp_args=(), logp_kwargs={}
+            new_vals = self.loglikelihood(
+                new_pts, logp_args=(), logp_kwargs={}
             )
-            current_evals += 1
+            current_evals += n_batch
             self.results_manager.end_timing('True Objective Evaluations')
 
-            new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pt.flatten())}
-            log.info(f" New point {new_pt_vals}")
-            log.info(f" Objective function value = {new_val.item():.4f}, GP predicted value = {self.gp.predict_mean(new_pt_u).item():.4f}")
+            for k in range(n_batch):
+                new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pts[k].flatten())}
+                log.info(f" New point {new_pt_vals}, {k+1}/{n_batch}")
+                log.info(f" Objective function value = {new_vals[k].item():.4f}, GP predicted value = {self.gp.predict_mean(new_pts_u[k]).item():.4f}")
+
+            # GP Training and timing
+            if refit:
+                self.results_manager.start_timing('GP Training')
+            pt_exists_or_below_threshold = self.gp.update(new_pts_u, new_vals, refit=refit,step=ii,n_restarts=4)
+            if refit:
+                self.results_manager.end_timing('GP Training')
+            log.info(f"New GP y_mean: {self.gp.y_mean:.4f}, y_std: {self.gp.y_std:.4f}")
+            log.info("Updated GP with new point.")
+            log.info(f" GP training size = {self.gp.npoints}")
+
 
             # Extract GP hyperparameters for tracking
             lengthscales = list(self.gp.lengthscales)
@@ -369,13 +390,6 @@ class BOBE:
 
             # Update results manager with iteration info (simplified)
             self.results_manager.update_iteration(iteration=ii)
-
-            # GP Training and timing
-            if refit:
-                self.results_manager.start_timing('GP Training')
-            pt_exists_or_below_threshold = self.gp.update(new_pt_u, new_val, refit=refit,step=ii,n_restarts=4)
-            if refit:
-                self.results_manager.end_timing('GP Training')
 
             if (pt_exists_or_below_threshold and self.mc_samples['method'] == 'MCMC'):
                 update_mc = True
@@ -388,9 +402,13 @@ class BOBE:
                     thinning=4, method=self.mc_points_method)
                 self.results_manager.end_timing('MCMC Sampling')
 
-            if float(new_val) > self.best_f:
-                self.best_f = float(new_val)
-                self.best_pt = new_pt
+
+            best_new_idx = np.argmax(new_vals)
+            best_new_val = float(np.max(new_vals))
+            best_new_pt = new_pts[best_new_idx]
+            if float(best_new_val) > self.best_f:
+                self.best_f = float(best_new_val)
+                self.best_pt = best_new_pt
                 self.best = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt.flatten())}
                 best_pt_iteration = ii
             
@@ -399,11 +417,9 @@ class BOBE:
             
             log.info(f" Current best point {self.best} with value = {self.best_f:.4f}, found at iteration {best_pt_iteration}")
 
-
-
             if ii % 4 == 0 and ii > 0:
                 jax.clear_caches()
-
+ 
             if (ii % 10 == 0) and self.save:
                 log.info(" Saving GP to file")
                 self.gp.save(outfile=f"{self.output_file}_gp")

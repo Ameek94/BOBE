@@ -11,6 +11,7 @@ from .optim import optimize
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
+from .gp import GP
 config.update("jax_enable_x64", True)
 log = get_logger("[acq]")
 
@@ -176,28 +177,65 @@ class AcquisitionFunction:
     def fun(self, x):
         raise NotImplementedError
 
-    def get_next_point(self, fun_args: Tuple = (), fun_kwargs: Dict[str, Any] = {}, step: int = 0) -> Tuple[np.ndarray, float]:
+    def get_next_point(self, gp: GP,
+                       acq_kwargs: Dict[str, Any] = {},
+                       optimizer_name: str = "adam",
+                       lr: float = 0.001,
+                       optimizer_kwargs: dict | None = {},
+                       maxiter: int = 500,
+                       n_restarts: int = 8,
+                       verbose: bool = True,
+                       early_stop_patience: int = 25,) -> Tuple[np.ndarray, float]:
         """
         Optimize the acquisition function to obtain the next point to sample.
-        
+
         Args:
             gp: Gaussian process model
             ndim: Number of dimensions (inferred from bounds if not provided)
             optimizer_name: Name of optimizer to use
             **kwargs: Additional arguments passed to optimize()
-        
-        Returns:
-            Tuple of (best_x, best_value)
+
         """
 
         raise NotImplementedError("Base class get_next() not implemented")
 
-    def get_next_batch(self, n_batch: int = 1, fun_args: Tuple = (), fun_kwargs: Dict[str, Any] = {}, step: int = 0) -> Tuple[np.ndarray, float]:
+    def get_next_batch(self, gp: GP,
+                       n_batch: int = 1,
+                       acq_kwargs: Dict[str, Any] = {},
+                       optimizer_name: str = "adam",
+                       lr: float = 0.001,
+                       optimizer_kwargs: dict | None = {},
+                       maxiter: int = 500,
+                       n_restarts: int = 8,
+                       verbose: bool = True,
+                       early_stop_patience: int = 25,) -> Tuple[np.ndarray, float]:
 
         """
         Get the next batch of points to sample.
         """
-        raise NotImplementedError("Base class get_next_batch() not implemented")
+
+        dummy_gp = gp.copy()
+
+        x_batch, acq_vals = [], []
+
+        for i in range(n_batch):
+            x_next, acq_val_next = self.get_next_point(dummy_gp, acq_kwargs=acq_kwargs,
+                                                        optimizer_name=optimizer_name,
+                                                        lr=lr,
+                                                        optimizer_kwargs=optimizer_kwargs,
+                                                        maxiter=maxiter,
+                                                        n_restarts=n_restarts,
+                                                        verbose=verbose,
+                                                        early_stop_patience=early_stop_patience)
+            x_batch.append(x_next)
+            acq_vals.append(acq_val_next)
+
+            mu = dummy_gp.predict_mean_single(x_next)
+            dummy_gp.update(x_next, mu,refit=False)
+
+        return np.array(x_batch), np.array(acq_vals)
+
+        # raise NotImplementedError("Base class get_next_batch() not implemented")
 
 class EI(AcquisitionFunction):
     """Expected Improvement acquisition function"""

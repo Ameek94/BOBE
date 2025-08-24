@@ -176,6 +176,7 @@ class GP:
         self.ndim = train_x.shape[1]
         self.y_mean = jnp.mean(train_y)
         self.y_std = jnp.std(train_y)
+        self.kernel_name = kernel if kernel=="rbf" else "matern"
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
         self.noise = noise
 
@@ -276,38 +277,37 @@ class GP:
             Whether the point new_x, new_y already exists in the training set.
 
         """
-        if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
-            log.info(f"Point {new_x} already exists in the training set, not updating")
-            return True
-        else:
-            # k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
-            #             noise=self.noise,include_noise=False).flatten()           # shape (n,)
-            # k_self = self.kernel(new_x,new_x,self.lengthscales,
-            #               self.outputscale,noise=self.noise,include_noise=True)[0, 0]  # scalar            
-            self.add(new_x,new_y)
-            if refit:
-                self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+        new_x = jnp.atleast_2d(new_x)
+        new_y = jnp.atleast_2d(new_y)
+
+        duplicate = False
+        for i in range(new_x.shape[0]):
+            if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x[i], atol=1e-6,rtol=1e-4), axis=1)):
+                log.info(f"Point {new_x[i]} already exists in the training set, not updating")
+                duplicate = True
             else:
-                # self.fit(lr=lr,maxiter=100,n_restarts=1)
-                K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True)
-                self.cholesky = jnp.linalg.cholesky(K)
-                # self.cholesky = fast_update_cholesky(self.cholesky,k,k_self)
-                self.alphas = cho_solve((self.cholesky, True), self.train_y)
-            return False
+                self.add(new_x[i],new_y[i])
+        if refit:
+            self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+        else:
+            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True)
+            self.cholesky = jnp.linalg.cholesky(K)
+            self.alphas = cho_solve((self.cholesky, True), self.train_y)
+        return duplicate
 
     def add(self,new_x,new_y):
         """
         Updates the GP with new training points.
         """
+        new_x = jnp.atleast_2d(new_x)
+        new_y = jnp.atleast_2d(new_y)
         self.train_x = jnp.concatenate([self.train_x,new_x])
         self.train_y = self.train_y*self.y_std + self.y_mean 
         self.train_y = jnp.concatenate([self.train_y,new_y])
         self.y_mean = jnp.mean(self.train_y.flatten(),axis=0)
         self.y_std = jnp.std(self.train_y.flatten(),axis=0)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
-        log.info(f"New GP y_mean: {self.y_mean:.4f}, y_std: {self.y_std:.4f}")
-        log.info("Updated GP with new point.")
-        log.info(f" GP training size = {self.npoints}")
+
 
     def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
@@ -560,6 +560,32 @@ class GP:
         }
 
         return samples_dict
+    
+    def copy(self):
+        """
+        Returns a deep copy of the GP with the same training data, hyperparameters,
+        and fitted state. The copy is independent: modifications to the new GP do 
+        not affect the original.
+        """
+        train_y= self.train_y * self.y_std + self.y_mean
+
+        gp_copy = GP(
+            train_x=self.train_x,
+            train_y=train_y,
+            noise=float(self.noise),
+            kernel=self.kernel_name,
+            optimizer="adam",  # or pass through if you extend GP further
+            outputscale_bounds=self.outputscale_bounds,
+            lengthscale_bounds=self.lengthscale_bounds,
+            lengthscales=jnp.array(self.lengthscales, copy=True),
+            outputscale=float(self.outputscale)
+        )
+
+        gp_copy.alphas = jnp.array(self.alphas, copy=True)
+        gp_copy.cholesky = jnp.array(self.cholesky, copy=True)
+        gp_copy.fitted = self.fitted
+
+        return gp_copy
 
     @property
     def hyperparams(self):
@@ -577,6 +603,8 @@ class GP:
         Returns the number of training points.
         """
         return self.train_x.shape[0]
+    
+
     
 
 
