@@ -8,111 +8,93 @@ from .logging_utils import get_logger
 log = get_logger("[pool]")
 
 
-# This block attempts to initialize MPI. If it fails or if only one process
-# is used, it sets up variables for serial execution.
-# A reusable module for MPI-based or serial task parallelism.
+# A reusable module for MPI-based or serial task parallelism. 
+# In BOBE, this is used to evaluate the likelihood in parallel for a batch of candidate points.
 
 try:
     from mpi4py import MPI
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
-    is_mpi_run = True if size > 1 else False
+    IS_MPI_AVAILABLE = True
 except ImportError:
-    comm = None
-    rank = 0
-    size = 1
-    is_mpi_run = False
+    MPI = None
+    IS_MPI_AVAILABLE = False
 
 class MPI_Pool:
-    """
-    A Pool class that abstracts MPI parallelism. It is agnostic of the
-    function it will execute.
-    """
+    """A hybrid pool that supports the 'pre-instantiate' pattern for MPI
+    and provides a serial fallback."""
+    
     def __init__(self):
-        self.comm = comm
-        self.rank = rank
-        self.size = size
-        self.is_mpi = is_mpi_run
-
-        # On worker processes, this call blocks and enters the listening loop.
-        if self.is_mpi and not self.is_master():
-            self._worker_loop()
+        """Initializes the pool based on whether MPI is available and active."""
+        # ⭐ 2. The __init__ logic now depends on the top-level flag.
+        if IS_MPI_AVAILABLE:
+            self.comm = MPI.COMM_WORLD
+            self.rank = self.comm.Get_rank()
+            self.size = self.comm.Get_size()
+            self.is_mpi = self.size > 1
+        else:
+            self.comm = None
+            self.rank = 0
+            self.size = 1
+            self.is_mpi = False
 
     def is_master(self):
-        """Returns True if the current process is the master (rank 0)."""
         return self.rank == 0
 
-    def map(self, function, tasks):
+    def run_map(self, function, tasks):
         """
-        Maps a function over a list of tasks, in parallel or serially.
-
-        The 'function' object itself is sent to the workers.
+        MASTER METHOD: Manages task distribution.
         """
         if not self.is_master():
             return None
 
         if not self.is_mpi:
-            # Serial execution is straightforward
-            return [function(task) for task in tasks]
-        else:
-            # Parallel (MPI) Execution
-            n_tasks = len(tasks)
-            results = [None] * n_tasks
-            task_index = 0
-            workers_busy = 0
-            
-            # Send initial tasks to all workers
-            for worker_rank in range(1, self.size):
-                if task_index < n_tasks:
-                    # ⭐ KEY CHANGE: Send the function along with the task
-                    payload = (function, tasks[task_index], task_index)
-                    self.comm.send(payload, dest=worker_rank)
-                    task_index += 1
-                    workers_busy += 1
-            
-            # Receive results and dispatch remaining tasks
-            while workers_busy > 0:
-                status = MPI.Status()
-                result_payload = self.comm.recv(source=MPI.ANY_SOURCE, status=status)
-                worker_rank = status.Get_source()
-                
-                result, original_index = result_payload
-                results[original_index] = result
-                
-                if task_index < n_tasks:
-                    payload = (function, tasks[task_index], task_index)
-                    self.comm.send(payload, dest=worker_rank)
-                    task_index += 1
-                else:
-                    workers_busy -= 1
-            
-            return results
+            return function(tasks)
 
-    def _worker_loop(self):
+        # This MPI-specific block is now safe because if we reach here,
+        # we know 'is_mpi' is True, which means the MPI import succeeded.
+        n_tasks = len(tasks)
+        results = [None] * n_tasks
+        task_index = 0
+        
+        for worker_rank in range(1, self.size):
+            if task_index < n_tasks:
+                self.comm.send((tasks[task_index], task_index), dest=worker_rank)
+                task_index += 1
+        
+        for _ in range(n_tasks):
+            # ⭐ 3. This call is now safe.
+            status = MPI.Status()
+            result, original_index = self.comm.recv(source=MPI.ANY_SOURCE, status=status)
+            worker_rank = status.Get_source()
+            
+            results[original_index] = result
+            
+            if task_index < n_tasks:
+                self.comm.send((tasks[task_index], task_index), dest=worker_rank)
+                task_index += 1
+        
+        return np.array(results)
+
+    def worker_listen(self, function):
         """
-        Worker's main loop. It receives a function and a task, executes,
-        and returns the result.
+        WORKER METHOD: Listens for tasks. Only runs in MPI mode.
         """
+        if self.is_master() or not self.is_mpi:
+            return
+
         while True:
             payload = self.comm.recv(source=0)
-            
-            if payload is None: # Termination signal
+            if payload is None:
                 break
-            
-            # Unpack the function to be executed
-            func_to_run, task, original_index = payload
-            
-            # Execute the received function with the task
-            result = func_to_run(task)
 
-            log.info(f"Worker {self.rank} completed a task.")
+            point, original_index = payload
+            result = function(point)
+            self.comm.send((result, original_index), dest=0)
             
-            result_payload = (result, original_index)
-            self.comm.send(result_payload, dest=0)
-
     def close(self):
-        """On the master, sends a termination signal to all workers."""
-        if self.is_mpi and self.is_master():
+        """
+        MASTER METHOD: Sends a termination signal to all worker processes.
+        """
+        if self.is_master() and self.is_mpi:
             for worker_rank in range(1, self.size):
                 self.comm.send(None, dest=worker_rank)
+

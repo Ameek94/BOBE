@@ -69,28 +69,55 @@ class BaseLikelihood:
 
         log.info(f"Initialized {self.name} with {self.ndim} params")
 
+    def _safe_eval(self, x: np.ndarray) -> float:
+        """Helper method to safely evaluate a single point."""
+        try:
+            val = float(self.logp(x))
+        except Exception:
+            return self.minus_inf
+
+        if np.isnan(val) or np.isinf(val) or val < self.minus_inf:
+            return self.minus_inf
+        return val
+
     def __call__(self, X: Union[np.ndarray, List[float]]) -> np.ndarray:
         """
-        Evaluate log-likelihood at one or more points X.
+        ⭐ 2. __call__ now performs direct evaluation. It handles both
+        a single point (from a worker) and a batch of points (in a serial run).
         """
-        X = np.atleast_2d(X)
-        if X.shape[1] != self.ndim:
-            raise ValueError(f"Input shape {X.shape} does not match ndim {self.ndim}")
+        points = np.atleast_2d(X)
+        if points.shape[1] != self.ndim:
+            raise ValueError(f"Input shape {points.shape} does not match ndim {self.ndim}")
 
-        tasks = [(self.logp, self.minus_inf, point) for point in X]
-        
-        vals = self.pool.map(_loglike_worker, tasks)
+        # This simple loop is the core logic.
+        # In a serial run, it evaluates all points.
+        # In an MPI run, a worker receives a single point, so it evaluates one.
+        vals = [self._safe_eval(p) for p in points]
 
-        vals = np.array(vals).reshape(X.shape[0], 1)
-        return vals
+        print(f"Evaluated {len(vals)} points at rank {self.pool.rank}")
+
+        return np.array(vals).reshape(len(vals), 1)
 
     def get_initial_points(self, n_sobol_init=8, rng=None):
-        """Sobol initialization by default, can be overridden in subclasses."""
+        """
+        This method now works correctly in both serial and MPI modes without change,
+        because the __call__ it uses is now hybrid.
+        """
         from scipy.stats import qmc
         sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=rng).random(n_sobol_init)
         sobol_points = scale_from_unit(sobol, self.param_bounds)
-        vals = self.__call__(sobol_points)
+        
+        # The master process calls this method. It then calls pool.run_map(self, sobol_points)
+        # to get the values, which works in both modes.
+        # To simplify, we assume initial points are always generated on the master.
+        if self.pool.is_master():
+             vals = self.pool.run_map(self.__call__, sobol_points)
+        else:
+            # Workers don't generate initial points
+            vals = np.empty((n_sobol_init, 1))
+
         return sobol_points, vals
+
 
 class ExternalLikelihood(BaseLikelihood):
     """Wrapper around a user-provided log-likelihood function."""
@@ -143,23 +170,30 @@ class CobayaLikelihood(BaseLikelihood):
 
         self.cobaya_model = cobaya_model
 
-    def __call__(self, X, *args, **kwargs):
-        vals = super().__call__(X, *args, **kwargs)
-        vals = np.where(vals<=self.minus_inf, self.minus_inf, vals + self.logprior_vol)
+    def __call__(self, X) -> np.ndarray:
+        # ⭐ 3. The signature is simplified. It calls the parent's now-functional
+        # __call__ method and then applies its specific corrections.
+        vals = super().__call__(X)
+        vals = np.where(vals <= self.minus_inf, self.minus_inf, vals + self.logprior_vol)
         return vals
 
     def get_initial_points(self, n_cobaya_init=4, n_sobol_init=16, rng=None):
+        # This method also now works correctly because the underlying calls
+        # are compatible with the new pool.
         points, logpost = [], []
+        if self.pool.is_master():
+            for _ in range(n_cobaya_init):
+                pt, res = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False,
+                                                            logposterior_as_dict=True, random_state=rng)
+                points.append(pt)
+                lp = res["logpost"]
+                logpost.append(self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol)
 
-        for _ in range(n_cobaya_init):
-            pt, res = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False,
-                                                        logposterior_as_dict=True, random_state=rng)
-            points.append(pt)
-            lp = res["logpost"]
-            logpost.append(self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol)
+            sobol_points, sobol_vals = super().get_initial_points(n_sobol_init, rng=rng)
+            points.extend(sobol_points)
+            logpost.extend(sobol_vals.flatten())
 
-        sobol_points, sobol_vals = super().get_initial_points(n_sobol_init, rng=rng)
-        points.extend(sobol_points)
-        logpost.extend(sobol_vals.flatten())
-
-        return np.array(points), np.array(logpost).reshape(len(points), 1)
+            return np.array(points), np.array(logpost).reshape(len(points), 1)
+        else:
+            # Workers return empty arrays of the correct shape to avoid errors
+            return np.empty((n_cobaya_init + n_sobol_init, self.ndim)), np.empty((n_cobaya_init + n_sobol_init, 1))

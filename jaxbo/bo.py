@@ -132,6 +132,7 @@ class BOBE:
             Value to use for minus infinity. This is used to set the lower bound of the loglikelihood.
         """
 
+        self.pool = pool
 
 
         set_global_seed(seed)
@@ -369,7 +370,7 @@ class BOBE:
             self.results_manager.update_acquisition(ii, acq_val, acq_str)
 
             self.results_manager.start_timing('True Objective Evaluations')
-            new_vals = self.loglikelihood(new_pts)
+            new_vals = self.pool.run_map(self.loglikelihood, new_pts) #self.loglikelihood(new_pts)
             
             current_evals += n_batch
             self.results_manager.end_timing('True Objective Evaluations')

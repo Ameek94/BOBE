@@ -1,88 +1,78 @@
+import os
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+    os.cpu_count()
+)
 from jaxbo.bo import BOBE
-from jaxbo.loglike import ExternalLikelihood
-from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter 
+from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
+from jaxbo.loglike import CobayaLikelihood
+import time
 import matplotlib.pyplot as plt
-import time
-import sys
-from jaxbo.nested_sampler import renormalise_log_weights
-from getdist import MCSamples
-from dynesty import DynamicNestedSampler
-import numpy as np
-import time
-from jaxbo.utils.pool import MPI_Pool   
+from jaxbo.utils.pool import MPI_Pool
+from jaxbo.run import run_bobe
 
-def loglike(X,slow=False):
-    logpdf = -0.25*(5*(0.2-X[0]))**2 - (20*(X[1]/4 - X[0]**4))**2
-    if slow:
-        time.sleep(2)  # Simulate a time-consuming computation
-    return logpdf
 
-def prior_transform(x):
-    x[0] = x[0]*2 - 1 #x[0] * (param_bounds[0,1] - param_bounds[0,0]) + param_bounds[0,0]
-    x[1] = x[1]*3 - 1 #x[1] * (param_bounds[1,1] - param_bounds[1,0]) + param_bounds[1,0]
-    return x
 
 
 def main():
 
-    ndim = 2
-    param_list = ['x1','x2']
-    param_labels = ['x_1','x_2']
-    param_bounds = np.array([[-1,1],[-1,2]]).T
-
+    # Set up the cosmological likelihood
+    cobaya_input_file = './cosmo_input/BAO_SN_no_cmb.yaml'
 
     pool = MPI_Pool()
 
     if pool.is_mpi:
-        name = 'banana_mpi'
+        name = 'mpi'
     else:
-        name = 'banana_serial'
+        name = 'serial'
 
-    likelihood = ExternalLikelihood(loglikelihood=loglike,ndim=ndim,param_list=param_list,
-        param_bounds=param_bounds,param_labels=param_labels,
-        name=name,noise_std=0.0,minus_inf=-1e5,pool=pool)
+    likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
+        minus_inf=-1e5, noise_std=0.0, name=f'BAO_SN_no_cmb_{name}', pool=pool)
+
+    print("="*60)
+    print("BAO SN NO CMB MPI TIMING TEST")
+    print("="*60)
+    print(f"Likelihood: {likelihood.name}")
+    print(f"Parameters: {likelihood.param_list}")
+    print(f"Dimensions: {len(likelihood.param_list)}")
+    print("="*60)
+    print(f"Running with {pool.size} MPI processes.")
+    
+    start = time.time()
+    print("Starting BOBE run with automatic timing measurement...")
+
+    results = run_bobe(likelihood,
+        n_cobaya_init=4, 
+        n_sobol_init=8, 
+        min_iters=5, 
+        max_eval_budget=200,
+        max_gp_size=200,
+        fit_step=2, 
+        update_mc_step=4, 
+        ns_step=3,
+        num_hmc_warmup=512,
+        num_hmc_samples=512, 
+        mc_points_size=128,
+        lengthscale_priors='DSLP', 
+        use_clf=False,
+        clf_use_size=10,
+        clf_threshold=350,
+        clf_update_step=1,  # SVM update step
+        clf_type='svm',  # Using SVM for classification
+        minus_inf=-1e5,
+        logz_threshold=0.001,
+        seed=10,  # For reproducibility
+        do_final_ns=False,)
+
+    end = time.time()
 
     if pool.is_master():
-
-
-        dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,
-                                               sample='rwalk',logl_kwargs={'slow': False})
-
-        dns_sampler.run_nested(print_progress=True,dlogz_init=0.01) 
-        res = dns_sampler.results  
-        mean = res['logz'][-1]
-        logz_err = res['logzerr'][-1]
-        print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
-
-        samples = res['samples']
-        weights = renormalise_log_weights(res['logwt'])
-
-        reference_samples = MCSamples(samples=samples, names=param_list, labels=param_labels,
-                                    weights=weights, 
-                                    ranges= dict(zip(param_list,param_bounds.T)))
-
-        start = time.time()
-        sampler = BOBE(n_cobaya_init=4, n_sobol_init = 8, 
-            min_iters=2, max_eval_budget=100,max_gp_size=200,
-        loglikelihood=likelihood,
-        fit_step = 1, update_mc_step = 4, ns_step = 2,
-        num_hmc_warmup = 256,num_hmc_samples = 1024, mc_points_size = 128,
-        logz_threshold=1e-3,resume=False,mc_points_method='NUTS',
-        lengthscale_priors='DSLP', use_clf=False,minus_inf=-1e5,)
-
         # Run BOBE with automatic timing collection
-        print("Starting BOBE run with automatic timing measurement...")
-        results = sampler.run(n_log_ei_iters=0)
-
-        end = time.time()
         manual_timing = end - start
 
         print("\n" + "="*60)
         print("RUN COMPLETED")
         print("="*60)
         print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
-
-        pool.close()
 
         # Extract components for backward compatibility
         gp = results['gp']
@@ -144,16 +134,18 @@ def main():
         # Get GP and best loglike evolution data
         gp_data = results['results_manager'].get_gp_data()
         best_loglike_data = results['results_manager'].get_best_loglike_data()
+        acquisition_data = results['results_manager'].get_acquisition_data()
 
         # Create summary dashboard with timing data
         print("Creating summary dashboard...")
         fig_dashboard = plotter.create_summary_dashboard(
             gp_data=gp_data,
+            acquisition_data=acquisition_data,
             best_loglike_data=best_loglike_data,
             timing_data=timing_data,
             save_path=f"{likelihood.name}_dashboard.png"
         )
-        # plt.show()
+        plt.show()
 
         # Create individual timing plot
         print("Creating detailed timing plot...")
@@ -162,7 +154,7 @@ def main():
         ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
         plt.tight_layout()
         plt.savefig(f"{likelihood.name}_timing_detailed.png", dpi=300, bbox_inches='tight')
-        # plt.show()
+        plt.show()
 
         # Create evidence evolution plot if available
         if comprehensive_results.get('logz_history'):
@@ -172,7 +164,7 @@ def main():
             ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
             plt.tight_layout()
             plt.savefig(f"{likelihood.name}_evidence.png", dpi=300, bbox_inches='tight')
-            # plt.show()
+            plt.show()
 
         # Create acquisition function evolution plot
         print("Creating acquisition function evolution plot...")
@@ -183,7 +175,7 @@ def main():
             ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
             plt.tight_layout()
             plt.savefig(f"{likelihood.name}_acquisition_evolution.png", dpi=300, bbox_inches='tight')
-            # plt.show()
+            plt.show()
         else:
             print("No acquisition function data available for plotting.")
 
@@ -196,11 +188,18 @@ def main():
             sample_array = samples['x']
             weights_array = samples['weights']
 
-
-        plot_final_samples(gp,{'x': sample_array, 'weights': weights_array},
-                           param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
-                           param_labels=likelihood.param_labels,output_file=likelihood.name,reference_samples=reference_samples,
-                           reference_file=None,scatter_points=True,reference_label='Dynesty')
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            output_file=likelihood.name,
+            reference_file='./cosmo_input/chains/BAO_SN_no_cmb',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
+            scatter_points=False
+        )
 
         # Save comprehensive results
         print("\n" + "="*60)
@@ -214,8 +213,33 @@ def main():
         print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
         print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
         print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
+        print(f"✓ Acquisition evolution: {likelihood.name}_acquisition_evolution.png")
         print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
 
-if __name__ == "__main__":
-    main()
+        # Create timing comparison with previous runs (if comments in original file are accurate)
+        print("\n" + "="*60)
+        print("PERFORMANCE COMPARISON")
+        print("="*60)
 
+        # Previous timing from comments in original file
+        previous_times = {
+            "Fast updates": 292.68,
+            "Older code": 387.66
+        }
+
+        current_time = timing_data['total_runtime']
+        print(f"Current run: {current_time:.2f} seconds")
+
+        for version, prev_time in previous_times.items():
+            speedup = prev_time / current_time
+            improvement = ((prev_time - current_time) / prev_time) * 100
+            print(f"vs {version}: {speedup:.2f}x speedup ({improvement:+.1f}%)")
+
+        print("\n" + "="*60)
+        print("ANALYSIS COMPLETE")
+        print("="*60)
+        print("Check the generated plots and saved files for detailed analysis.")
+
+if __name__ == "__main__":
+    # Run the analysis
+    main()
