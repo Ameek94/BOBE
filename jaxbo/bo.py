@@ -409,6 +409,8 @@ class BOBE:
                 self.gp.save(outfile=f"{self.output_file}_gp")
 
             if ns_flag:
+                if not refit:
+                    self.gp.fit(maxiter=100,n_restarts=1)
                 log.info(" Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(

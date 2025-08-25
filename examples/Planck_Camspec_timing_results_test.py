@@ -42,7 +42,7 @@ sampler = BOBE(n_cobaya_init=16, n_sobol_init=16,
         num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=512,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf, clf_use_size=30, clf_update_step=clf_update_step,
-        clf_threshold=300, gp_threshold=400,
+        clf_threshold=300, gp_threshold=500,
         minus_inf=-1e5, logz_threshold=1., seed=100)
 
 # Run BOBE with automatic timing collection
