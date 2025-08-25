@@ -46,3 +46,4 @@ test_methods/
 *.ini
 *.png
 *.ranges
+*results_plots/

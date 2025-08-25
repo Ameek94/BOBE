@@ -15,7 +15,7 @@ from scipy import stats
 # from .acquisition import WIPV, EI #, logEI
 from .gp import GP, DSLP_GP, SAAS_GP, load_gp #, sample_GP_NUTS
 from .clf_gp import GPwithClassifier, load_clf_gp
-from .loglike import ExternalLikelihood, CobayaLikelihood
+from .loglike import BaseLikelihood, ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, compute_kl_divergences, compute_successive_kl
@@ -25,6 +25,7 @@ from .optim import optimize
 from .utils.logging_utils import get_logger
 from .utils.results import BOBEResults
 from .acquisition import *
+from .utils.pool import MPI_Pool
 
 log = get_logger("[bo]")
 log.info(f'JAX using {jax.device_count()} devices.')
@@ -34,6 +35,9 @@ _acq_funcs = {"wipv": WIPV, "ei": EI, "logei": LogEI}
 import numpy as np
 from scipy import stats
 import warnings
+
+
+# def safe_objective_eval(func,)
 
 
 class BOBE:
@@ -67,6 +71,7 @@ class BOBE:
                  gp_threshold=5000,
                  logz_threshold=1.0,
                  minus_inf=-1e5,
+                 pool: MPI_Pool = None,
                  do_final_ns=True,
                  return_getdist_samples=False,
                  seed: Optional[int] = None):
@@ -128,9 +133,10 @@ class BOBE:
         """
 
 
+
         set_global_seed(seed)
 
-        if not isinstance(loglikelihood, ExternalLikelihood):
+        if not isinstance(loglikelihood, BaseLikelihood):
             raise ValueError("loglikelihood must be an instance of ExternalLikelihood")
 
         self.loglikelihood = loglikelihood
@@ -199,9 +205,11 @@ class BOBE:
         else:
             # Fresh start - evaluate initial points
             self.results_manager.start_timing('True Objective Evaluations')
-            init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,
-                                    n_init_sobol=n_sobol_init)
-            self.results_manager.end_timing('True Objective Evaluations')            
+            if isinstance(self.loglikelihood, CobayaLikelihood):
+                init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,n_sobol_init=n_sobol_init)
+            else:
+                init_points, init_vals = self.loglikelihood.get_initial_points(n_sobol_init=n_sobol_init)
+            self.results_manager.end_timing('True Objective Evaluations')
             train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
             train_y = jnp.array(init_vals)
             # GP setup
@@ -357,13 +365,12 @@ class BOBE:
 
             acq_val = float(np.mean(acq_vals))
 
-            log.info(f" Acquisition value {acq_val:.4e} at new point")
+            log.info(f" Mean acquisition value {acq_val:.4e} at new point")
             self.results_manager.update_acquisition(ii, acq_val, acq_str)
 
             self.results_manager.start_timing('True Objective Evaluations')
-            new_vals = self.loglikelihood(
-                new_pts, logp_args=(), logp_kwargs={}
-            )
+            new_vals = self.loglikelihood(new_pts)
+            
             current_evals += n_batch
             self.results_manager.end_timing('True Objective Evaluations')
 

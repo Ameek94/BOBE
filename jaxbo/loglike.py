@@ -2,164 +2,164 @@
 from .utils.core_utils import scale_to_unit, scale_from_unit
 from typing import Any, Callable, List,Optional, Tuple, Union, Dict
 import numpy as np
-import tqdm
+from functools import partial
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from scipy.stats import qmc
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
+from .utils.pool import MPI_Pool
 import logging
-log = get_logger("[loglike]")
+import numpy as np
+import tqdm
+from typing import Any, Callable, List, Optional, Union, Dict
+from .utils.core_utils import scale_from_unit
+from .utils.logging_utils import get_logger
+
+log = get_logger("[likelihood]")
 
 
-class ExternalLikelihood:
+def _loglike_worker(payload: tuple) -> float:
+    """
+    Worker function is now simpler: it only expects the function and a point.
+    """
 
-    def __init__(self
-                 ,loglikelihood: Callable
-                 ,ndim: int
-                 ,param_list: Optional[list[str]] = None # ndim length
-                 ,param_labels: Optional[list[str]] = None# ndim length
-                 ,param_bounds: Optional[Union[list,np.ndarray]] = None # 2 x ndim shaped
-                 ,noise_std: float = 0.
-                 ,name: Optional[str] = None,
-                 vectorized: bool = False,
+    logp_func, minus_inf_val, x = payload
+    
+    try:
+        # The logp_func already has its args/kwargs baked in
+        val = float(logp_func(x)) 
+    except Exception:
+        return minus_inf_val
+
+    if np.isnan(val) or np.isinf(val) or val < minus_inf_val:
+        return minus_inf_val
+    return val
+
+class BaseLikelihood:
+    """Class for log-likelihoods with common evaluation logic."""
+
+    def __init__(self,
+                 loglikelihood: Callable,
+                 logp_args: Optional[Tuple[Any, ...]] = None,
+                 logp_kwargs: Optional[dict] = None,
+                 ndim: int = 1,
+                 param_list: Optional[List[str]] = None,
+                 param_labels: Optional[List[str]] = None,
+                 param_bounds: Optional[Union[List, np.ndarray]] = None,
+                 noise_std: float = 0.,
+                 name: Optional[str] = None,
                  minus_inf: float = -1e5,
-                 ) -> None:
+                 pool: MPI_Pool = None):
         
-        self.logp = loglikelihood
-        self.ndim = int(ndim)
-        self.param_list = param_list if param_list is not None else ['x_%i'%(i+1) for i in range(ndim)] # type: ignore
-        assert len(self.param_list)==ndim
-        self.param_labels = param_labels if param_labels is not None else ['x_{%i}'%(i+1) for i in range(ndim)] # type: ignore
-        assert len(self.param_list)==ndim
-        self.param_bounds = np.array(param_bounds) if param_bounds is not None else np.array(ndim*[[0,1]]).T # type: ignore
-        assert len(self.param_bounds.T)==ndim
-        self.noise_std = noise_std
-        self.name = name if name is not None else 'loglikelihood'
-        self.vectorized = vectorized
-        self.minus_inf = minus_inf
-        self.logprior_vol = np.log(np.prod(param_bounds[1] - param_bounds[0]))
-
-        log.info(f"Loglikelihood {self.name} initialized with params : {self.param_list},  bounds: \n{self.param_bounds.T} \nand labels: \n{self.param_labels}")
-
-    def __call__(self, x: Union[np.ndarray, List[float]]
-                 ,logp_args: tuple = ()
-                 ,logp_kwargs: dict[str,Any] = {}) -> Union[np.ndarray, float]:
-        x = np.atleast_2d(x)
-        if x.shape[1] != self.ndim:
-                raise ValueError(f"Input shape {x.shape} does not match ndim {self.ndim}")
-        if self.vectorized:
-            vals = self.logp(x,*logp_args,**logp_kwargs)
+        if logp_args or logp_kwargs:
+            self.logp = partial(loglikelihood, *(logp_args or ()), **(logp_kwargs or {}))
         else:
-            r = np.arange(x.shape[0])
-            progress_bar = tqdm.tqdm(r, desc="Evaluating Loglikelihood", leave=False)
-            vals = []
-            for i in progress_bar:
-                vals.append(self.logp(x[i],*logp_args,**logp_kwargs))
-            vals = np.array(vals)
-        # change nans and infs to minus_inf
-        vals = np.where(np.isnan(vals),self.minus_inf,vals)
-        vals = np.where(np.isinf(vals),self.minus_inf,vals)
-        vals = np.where(vals<self.minus_inf,self.minus_inf,vals)
-        vals = np.reshape(vals,(x.shape[0],1))
+            self.logp = loglikelihood
 
-        # add noise if specified
-        noise = self.noise_std * np.random.randn(x.shape[0],1)
+        self.ndim = int(ndim)
+        self.param_list = param_list if param_list is not None else [f"x_{i+1}" for i in range(ndim)]
+        self.param_labels = param_labels if param_labels is not None else [f"x_{{{i+1}}}" for i in range(ndim)]
+        self.param_bounds = np.array(param_bounds) if param_bounds is not None else np.array(ndim * [[0, 1]]).T
+        self.noise_std = noise_std
+        self.name = name or "loglikelihood"
+        self.minus_inf = minus_inf
+        self.logprior_vol = np.log(np.prod(self.param_bounds[1] - self.param_bounds[0]))
+        self.pool = pool if pool is not None else MPI_Pool()
 
-        return vals + noise
+        log.info(f"Initialized {self.name} with {self.ndim} params")
+
+    def __call__(self, X: Union[np.ndarray, List[float]]) -> np.ndarray:
+        """
+        Evaluate log-likelihood at one or more points X.
+        """
+        X = np.atleast_2d(X)
+        if X.shape[1] != self.ndim:
+            raise ValueError(f"Input shape {X.shape} does not match ndim {self.ndim}")
+
+        tasks = [(self.logp, self.minus_inf, point) for point in X]
         
-    def get_initial_points(self,n_init_sobol=8,n_cobaya_init=0):
-        points, logpost = [], []        
-        r = np.arange(n_init_sobol)
-        progress_bar = tqdm.tqdm(r, desc="Evaluating Sobol points")
-        sobol = qmc.Sobol(d=self.ndim, scramble=True).random(n_init_sobol)
-        sobol_points = scale_from_unit(sobol,self.param_bounds)
-        for i in progress_bar:
-            pt = sobol_points[i]
-            lp = self.logp(pt)
-            logpost.append(self.minus_inf if lp < self.minus_inf else lp)
-            points.append(pt)
-        return np.array(points), np.array(logpost).reshape(n_init_sobol, 1)
+        vals = self.pool.map(_loglike_worker, tasks)
 
+        vals = np.array(vals).reshape(X.shape[0], 1)
+        return vals
 
-class CobayaLikelihood(ExternalLikelihood):
-    """
-    Class for implementing external loglikelihoods using cobaya
-    """
+    def get_initial_points(self, n_sobol_init=8, rng=None):
+        """Sobol initialization by default, can be overridden in subclasses."""
+        from scipy.stats import qmc
+        sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=rng).random(n_sobol_init)
+        sobol_points = scale_from_unit(sobol, self.param_bounds)
+        vals = self.__call__(sobol_points)
+        return sobol_points, vals
 
-    def __init__(self, 
-                 input_file_dict: str| Dict[str, Any],
+class ExternalLikelihood(BaseLikelihood):
+    """Wrapper around a user-provided log-likelihood function."""
+
+    def __init__(self, loglikelihood: Callable, ndim: int, pool: MPI_Pool, **kwargs):
+        super().__init__(loglikelihood=loglikelihood, ndim=ndim, pool=pool, **kwargs)
+
+class CobayaLikelihood(BaseLikelihood):
+    """Likelihood wrapper for Cobaya models."""
+
+    def __init__(self,
+                 input_file_dict: Union[str, Dict[str, Any]],
                  confidence_for_unbounded: float = 0.9999995,
                  noise_std: float = 0,
                  minus_inf: float = -1e5,
-                 name: str | None = 'cobaya_model') -> None:
+                 name: str = "cobaya_model",
+                 pool: MPI_Pool = None):
+
         if isinstance(input_file_dict, str):
             info = yaml_load(input_file_dict)
-        elif isinstance(input_file_dict, dict):
+        else:
             info = input_file_dict
-        self.cobaya_model = get_model(info)
-        rootlogger = logging.getLogger() 
-        rootlogger.handlers.pop()    
-        # Parameter setup
-        param_list = list(self.cobaya_model.parameterization.sampled_params())
+
+        cobaya_model = get_model(info)
+
+        # Silence cobaya root logger
+        rootlogger = logging.getLogger()
+        if rootlogger.handlers:
+            rootlogger.handlers.clear()
+
+        param_list = list(cobaya_model.parameterization.sampled_params())
         param_bounds = np.array(
-            self.cobaya_model.prior.bounds(confidence_for_unbounded=confidence_for_unbounded)
+            cobaya_model.prior.bounds(confidence_for_unbounded=confidence_for_unbounded)
         ).T
-        self.logprior_vol = np.log(np.prod(param_bounds[1] - param_bounds[0]))
-        param_labels = [
-            self.cobaya_model.parameterization.labels()[k] for k in param_list
-        ]
+        param_labels = [cobaya_model.parameterization.labels()[k] for k in param_list]
         ndim = len(param_list)
 
-        loglikelihood = lambda x: self.cobaya_model.logpost(x, make_finite=True)
+        def cobaya_logp(x):
+            return cobaya_model.logpost(x, make_finite=False)
 
-        super().__init__(loglikelihood=loglikelihood, 
-                         ndim=ndim, 
-                         param_list=param_list, param_labels=param_labels, param_bounds=param_bounds, 
-                         noise_std=noise_std, name=name, vectorized=False, minus_inf=minus_inf)
+        super().__init__(loglikelihood=cobaya_logp,
+                         ndim=ndim,
+                         param_list=param_list,
+                         param_labels=param_labels,
+                         param_bounds=param_bounds,
+                         noise_std=noise_std,
+                         name=name,
+                         minus_inf=minus_inf,
+                         pool=pool)
 
-    def __call__(self, x, *logp_args, **logp_kwargs) -> np.ndarray:
-        x = np.atleast_2d(x)
-        if x.shape[1] != self.ndim:
-            raise ValueError(f"Input shape {x.shape} does not match ndim {self.ndim}")
-        r = np.arange(x.shape[0])
-        progress_bar = tqdm.tqdm(r, desc="Evaluating Loglikelihood", leave=False)
-        vals = []
-        for i in progress_bar:
-            pt = x[i]
-            lp = self.cobaya_model.logpost(pt,make_finite=False)
-            vals.append(lp)
-        vals = np.array(vals)
-        vals = np.where(np.isnan(vals),self.minus_inf,vals)
-        vals = np.where(np.isinf(vals),self.minus_inf,vals)
-        vals = np.where(vals<self.minus_inf,self.minus_inf,vals)
-        vals = np.reshape(vals,(x.shape[0],1))
-        return vals + self.logprior_vol
-    
-    def get_initial_points(self, n_cobaya_init=4,n_init_sobol=16):
+        self.cobaya_model = cobaya_model
+
+    def __call__(self, X, *args, **kwargs):
+        vals = super().__call__(X, *args, **kwargs)
+        vals = np.where(vals<=self.minus_inf, self.minus_inf, vals + self.logprior_vol)
+        return vals
+
+    def get_initial_points(self, n_cobaya_init=4, n_sobol_init=16, rng=None):
         points, logpost = [], []
-        progress_bar = tqdm.tqdm(range(n_cobaya_init), desc='Evaluating Cobaya reference points')
-        try:
-            rng = get_numpy_rng()
-        except Exception as e:
-            log.warning(f"Failed to get numpy RNG from seed utils: {e}, using default RNG.")
-            rng = np.random.default_rng()
-        for _ in progress_bar:
-            pt, res = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False,
-                                               logposterior_as_dict=True,random_state=rng)
-            points.append(pt)
-            lp = res['logpost']
-            logpost.append(self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol)
-        
-        r = np.arange(n_init_sobol)
-        progress_bar = tqdm.tqdm(r, desc="Evaluating Sobol points")
 
-        sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=rng).random(n_init_sobol)
-        sobol_points = scale_from_unit(sobol,self.param_bounds)
-        for i in progress_bar:
-            pt = sobol_points[i]
-            lp = self.cobaya_model.logpost(pt, make_finite=True)
-            logpost.append(self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol)
+        for _ in range(n_cobaya_init):
+            pt, res = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False,
+                                                        logposterior_as_dict=True, random_state=rng)
             points.append(pt)
-        
-        return np.array(points), np.array(logpost).reshape(n_cobaya_init+n_init_sobol, 1)
+            lp = res["logpost"]
+            logpost.append(self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol)
+
+        sobol_points, sobol_vals = super().get_initial_points(n_sobol_init, rng=rng)
+        points.extend(sobol_points)
+        logpost.extend(sobol_vals.flatten())
+
+        return np.array(points), np.array(logpost).reshape(len(points), 1)
