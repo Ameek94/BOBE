@@ -152,15 +152,15 @@ def train_with_restarts(
 
     for i in range(n_restarts):
         current_seed = rng.integers(0, 2**32 - 1)
-        log.info(f"[Restart {i+1}/{n_restarts}] Starting training with seed {current_seed}")
+        log.debug(f"[Restart {i+1}/{n_restarts}] Starting training with seed {current_seed}")
         
         # Use initial params for first restart, None for others
         restart_init_params = init_params if i == 0 else None
         
         if i == 0 and init_params is not None:
-            log.info(f"[Restart {i+1}/{n_restarts}] Using provided initial parameters")
+            log.debug(f"[Restart {i+1}/{n_restarts}] Using provided initial parameters")
         elif i > 0:
-            log.info(f"[Restart {i+1}/{n_restarts}] Using random initialization")
+            log.debug(f"[Restart {i+1}/{n_restarts}] Using random initialization")
 
         # Pass the pre-split data to avoid re-splitting
         predict_fn, params, metrics = train_fn(
@@ -178,9 +178,9 @@ def train_with_restarts(
             best_predict_fn = predict_fn
             best_params = params
             best_metrics = metrics
-            log.info(f"[Restart {i+1}/{n_restarts}] New best val_loss: {val_loss:.4e}")
+            log.debug(f"[Restart {i+1}/{n_restarts}] New best val_loss: {val_loss:.4e}")
 
-    log.info(f"[Training] Best model selected with val_loss = {best_val_loss:.4e}")
+    log.debug(f"[Training] Best model selected with val_loss = {best_val_loss:.4e}")
     return best_predict_fn, best_params, best_metrics
 
 
@@ -205,7 +205,7 @@ def train_nn(
     dropout_rate=0.1,
     lr=1e-3,
     weight_decay=1e-4,
-    n_epochs=750,
+    n_epochs=500,
     batch_size=128,
     early_stop_patience=50,
     seed=0,
@@ -267,7 +267,7 @@ def train_nn(
         else:
             patience -= 1
             if patience <= 0:
-                log.info(f"[NN] early stopping at epoch {epoch}")
+                log.debug(f"[NN] early stopping at epoch {epoch}")
                 break
 
     apply_fn = lambda xx: model.apply(best_params, xx, train=False)
@@ -338,7 +338,7 @@ def train_ellipsoid(
     x_val: jnp.ndarray, y_val: jnp.ndarray,
     lr: float = 1e-2,
     weight_decay: float = 1e-4,
-    n_epochs: int = 1000,
+    n_epochs: int = 500,
     batch_size: int = 32,
     seed: int = 0,
     patience: int = 50,
@@ -396,7 +396,7 @@ def train_ellipsoid(
         else:
             patience_counter += 1
             if patience_counter > patience:
-                log.info(f"Early stopping at epoch {epoch}")
+                log.debug(f"Early stopping at epoch {epoch}")
                 break
 
     train_loss = loss_fn(best_params, x_train, y_train)

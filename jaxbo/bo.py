@@ -197,10 +197,7 @@ class BOBE:
             # Resume from explicit file
             log.info(f" Resuming from file {resume_file}")
             # Use the standard naming convention: add _gp if not present
-            if not resume_file.endswith('_gp') and not resume_file.endswith('_gp.npz'):
-                gp_file = f"{resume_file}_gp"
-            else:
-                gp_file = resume_file
+            gp_file = resume_file
             if use_clf:
                 self.gp = load_clf_gp(gp_file)
             else:
@@ -374,6 +371,7 @@ class BOBE:
 
             self.results_manager.start_timing('True Objective Evaluations')
             new_vals = self.pool.run_map(self.loglikelihood, new_pts) #self.loglikelihood(new_pts)
+            new_vals = jnp.reshape(new_vals, (n_batch, 1))
             
             current_evals += n_batch
             self.results_manager.end_timing('True Objective Evaluations')
@@ -385,13 +383,10 @@ class BOBE:
                 log.info(f" Objective function value = {new_vals[k].item():.4f}, GP predicted value = {predicted_val.item():.4f}")
 
 
-            new_vals = jnp.reshape(new_vals, (n_batch, 1))
-            log.info(f" New vals shape: {new_vals.shape}")
-
             # GP Training and timing
             if refit:
                 self.results_manager.start_timing('GP Training')
-            pt_exists_or_below_threshold = self.gp.update(new_pts_u, new_vals, refit=refit,step=ii,n_restarts=4)
+            pt_exists_or_below_threshold = self.gp.update(new_pts_u, new_vals, refit=refit,n_restarts=4)
             if refit:
                 self.results_manager.end_timing('GP Training')
             log.info(f"New GP y_mean: {self.gp.y_mean:.4f}, y_std: {self.gp.y_std:.4f}")
@@ -638,13 +633,14 @@ class BOBE:
         
         if ns_samples is not None:
             try:
-                # Get the three likelihood estimates from logz bounds
                 log_weights = np.log(ns_samples['weights'] + 1e-300)  # Avoid log(0)
                 logl = ns_samples['logl']
 
                 # Compute successive KL if we have previous samples
                 if self.prev_samples is not None:
+
                     # compare different iterations with the equal weighted samples at the previous iteration.
+                    # this needs to be replace with a different calculationmethod due to the fake mode issue
                     prev_logl = self.prev_samples['logl']
                     prev_samples_x = self.prev_samples['x']
                     new_logl = jax.lax.map(gp.predict_mean_single,prev_samples_x,batch_size=200)

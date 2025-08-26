@@ -52,7 +52,7 @@ def setup_logging(verbosity='INFO', log_file=None):
     base_level = verbosity_levels.get(verbosity.upper(), logging.INFO)
     
     # Add rank to the log format for clarity in files
-    log_format = f'[{rank}: %(name)s] %(asctime)s %(levelname)s: %(message)s'
+    log_format = f'[{rank}: %(name)s] %(levelname)s: %(message)s' # %(asctime)s 
     formatter = logging.Formatter(log_format)
 
     root_logger = logging.getLogger()

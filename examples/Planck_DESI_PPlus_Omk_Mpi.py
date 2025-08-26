@@ -18,7 +18,9 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    name = str(sys.argv[2]) if len(sys.argv) > 2 else 'serial'
+    name = str(sys.argv[3]) if len(sys.argv) > 3 else 'serial'
+
+    clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 
     likelihood_name = f'Planck_DESI_PP_Omk_{name}'
     
@@ -34,13 +36,13 @@ def main():
         n_log_ei_iters=300,
         n_cobaya_init=8,
         n_sobol_init=32,
-        min_iters=180,
+        min_iters=400,
         max_eval_budget=2500,
         max_gp_size=1800,
-        fit_step=5, 
-        zeta_ei = 0.1,
+        fit_step=10, 
+        zeta_ei=0.1,
         update_mc_step=1, 
-        wipv_batch_size=6,
+        wipv_batch_size=5,
         ns_step=5,
         num_hmc_warmup=512,
         num_hmc_samples=5000, 
@@ -51,7 +53,7 @@ def main():
         clf_threshold=350,
         gp_threshold=500,
         clf_update_step=1,  # SVM update step
-        clf_type='svm',  # Using SVM for classification
+        clf_type=clf_type,  # Using SVM for classification
         minus_inf=-1e5,
         logz_threshold=0.02,
         seed=10,  # For reproducibility

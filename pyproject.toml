@@ -27,7 +27,8 @@ dependencies = [
     "getdist",
     "tqdm",
     "cobaya",
-    "dynesty"
+    "dynesty",
+    "scikit-learn"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

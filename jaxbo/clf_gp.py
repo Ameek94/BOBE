@@ -39,7 +39,8 @@ class GPwithClassifier:
                  noise=1e-8, kernel="rbf", optimizer="adam", 
                  outputscale_bounds=[-4, 4], lengthscale_bounds=[np.log10(0.05), 2],
                  lengthscale_priors='DSLP', lengthscales=None, outputscale=1.0,
-                 tausq=None, tausq_bounds=[-4, 4]
+                 tausq=None, tausq_bounds=[-4, 4],train_clf_on_init=True,  # Prevent retraining on copy
+
                  ):
         """
         Generic Classifier-GP class combining a GP with a classifier. The GP is trained on the data points
@@ -117,7 +118,8 @@ class GPwithClassifier:
         self._clf_predict_func = None # Will hold the jitted prediction function
 
         if self.use_clf and self.clf_type in available_classifiers:
-             self._train_classifier() # Initial training if enough data
+             if train_clf_on_init:
+                 self._train_classifier() # Initial training if enough data
         elif self.use_clf and self.clf_type not in available_classifiers:
              raise ValueError(f"Classifier type '{self.clf_type}' not supported. Available: {list(available_classifiers.keys())}")
         else:
@@ -222,7 +224,7 @@ class GPwithClassifier:
         """
         return self.gp.fantasy_var(new_x, mc_points,k_train_mc)
 
-    def update(self, new_x, new_y, refit=True, lr=5e-3, maxiter=300, n_restarts=4, step=0):
+    def update(self, new_x, new_y, refit=True, lr=5e-3, maxiter=300, n_restarts=4):
         """
         Updates the classifier and GP training sets.
         Retrains classifier/GP based on thresholds and steps.
@@ -270,7 +272,7 @@ class GPwithClassifier:
                     self.use_clf = True
 
             # Retrain classifier if conditions are met
-            if self.use_clf and (step % self.clf_update_step == 0):
+            if self.use_clf: #
                 self._train_classifier()
 
         # Return whether GP was updated, classifier is always updated
@@ -543,10 +545,18 @@ class GPwithClassifier:
             lengthscale_priors="DSLP",  # or SAAS depending on your setup
             lengthscales=np.array(self.gp.lengthscales),
             outputscale=float(self.gp.outputscale),
+            train_clf_on_init=False,
         )
 
         # Replace the gp with the already-trained copy
         gp_clf_copy.gp = gp_copy
+
+        # Copy classifier state
+        gp_clf_copy.clf_params = copy.deepcopy(self.clf_params)
+        gp_clf_copy.clf_metrics = copy.deepcopy(self.clf_metrics)
+        gp_clf_copy.use_clf = self.use_clf
+        # gp_clf_copy._clf_predict_func = self._clf_predict_func # Pass the jitted function directly
+
 
         # # Copy classifier state (but not retrain unless explicitly needed)
         # gp_clf_copy.clf_params = copy.deepcopy(self.clf_params)

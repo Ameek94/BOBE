@@ -256,7 +256,7 @@ class GP:
         x = jnp.atleast_2d(x)
         return jax.vmap(self.predict_single, in_axes=0,out_axes=(0,0))(x)
 
-    def update(self,new_x,new_y,refit=True,lr=5e-3,maxiter=300,n_restarts=4,step=0):
+    def update(self,new_x,new_y,refit=True,lr=5e-3,maxiter=300,n_restarts=4):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 
