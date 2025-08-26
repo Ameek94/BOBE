@@ -15,7 +15,7 @@ from .gp import GP
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
 from scipy.special import logsumexp
-log = get_logger("[ns]")
+log = get_logger("ns")
 
 # try:
 from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool

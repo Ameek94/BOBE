@@ -2,45 +2,39 @@ import os
 os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
-from jaxbo.bo import BOBE
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
-from jaxbo.loglike import CobayaLikelihood
 import time
 import matplotlib.pyplot as plt
-from jaxbo.utils.pool import MPI_Pool
 from jaxbo.run import run_bobe
+from jaxbo.utils.logging_utils import get_logger
 
-
-
+# Check for MPI to set the likelihood name correctly
+try:
+    from mpi4py import MPI
+    is_mpi = MPI.COMM_WORLD.Get_size() > 1
+except ImportError:
+    is_mpi = False
 
 def main():
 
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/BAO_SN_no_cmb.yaml'
-
-    pool = MPI_Pool()
-
-    if pool.is_mpi:
-        name = 'mpi'
-    else:
-        name = 'serial'
-
-    likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0, name=f'BAO_SN_no_cmb_{name}', pool=pool)
-
-    print("="*60)
-    print("BAO SN NO CMB MPI TIMING TEST")
-    print("="*60)
-    print(f"Likelihood: {likelihood.name}")
-    print(f"Parameters: {likelihood.param_list}")
-    print(f"Dimensions: {len(likelihood.param_list)}")
-    print("="*60)
-    print(f"Running with {pool.size} MPI processes.")
     
-    start = time.time()
-    print("Starting BOBE run with automatic timing measurement...")
+    run_type = 'mpi' if is_mpi else 'serial'
+    likelihood_name = f'BAO_SN_no_cmb_{run_type}'
 
-    results = run_bobe(likelihood,
+    start = time.time()
+    print("Starting BOBE run...")
+
+    results = run_bobe(
+        likelihood=cobaya_input_file,
+        likelihood_kwargs={
+            'confidence_for_unbounded': 0.9999995,
+            'minus_inf': -1e5,
+            'noise_std': 0.0,
+            'name': likelihood_name,
+        },
+        verbosity='INFO',
         n_cobaya_init=4, 
         n_sobol_init=8, 
         min_iters=5, 
@@ -53,80 +47,83 @@ def main():
         num_hmc_samples=512, 
         mc_points_size=128,
         lengthscale_priors='DSLP', 
-        use_clf=False,
+        use_clf=True,
         clf_use_size=10,
         clf_threshold=350,
-        clf_update_step=1,  # SVM update step
-        clf_type='svm',  # Using SVM for classification
+        clf_update_step=1,
+        clf_type='svm',
         minus_inf=-1e5,
         logz_threshold=0.001,
-        seed=10,  # For reproducibility
-        do_final_ns=False,)
+        seed=10,
+        do_final_ns=False,
+    )
 
     end = time.time()
 
-    if pool.is_master():
-        # Run BOBE with automatic timing collection
+    if results is not None:
+        log = get_logger("[main]")
         manual_timing = end - start
 
-        print("\n" + "="*60)
-        print("RUN COMPLETED")
-        print("="*60)
-        print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
+        log.info("\n" + "="*60)
+        log.info("RUN COMPLETED")
+        log.info("="*60)
+        log.info(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
 
         # Extract components for backward compatibility
         gp = results['gp']
         samples = results['samples']
+        likelihood = results['likelihood']
         logz_dict = results.get('logz', {})
         comprehensive_results = results['comprehensive']
         timing_data = comprehensive_results['timing']
 
         # Print detailed timing analysis
-        print("\n" + "="*60)
-        print("DETAILED TIMING ANALYSIS")
-        print("="*60)
+        log.info("\n" + "="*60)
+        log.info("DETAILED TIMING ANALYSIS")
+        log.info("="*60)
 
-        print(f"Automatic timing: {timing_data['total_runtime']:.2f} seconds ({timing_data['total_runtime']/60:.2f} minutes)")
-        print(f"Timing difference: {abs(manual_timing - timing_data['total_runtime']):.2f} seconds")
+        log.info(f"Automatic timing: {timing_data['total_runtime']:.2f} seconds ({timing_data['total_runtime']/60:.2f} minutes)")
+        log.info(f"Timing difference: {abs(manual_timing - timing_data['total_runtime']):.2f} seconds")
 
-        print("\nPhase Breakdown:")
-        print("-" * 40)
+        log.info("\nPhase Breakdown:")
+        log.info("-" * 40)
         for phase, time_spent in timing_data['phase_times'].items():
             if time_spent > 0:
                 percentage = timing_data['percentages'].get(phase, 0)
-                print(f"{phase:25s}: {time_spent:8.2f}s ({percentage:5.1f}%)")
+                log.info(f"{phase:25s}: {time_spent:8.2f}s ({percentage:5.1f}%)")
 
         # Analyze timing efficiency
-        print("\nTiming Efficiency Analysis:")
-        print("-" * 40)
+        log.info("\nTiming Efficiency Analysis:")
+        log.info("-" * 40)
         total_measured = sum(t for t in timing_data['phase_times'].values() if t > 0)
         overhead = timing_data['total_runtime'] - total_measured
-        overhead_pct = (overhead / timing_data['total_runtime']) * 100
+        overhead_pct = (overhead / timing_data['total_runtime']) * 100 if timing_data['total_runtime'] > 0 else 0
 
-        print(f"Total measured phases: {total_measured:.2f}s ({(total_measured/timing_data['total_runtime']*100):.1f}%)")
-        print(f"Overhead/unmeasured: {overhead:.2f}s ({overhead_pct:.1f}%)")
+        log.info(f"Total measured phases: {total_measured:.2f}s ({(total_measured/timing_data['total_runtime']*100):.1f}%)")
+        log.info(f"Overhead/unmeasured: {overhead:.2f}s ({overhead_pct:.1f}%)")
 
         # Find dominant phase
-        max_phase = max(timing_data['phase_times'].items(), key=lambda x: x[1])
-        print(f"Dominant phase: {max_phase[0]} ({timing_data['percentages'][max_phase[0]]:.1f}%)")
+        if any(t > 0 for t in timing_data['phase_times'].values()):
+            max_phase = max(timing_data['phase_times'].items(), key=lambda x: x[1])
+            log.info(f"Dominant phase: {max_phase[0]} ({timing_data['percentages'][max_phase[0]]:.1f}%)")
 
         # Print convergence info
-        print("\n" + "="*60)
-        print("CONVERGENCE ANALYSIS")
-        print("="*60)
-        print(f"Converged: {comprehensive_results['converged']}")
-        print(f"Termination reason: {comprehensive_results['termination_reason']}")
-        print(f"Final GP size: {gp.train_x.shape[0]}")
+        log.info("\n" + "="*60)
+        log.info("CONVERGENCE ANALYSIS")
+        log.info("="*60)
+        log.info(f"Converged: {comprehensive_results['converged']}")
+        log.info(f"Termination reason: {comprehensive_results['termination_reason']}")
+        log.info(f"Final GP size: {gp.train_x.shape[0]}")
 
         if logz_dict:
-            print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
+            log.info(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
             if 'upper' in logz_dict and 'lower' in logz_dict:
-                print(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
+                log.info(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
 
         # Create comprehensive plots
-        print("\n" + "="*60)
-        print("GENERATING PLOTS")
-        print("="*60)
+        log.info("\n" + "="*60)
+        log.info("GENERATING PLOTS")
+        log.info("="*60)
 
         # Initialize plotter
         plotter = BOBESummaryPlotter(results['results_manager'])
@@ -137,7 +134,7 @@ def main():
         acquisition_data = results['results_manager'].get_acquisition_data()
 
         # Create summary dashboard with timing data
-        print("Creating summary dashboard...")
+        log.info("Creating summary dashboard...")
         fig_dashboard = plotter.create_summary_dashboard(
             gp_data=gp_data,
             acquisition_data=acquisition_data,
@@ -148,7 +145,7 @@ def main():
         plt.show()
 
         # Create individual timing plot
-        print("Creating detailed timing plot...")
+        log.info("Creating detailed timing plot...")
         fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
         plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
         ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
@@ -158,7 +155,7 @@ def main():
 
         # Create evidence evolution plot if available
         if comprehensive_results.get('logz_history'):
-            print("Creating evidence evolution plot...")
+            log.info("Creating evidence evolution plot...")
             fig_evidence, ax_evidence = plt.subplots(1, 1, figsize=(10, 6))
             plotter.plot_evidence_evolution(ax=ax_evidence)
             ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
@@ -167,7 +164,7 @@ def main():
             plt.show()
 
         # Create acquisition function evolution plot
-        print("Creating acquisition function evolution plot...")
+        log.info("Creating acquisition function evolution plot...")
         acquisition_data = results['results_manager'].get_acquisition_data()
         if acquisition_data and acquisition_data.get('iterations'):
             fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
@@ -177,10 +174,10 @@ def main():
             plt.savefig(f"{likelihood.name}_acquisition_evolution.png", dpi=300, bbox_inches='tight')
             plt.show()
         else:
-            print("No acquisition function data available for plotting.")
+            log.info("No acquisition function data available for plotting.")
 
         # Create parameter samples plot
-        print("Creating parameter samples plot...")
+        log.info("Creating parameter samples plot...")
         if hasattr(samples, 'samples'):  # GetDist samples
             sample_array = samples.samples
             weights_array = samples.weights
@@ -202,43 +199,24 @@ def main():
         )
 
         # Save comprehensive results
-        print("\n" + "="*60)
-        print("SAVING RESULTS")
-        print("="*60)
+        log.info("\n" + "="*60)
+        log.info("SAVING RESULTS")
+        log.info("="*60)
 
         # Results are automatically saved by BOBE, but let's summarize what was saved
-        print(f"✓ Main results: {likelihood.name}_results.pkl")
-        print(f"✓ Timing data: {likelihood.name}_timing.json")
-        print(f"✓ Legacy samples: {likelihood.name}_samples.npz")
-        print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
-        print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
-        print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
-        print(f"✓ Acquisition evolution: {likelihood.name}_acquisition_evolution.png")
-        print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
+        log.info(f"✓ Main results: {likelihood.name}_results.pkl")
+        log.info(f"✓ Timing data: {likelihood.name}_timing.json")
+        log.info(f"✓ Legacy samples: {likelihood.name}_samples.npz")
+        log.info(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
+        log.info(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
+        log.info(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
+        log.info(f"✓ Acquisition evolution: {likelihood.name}_acquisition_evolution.png")
+        log.info(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
 
-        # Create timing comparison with previous runs (if comments in original file are accurate)
-        print("\n" + "="*60)
-        print("PERFORMANCE COMPARISON")
-        print("="*60)
-
-        # Previous timing from comments in original file
-        previous_times = {
-            "Fast updates": 292.68,
-            "Older code": 387.66
-        }
-
-        current_time = timing_data['total_runtime']
-        print(f"Current run: {current_time:.2f} seconds")
-
-        for version, prev_time in previous_times.items():
-            speedup = prev_time / current_time
-            improvement = ((prev_time - current_time) / prev_time) * 100
-            print(f"vs {version}: {speedup:.2f}x speedup ({improvement:+.1f}%)")
-
-        print("\n" + "="*60)
-        print("ANALYSIS COMPLETE")
-        print("="*60)
-        print("Check the generated plots and saved files for detailed analysis.")
+        log.info("\n" + "="*60)
+        log.info("ANALYSIS COMPLETE")
+        log.info("="*60)
+        log.info("Check the generated plots and saved files for detailed analysis.")
 
 if __name__ == "__main__":
     # Run the analysis

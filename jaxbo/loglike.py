@@ -3,8 +3,6 @@ from .utils.core_utils import scale_to_unit, scale_from_unit
 from typing import Any, Callable, List,Optional, Tuple, Union, Dict
 import numpy as np
 from functools import partial
-from cobaya.yaml import yaml_load
-from cobaya.model import get_model
 from scipy.stats import qmc
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
@@ -16,35 +14,17 @@ from typing import Any, Callable, List, Optional, Union, Dict
 from .utils.core_utils import scale_from_unit
 from .utils.logging_utils import get_logger
 
-log = get_logger("[likelihood]")
+log = get_logger("likelihood")
 
-
-def _loglike_worker(payload: tuple) -> float:
-    """
-    Worker function is now simpler: it only expects the function and a point.
-    """
-
-    logp_func, minus_inf_val, x = payload
-    
-    try:
-        # The logp_func already has its args/kwargs baked in
-        val = float(logp_func(x)) 
-    except Exception:
-        return minus_inf_val
-
-    if np.isnan(val) or np.isinf(val) or val < minus_inf_val:
-        return minus_inf_val
-    return val
 
 class BaseLikelihood:
     """Class for log-likelihoods with common evaluation logic."""
 
     def __init__(self,
                  loglikelihood: Callable,
+                 param_list: List[str],
                  logp_args: Optional[Tuple[Any, ...]] = None,
                  logp_kwargs: Optional[dict] = None,
-                 ndim: int = 1,
-                 param_list: Optional[List[str]] = None,
                  param_labels: Optional[List[str]] = None,
                  param_bounds: Optional[Union[List, np.ndarray]] = None,
                  noise_std: float = 0.,
@@ -57,10 +37,18 @@ class BaseLikelihood:
         else:
             self.logp = loglikelihood
 
-        self.ndim = int(ndim)
-        self.param_list = param_list if param_list is not None else [f"x_{i+1}" for i in range(ndim)]
-        self.param_labels = param_labels if param_labels is not None else [f"x_{{{i+1}}}" for i in range(ndim)]
-        self.param_bounds = np.array(param_bounds) if param_bounds is not None else np.array(ndim * [[0, 1]]).T
+        # check param list in correct format
+        if not all(isinstance(p, str) for p in param_list):
+            raise ValueError("All elements of param_list must be strings corresponding to parameter names.")
+
+        self.ndim = len(param_list)
+        self.param_list = param_list if param_list is not None else [f"x_{i+1}" for i in range(self.ndim)]
+        self.param_labels = param_labels if param_labels is not None else [f"x_{{{i+1}}}" for i in range(self.ndim)]
+        if param_bounds is None:
+            self.param_bounds = np.array(self.ndim * [[0, 1]]).T
+            log.warning("No param_bounds provided. Assuming unit cube [0,1] for all parameters.")
+        else:
+            self.param_bounds = np.array(param_bounds)
         self.noise_std = noise_std
         self.name = name or "loglikelihood"
         self.minus_inf = minus_inf
@@ -82,26 +70,22 @@ class BaseLikelihood:
 
     def __call__(self, X: Union[np.ndarray, List[float]]) -> np.ndarray:
         """
-        ⭐ 2. __call__ now performs direct evaluation. It handles both
+        __call__ now performs direct evaluation. It handles both
         a single point (from a worker) and a batch of points (in a serial run).
         """
         points = np.atleast_2d(X)
         if points.shape[1] != self.ndim:
             raise ValueError(f"Input shape {points.shape} does not match ndim {self.ndim}")
 
-        # This simple loop is the core logic.
         # In a serial run, it evaluates all points.
         # In an MPI run, a worker receives a single point, so it evaluates one.
         vals = [self._safe_eval(p) for p in points]
-
-        print(f"Evaluated {len(vals)} points at rank {self.pool.rank}")
 
         return np.array(vals).reshape(len(vals), 1)
 
     def get_initial_points(self, n_sobol_init=8, rng=None):
         """
-        This method now works correctly in both serial and MPI modes without change,
-        because the __call__ it uses is now hybrid.
+        Get initial points for the optimization process using Sobol quasi-random sampling.
         """
         from scipy.stats import qmc
         sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=rng).random(n_sobol_init)
@@ -122,8 +106,8 @@ class BaseLikelihood:
 class ExternalLikelihood(BaseLikelihood):
     """Wrapper around a user-provided log-likelihood function."""
 
-    def __init__(self, loglikelihood: Callable, ndim: int, pool: MPI_Pool, **kwargs):
-        super().__init__(loglikelihood=loglikelihood, ndim=ndim, pool=pool, **kwargs)
+    def __init__(self, loglikelihood: Callable, pool: MPI_Pool, **kwargs):
+        super().__init__(loglikelihood=loglikelihood, pool=pool, **kwargs)
 
 class CobayaLikelihood(BaseLikelihood):
     """Likelihood wrapper for Cobaya models."""
@@ -135,6 +119,13 @@ class CobayaLikelihood(BaseLikelihood):
                  minus_inf: float = -1e5,
                  name: str = "cobaya_model",
                  pool: MPI_Pool = None):
+        
+        try:
+            from cobaya.yaml import yaml_load
+            from cobaya.model import get_model
+        except ImportError:
+            log.error("Cobaya is not installed.")
+            raise
 
         if isinstance(input_file_dict, str):
             info = yaml_load(input_file_dict)
@@ -143,23 +134,21 @@ class CobayaLikelihood(BaseLikelihood):
 
         cobaya_model = get_model(info)
 
-        # Silence cobaya root logger
-        rootlogger = logging.getLogger()
-        if rootlogger.handlers:
-            rootlogger.handlers.clear()
+        # # Silence cobaya root logger
+        # rootlogger = logging.getLogger()
+        # if rootlogger.handlers:
+        #     rootlogger.handlers.clear()
 
         param_list = list(cobaya_model.parameterization.sampled_params())
         param_bounds = np.array(
             cobaya_model.prior.bounds(confidence_for_unbounded=confidence_for_unbounded)
         ).T
         param_labels = [cobaya_model.parameterization.labels()[k] for k in param_list]
-        ndim = len(param_list)
 
         def cobaya_logp(x):
             return cobaya_model.logpost(x, make_finite=False)
 
         super().__init__(loglikelihood=cobaya_logp,
-                         ndim=ndim,
                          param_list=param_list,
                          param_labels=param_labels,
                          param_bounds=param_bounds,
@@ -171,15 +160,14 @@ class CobayaLikelihood(BaseLikelihood):
         self.cobaya_model = cobaya_model
 
     def __call__(self, X) -> np.ndarray:
-        # ⭐ 3. The signature is simplified. It calls the parent's now-functional
+        # This calls the parent's now-functional
         # __call__ method and then applies its specific corrections.
         vals = super().__call__(X)
-        vals = np.where(vals <= self.minus_inf, self.minus_inf, vals + self.logprior_vol)
+        vals = np.where(vals <= self.minus_inf, self.minus_inf, vals + self.logprior_vol) # add logprior volume  
         return vals
 
     def get_initial_points(self, n_cobaya_init=4, n_sobol_init=16, rng=None):
-        # This method also now works correctly because the underlying calls
-        # are compatible with the new pool.
+        # Can do further parallelization here by getting valid points from the pool.
         points, logpost = [], []
         if self.pool.is_master():
             for _ in range(n_cobaya_init):

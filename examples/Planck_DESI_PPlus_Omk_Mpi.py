@@ -1,21 +1,27 @@
 import os
+import sys
+num_devices = int(sys.argv[1]) if len(sys.argv) > 1 else 8
 os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
-    os.cpu_count()
+    num_devices
 )
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 import time
 import matplotlib.pyplot as plt
-from jaxbo.utils.logging_utils import get_logger
 from jaxbo.run import run_bobe
+from jaxbo.utils.logging_utils import get_logger
 
 def main():
+
     # Set up the cosmological likelihood
-    cobaya_input_file = './cosmo_input/LCDM_6D.yaml'
-    likelihood_name = 'Planck_lite_mpi_test'
-
+    cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_Omk_PPlus.yaml'
+    
     start = time.time()
-    print("Starting BOBE run...")
+    print("Starting BOBE run with automatic timing measurement...")
 
+    name = str(sys.argv[2]) if len(sys.argv) > 2 else 'serial'
+
+    likelihood_name = f'Planck_DESI_PP_Omk_{name}'
+    
     results = run_bobe(
         likelihood=cobaya_input_file,
         likelihood_kwargs={
@@ -25,34 +31,40 @@ def main():
             'name': likelihood_name,
         },
         verbosity='INFO',
-        n_cobaya_init=4, 
-        n_sobol_init=8, 
-        min_iters=20, 
-        max_eval_budget=200,
-        max_gp_size=200,
-        fit_step=2, 
-        update_mc_step=4, 
-        ns_step=3,
+        n_log_ei_iters=300,
+        n_cobaya_init=8,
+        n_sobol_init=32,
+        min_iters=180,
+        max_eval_budget=2500,
+        max_gp_size=1800,
+        fit_step=5, 
+        zeta_ei = 0.1,
+        update_mc_step=1, 
+        wipv_batch_size=6,
+        ns_step=5,
         num_hmc_warmup=512,
-        num_hmc_samples=512, 
-        mc_points_size=128,
+        num_hmc_samples=5000, 
+        mc_points_size=512,
         lengthscale_priors='DSLP', 
         use_clf=True,
         clf_use_size=10,
         clf_threshold=350,
-        clf_update_step=1,
-        clf_type='svm',
+        gp_threshold=500,
+        clf_update_step=1,  # SVM update step
+        clf_type='svm',  # Using SVM for classification
         minus_inf=-1e5,
-        logz_threshold=0.01,
-        seed=10,
+        logz_threshold=0.02,
+        seed=10,  # For reproducibility
         do_final_ns=False,
     )
 
     end = time.time()
 
+    # The rest of the script runs only on the master process
     if results is not None:
-        log = get_logger("[main]")
+        # Run BOBE with automatic timing collection
         manual_timing = end - start
+        log = get_logger("[main]")
 
         log.info("\n" + "="*60)
         log.info("RUN COMPLETED")
@@ -62,8 +74,8 @@ def main():
         # Extract components for backward compatibility
         gp = results['gp']
         samples = results['samples']
-        logz_dict = results.get('logz', {})
         likelihood = results['likelihood']
+        logz_dict = results.get('logz', {})
         comprehensive_results = results['comprehensive']
         timing_data = comprehensive_results['timing']
 
@@ -87,15 +99,14 @@ def main():
         log.info("-" * 40)
         total_measured = sum(t for t in timing_data['phase_times'].values() if t > 0)
         overhead = timing_data['total_runtime'] - total_measured
-        overhead_pct = (overhead / timing_data['total_runtime']) * 100 if timing_data['total_runtime'] > 0 else 0
+        overhead_pct = (overhead / timing_data['total_runtime']) * 100
 
         log.info(f"Total measured phases: {total_measured:.2f}s ({(total_measured/timing_data['total_runtime']*100):.1f}%)")
         log.info(f"Overhead/unmeasured: {overhead:.2f}s ({overhead_pct:.1f}%)")
 
         # Find dominant phase
-        if any(t > 0 for t in timing_data['phase_times'].values()):
-            max_phase = max(timing_data['phase_times'].items(), key=lambda x: x[1])
-            log.info(f"Dominant phase: {max_phase[0]} ({timing_data['percentages'][max_phase[0]]:.1f}%)")
+        max_phase = max(timing_data['phase_times'].items(), key=lambda x: x[1])
+        log.info(f"Dominant phase: {max_phase[0]} ({timing_data['percentages'][max_phase[0]]:.1f}%)")
 
         # Print convergence info
         log.info("\n" + "="*60)
@@ -132,7 +143,7 @@ def main():
             timing_data=timing_data,
             save_path=f"{likelihood.name}_dashboard.pdf"
         )
-        plt.show()
+        # plt.show()
 
         # Create individual timing plot
         log.info("Creating detailed timing plot...")
@@ -141,7 +152,7 @@ def main():
         ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
         plt.tight_layout()
         plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
-        plt.show()
+        # plt.show()
 
         # Create evidence evolution plot if available
         if comprehensive_results.get('logz_history'):
@@ -151,7 +162,7 @@ def main():
             ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
             plt.tight_layout()
             plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
-            plt.show()
+            # plt.show()
 
         # Create acquisition function evolution plot
         log.info("Creating acquisition function evolution plot...")
@@ -162,7 +173,7 @@ def main():
             ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
             plt.tight_layout()
             plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
-            plt.show()
+            # plt.show()
         else:
             log.info("No acquisition function data available for plotting.")
 
@@ -175,38 +186,35 @@ def main():
             sample_array = samples['x']
             weights_array = samples['weights']
 
+
+        param_list_LCDM = ['omk','omch2','ombh2','logA','ns','H0','tau']
         plot_final_samples(
             gp, 
             {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
             param_list=likelihood.param_list,
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
-            output_file=likelihood.name,
-            reference_file='./cosmo_input/chains/Planck_lite_LCDM',
+            plot_params=param_list_LCDM,
+            output_file=f'{likelihood.name}_cosmo',
+            reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
             scatter_points=False
         )
 
-        # Save comprehensive results
-        log.info("\n" + "="*60)
-        log.info("SAVING RESULTS")
-        log.info("="*60)
 
-        # Results are automatically saved by BOBE, but let's summarize what was saved
-        log.info(f"✓ Main results: {likelihood_name}_results.pkl")
-        log.info(f"✓ Timing data: {likelihood_name}_timing.json")
-        log.info(f"✓ Legacy samples: {likelihood_name}_samples.npz")
-        log.info(f"✓ Summary dashboard: {likelihood_name}_dashboard.pdf")
-        log.info(f"✓ Detailed timing: {likelihood_name}_timing_detailed.pdf")
-        log.info(f"✓ Evidence evolution: {likelihood_name}_evidence.pdf")
-        log.info(f"✓ Acquisition evolution: {likelihood_name}_acquisition_evolution.pdf")
-        log.info(f"✓ Parameter samples: {likelihood_name}_samples.pdf")
-
-        log.info("\n" + "="*60)
-        log.info("ANALYSIS COMPLETE")
-        log.info("="*60)
-        log.info("Check the generated plots and saved files for detailed analysis.")
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            output_file=f'{likelihood.name}_full',
+            reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
+            scatter_points=False
+        )
 
 if __name__ == "__main__":
     # Run the analysis

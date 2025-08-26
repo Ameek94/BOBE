@@ -26,7 +26,7 @@ except ImportError:
 from .timing import BOBETimingCollector  
 from .logging_utils import get_logger
 
-log = get_logger("[results]")
+log = get_logger("results")
 
 
 def convert_jax_to_json_serializable(obj):

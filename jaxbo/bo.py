@@ -27,7 +27,7 @@ from .utils.results import BOBEResults
 from .acquisition import *
 from .utils.pool import MPI_Pool
 
-log = get_logger("[bo]")
+log = get_logger("bo")
 log.info(f'JAX using {jax.device_count()} devices.')
 
 _acq_funcs = {"wipv": WIPV, "ei": EI, "logei": LogEI}
@@ -54,7 +54,8 @@ class BOBE:
                  save=True,
                  noise = 1e-8,
                  fit_step=10,
-                 update_mc_step=10,
+                 update_mc_step=1,
+                 wipv_batch_size=4,
                  ns_step=10,
                  num_hmc_warmup=512,
                  num_hmc_samples=512,
@@ -167,6 +168,7 @@ class BOBE:
                 'max_gp_size': max_gp_size,
                 'fit_step': fit_step,
                 'update_mc_step': update_mc_step,
+                'wipv_batch_size': wipv_batch_size,
                 'ns_step': ns_step,
                 'num_hmc_warmup': num_hmc_warmup,
                 'num_hmc_samples': num_hmc_samples,
@@ -246,6 +248,7 @@ class BOBE:
         self.fit_step = fit_step
         self.update_mc_step = update_mc_step
         self.ns_step = ns_step
+        self.wipv_batch_size = wipv_batch_size
         self.num_hmc_warmup = num_hmc_warmup
         self.num_hmc_samples = num_hmc_samples
         self.mc_points_size = mc_points_size
@@ -345,7 +348,7 @@ class BOBE:
                 n_restarts = 1
                 maxiter = 200
                 early_stop_patience = 25
-                n_batch = self.update_mc_step # since we only need to update true GP before doing the next MCMC
+                n_batch = self.wipv_batch_size # since we only need to update true GP before doing the next MCMC
             else:
                 acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten())}
                 n_restarts = 10
@@ -378,7 +381,12 @@ class BOBE:
             for k in range(n_batch):
                 new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pts[k].flatten())}
                 log.info(f" New point {new_pt_vals}, {k+1}/{n_batch}")
-                log.info(f" Objective function value = {new_vals[k].item():.4f}, GP predicted value = {self.gp.predict_mean(new_pts_u[k]).item():.4f}")
+                predicted_val = self.gp.predict_mean(new_pts_u[k])
+                log.info(f" Objective function value = {new_vals[k].item():.4f}, GP predicted value = {predicted_val.item():.4f}")
+
+
+            new_vals = jnp.reshape(new_vals, (n_batch, 1))
+            log.info(f" New vals shape: {new_vals.shape}")
 
             # GP Training and timing
             if refit:
@@ -388,7 +396,7 @@ class BOBE:
                 self.results_manager.end_timing('GP Training')
             log.info(f"New GP y_mean: {self.gp.y_mean:.4f}, y_std: {self.gp.y_std:.4f}")
             log.info("Updated GP with new point.")
-            log.info(f" GP training size = {self.gp.npoints}")
+            log.info(f" GP training size = {self.gp.train_x.shape[0]}")
 
 
             # Extract GP hyperparameters for tracking
@@ -503,13 +511,12 @@ class BOBE:
                     results_dict['logz'] = logz_dict
                     results_dict['termination_reason'] = self.termination_reason
 
-        samples = ns_samples['x']
-        weights = ns_samples['weights']
-        loglikes = ns_samples['logl']
-
-        if not ns_success:
-        # if not self.do_final_ns:
-            log.info("No nested sampling results found, MC samples from HMC/MCMC will be used instead.")
+        if (ns_samples is not None) and ns_success:
+            samples = ns_samples['x']
+            weights = ns_samples['weights']
+            loglikes = ns_samples['logl']
+        else:
+            log.info("No nested sampling results found or nested sampling unsuccessful, MC samples from HMC/MCMC will be used instead.")
             self.results_manager.start_timing('MCMC Sampling')
             mc_samples = get_mc_samples(
                     self.gp, warmup_steps=512, num_samples=1000*self.ndim,
@@ -597,6 +604,7 @@ class BOBE:
         # Prepare return dictionary with both legacy and new format
         results_dict['samples'] = output_samples
         results_dict['gp'] = self.gp
+        results_dict['likelihood'] = self.loglikelihood
         
         # Add comprehensive results
         results_dict['comprehensive'] = comprehensive_results

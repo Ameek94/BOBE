@@ -15,7 +15,7 @@ from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
 from .utils.logging_utils import get_logger
-log = get_logger("[gp]")
+log = get_logger("gp")
 from optax import adam, apply_updates
 from .optim import optimize
 import tqdm
@@ -171,7 +171,7 @@ class GP:
         if train_x.ndim != 2:
             raise ValueError("train_x must be 2D")
         
-        log.info(f"GP training size = {self.train_x.shape[0]}")
+        log.debug(f"GP training size = {self.train_x.shape[0]}")
 
         self.ndim = train_x.shape[1]
         self.y_mean = jnp.mean(train_y)
@@ -180,7 +180,7 @@ class GP:
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
         self.noise = noise
 
-        log.info(f"GP y_mean: {self.y_mean:.4f}, y_std: {self.y_std:.4f}, noise: {self.noise:.2e}")
+        log.debug(f"GP y_mean: {self.y_mean:.4f}, y_std: {self.y_std:.4f}, noise: {self.noise:.2e}")
 
         self.train_y = (train_y - self.y_mean) / self.y_std
         self.lengthscales = jnp.ones(self.ndim) if lengthscales is None else jnp.array(lengthscales)
@@ -188,7 +188,7 @@ class GP:
         self.lengthscale_bounds = lengthscale_bounds
         self.outputscale_bounds = outputscale_bounds
         self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.outputscale_bounds]
-        log.info(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
+        log.debug(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
 
         self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True))
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
@@ -283,7 +283,7 @@ class GP:
         duplicate = False
         for i in range(new_x.shape[0]):
             if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x[i], atol=1e-6,rtol=1e-4), axis=1)):
-                log.info(f"Point {new_x[i]} already exists in the training set, not updating")
+                log.debug(f"Point {new_x[i]} already exists in the training set, not updating")
                 duplicate = True
             else:
                 self.add(new_x[i],new_y[i])

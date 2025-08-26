@@ -14,7 +14,7 @@ from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
 from .clf import train_svm, svm_predict_proba, train_nn, train_nn_multiple_restarts,train_ellipsoid_multiple_restarts, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
 from .utils.seed_utils import get_new_jax_key, get_numpy_rng
 from .utils.logging_utils import get_logger
-log = get_logger("[clf_gp]")
+log = get_logger("clf_gp")
 
 
 available_classifiers = {
@@ -134,7 +134,7 @@ class GPwithClassifier:
             0, 1
         )
 
-        log.info(f" Number of labels 0: {np.sum(labels == 0)}, 1: {np.sum(labels == 1)}")
+        log.debug(f" Number of labels 0: {np.sum(labels == 0)}, 1: {np.sum(labels == 1)}")
 
         # Add method to handle if only class is present
         if np.all(labels == labels[0]):
@@ -158,8 +158,8 @@ class GPwithClassifier:
                                                                                labels, init_params = self.clf_params,
                                                                                **kwargs)
 
-        log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
-        log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
+        log.debug(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
+        log.debug(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
 
     def fit(self, lr=5e-3, maxiter=300, n_restarts=4):
         """Fits the GP hyperparameters."""
@@ -189,6 +189,22 @@ class GPwithClassifier:
         x = jnp.atleast_2d(x)
         return jax.vmap(self.predict_var_single)(x)
 
+    def predict_mean(self,x):
+        res = self.gp.predict_mean(x)
+        if not self.use_clf or self._clf_predict_func is None:
+            return res
+
+        clf_probs = self._clf_predict_func(x)
+        return jnp.where(clf_probs >= self.probability_threshold, res, self.minus_inf)
+    
+    def predict_var(self,x):
+        var = self.gp.predict_var(x)
+        if not self.use_clf or self._clf_predict_func is None:
+            return var
+
+        clf_probs = self._clf_predict_func(x)
+        return jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
+
     def predict_single(self,x):
         mean, var = self.gp.predict_single(x)
         if not self.use_clf or self._clf_predict_func is None:
@@ -217,27 +233,35 @@ class GPwithClassifier:
         if not self.clf_flag:
             gp_not_updated = self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
         else:
-            # Check for duplicates in classifier data
-            is_duplicate = jnp.any(jnp.all(jnp.isclose(self.train_x_clf, new_x, atol=1e-6, rtol=1e-4), axis=1))
-            if is_duplicate:
-                log.info(f"Point already exists in the classifier training set, not updating.")
-                return True 
+            # Check for duplicates in data 
+            new_pts_to_add = []
+            new_vals_to_add = []
+            for i in range(new_x.shape[0]):
+                if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x[i], atol=1e-6,rtol=1e-4), axis=1)):
+                    log.info(f"Point {new_x[i]} already exists in the training set, not updating")
+                    duplicate = True
+                else:
+                    new_pts_to_add.append(new_x[i])
+                    new_vals_to_add.append(new_y[i])
 
-            # Update classifier data
-            self.train_x_clf = jnp.concatenate([self.train_x_clf, new_x], axis=0)
-            self.train_y_clf = jnp.concatenate([self.train_y_clf, new_y], axis=0)
+            new_pts_to_add = jnp.atleast_2d(jnp.array(new_pts_to_add))
+            new_vals_to_add = jnp.atleast_2d(jnp.array(new_vals_to_add))
+            self.train_x_clf = jnp.concatenate([self.train_x_clf, new_pts_to_add], axis=0)
+            self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
             log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
 
             # Update GP data if within threshold
             gp_not_updated = False
-            if new_y.flatten()[0] > (self.train_y_clf.max() - self.gp_threshold):
-                # Update GP - properties will automatically reflect the updated GP
-                self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
-            else:
-                log.info("Point not within GP threshold, not updating GP.")
-                if refit:
-                    self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
-                gp_not_updated = True
+            for i in range(new_pts_to_add.shape[0]):
+                val = new_vals_to_add[i]
+                x = new_pts_to_add[i]
+                if val > (self.train_y_clf.max() - self.gp_threshold):
+                    # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
+                    self.gp.update(x, val,refit=False)
+                else:
+                    log.info("Point not within GP threshold, not updating GP.")
+            if refit:
+                self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
 
             # Check if classifier data size has reached the threshold
             if not self.use_clf:
@@ -270,9 +294,9 @@ class GPwithClassifier:
             chosen_index = np.random.choice(valid_indices, size=1)[0]
     
             pt = self.train_x_clf[chosen_index]
-            log.info(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
+            log.debug(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
         else:
-            log.info(f"Getting random point")
+            log.debug(f"Getting random point in unit cube")
 
             pt = np.random.uniform(0, 1, size=self.ndim)
 
@@ -512,7 +536,7 @@ class GPwithClassifier:
             clf_threshold=self.clf_threshold,
             gp_threshold=self.gp_threshold,
             noise=self.gp.noise,
-            kernel="rbf" if self.gp.kernel.name == "rbf_kernel" else "matern",
+            kernel="rbf" if self.gp.kernel_name == "rbf_kernel" else "matern",
             optimizer="adam",  # adjust if you actually use different optimizers
             outputscale_bounds=self.gp.outputscale_bounds,
             lengthscale_bounds=self.gp.lengthscale_bounds,

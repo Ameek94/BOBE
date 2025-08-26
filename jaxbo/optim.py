@@ -8,7 +8,7 @@ from .utils.core_utils import scale_to_unit, scale_from_unit, split_vmap
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_new_jax_key, get_global_seed
 
-log = get_logger("[optim]")
+log = get_logger("optim")
 
 def _get_optimizer(optimizer_name: str, learning_rate: float = 1e-3, optimizer_kwargs: Optional[dict] = {}) -> optax.GradientTransformation:
     """Get the optax optimizer."""
@@ -52,7 +52,7 @@ def optimize(
     optimizer_kwargs: Optional[dict] = {},
     maxiter: int = 200,
     n_restarts: int = 4,
-    verbose: bool = True,
+    verbose: bool = False,
     early_stop_patience: int = 25,
     split_vmap_batch_size: int = 4,
 ) -> Tuple[jnp.ndarray, float]:

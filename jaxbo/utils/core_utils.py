@@ -8,7 +8,7 @@ from scipy import stats
 from .logging_utils import get_logger
 from .seed_utils import get_numpy_rng
 import math
-log = get_logger("[utils]")
+log = get_logger("utils")
 
 def renormalise_log_weights(log_weights):
     log_total = logsumexp(log_weights)

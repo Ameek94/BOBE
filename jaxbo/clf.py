@@ -6,14 +6,18 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from sklearn.svm import SVC
-from flax import linen as nn
-from flax.core import freeze
 import optax
 from typing import Callable, Dict, Any, Union, List, Optional, Tuple
 from functools import partial
 from .utils.logging_utils import get_logger 
 from .utils.seed_utils import get_numpy_rng, get_new_jax_key
-log = get_logger("[clf]")
+log = get_logger("clf")
+
+try:
+    from flax import linen as nn
+    from flax.core import freeze
+except ImportError:
+    log.warning("Flax is not available. Only SVM classifier will be available.")
 
 # -----------------------------------------------------------------------------
 # Scikit-learn SVM Classifier using JAX for prediction.
