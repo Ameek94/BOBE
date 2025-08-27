@@ -18,7 +18,7 @@ from .clf_gp import GPwithClassifier, load_clf_gp
 from .likelihood import BaseLikelihood, ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
-from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, compute_kl_divergences, compute_successive_kl
+from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, compute_successive_kl
 from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from .nested_sampler import nested_sampling_Dy
 from .optim import optimize
@@ -358,8 +358,8 @@ class BOBE:
                 n_batch = self.wipv_batch_size # since we only need to update true GP before doing the next MCMC
             else:
                 acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten())}
-                n_restarts = 10
-                maxiter = 500
+                n_restarts = 20
+                maxiter = 250
                 early_stop_patience = 50
                 n_batch = 1
 

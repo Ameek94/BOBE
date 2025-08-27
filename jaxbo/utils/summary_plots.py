@@ -451,9 +451,9 @@ class BOBESummaryPlotter:
             # Transform values based on function type
             if func_name == "WIPV":
                 func_values = np.log10(func_values)
-                label = "WIPV (log10)"
+                label = "WIPV"
             elif func_name in ["LogEI", "EI"]:
-                func_values = -func_values
+                func_values = -func_values / np.log(10) # convert to log10 from log
                 label = func_name
             else:
                 label = func_name
@@ -475,10 +475,10 @@ class BOBESummaryPlotter:
         # Set reasonable y-limits
         if y_values:
             y_min, y_max = np.min(y_values), np.max(y_values)
-            ax.set_ylim(max(y_min, -10.), min(y_max, 10.))
+            ax.set_ylim(max(y_min-1, -20.), min(y_max+1, 5.))
         
         ax.set_xlabel('Iteration')
-        ax.set_ylabel('Acquisition Function Value')
+        ax.set_ylabel('Acquisition Function Value (log 10)')
         ax.set_title('Acquisition Function Evolution')
         ax.legend()
         ax.grid(True, alpha=0.3)

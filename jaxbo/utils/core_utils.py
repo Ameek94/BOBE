@@ -3,9 +3,9 @@ from os import devnull
 import numpy as np
 import jax.numpy as jnp
 from jax import vmap
-from scipy.special import logsumexp
+from scipy.special import logsumexp, erfc
 from scipy import stats
-from scipy.stats import chi2, erfc
+from scipy.stats import chi2
 from .logging_utils import get_logger
 from .seed_utils import get_numpy_rng
 import math
