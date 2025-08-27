@@ -475,8 +475,9 @@ class BOBE:
                 log.info(f" {self.termination_reason}")
                 break
             if self.gp.train_x.shape[0] > 1800:
-                self.ns_step = 25
-    
+                self.ns_step = int(25/self.wipv_batch_size)
+                self.fit_step = int(50/self.wipv_batch_size)
+
 
 
         #-------End of BO loop-------

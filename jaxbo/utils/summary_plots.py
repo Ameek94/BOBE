@@ -14,12 +14,12 @@ import warnings
 from pathlib import Path
 import json
 
-try:
-    import seaborn as sns
-    HAS_SEABORN = True
-except ImportError:
-    HAS_SEABORN = False
-    warnings.warn("Seaborn not available. Using matplotlib defaults.")
+# try:
+#     import seaborn as sns
+#     HAS_SEABORN = True
+# except ImportError:
+#     HAS_SEABORN = False
+#     warnings.warn("Seaborn not available. Using matplotlib defaults.")
 
 try:
     import getdist
@@ -30,17 +30,19 @@ except ImportError:
     warnings.warn("GetDist not available. Triangle plots will be limited.")
 
 from .results import BOBEResults, load_bobe_results
+from .core_utils import scale_from_unit, scale_to_unit
 from .logging_utils import get_logger
 
 log = get_logger("plots")
 
+# Set default plotting style
+plt.style.use('default')
 
-def scale_from_unit(x, param_bounds):
-    """
-    Project from unit hypercube to original domain, X is N x d shaped, param_bounds are 2 x d
-    """
-    x = x * (param_bounds[1] - param_bounds[0]) + param_bounds[0]
-    return x
+# Enable LaTeX rendering for mathematical expressions
+plt.rcParams['text.usetex'] = False  # Use mathtext instead of full LaTeX for compatibility
+plt.rcParams['font.family'] = 'serif'
+# plt.rcParams['mathtext.fontset'] = 'cm'  # Computer Modern font for math
+
 
 
 def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=None, param_bounds=None,
@@ -131,18 +133,9 @@ def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=N
                 ax = g.subplots[j, i]
                 ax.scatter(points[:, i], points[:, j], alpha=0.5, color='forestgreen', s=5)
 
-    g.export(output_file + '_samples.pdf')
+    g.export(output_file + '_param_posteriors.pdf')
 
 
-# Set default plotting style
-plt.style.use('default')
-if HAS_SEABORN:
-    sns.set_palette("husl")
-
-# Enable LaTeX rendering for mathematical expressions
-plt.rcParams['text.usetex'] = False  # Use mathtext instead of full LaTeX for compatibility
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['mathtext.fontset'] = 'cm'  # Computer Modern font for math
 
 
 class BOBESummaryPlotter:
@@ -766,16 +759,33 @@ class BOBESummaryPlotter:
         
         # Basic run info
         stats_lines = [
-            f"Problem: {self.ndim}D",
+            f"Dimensions: {self.ndim}D",
             f"Likelihood: {self.results.likelihood_name}"
         ]
         
-        # Sample statistics
-        if self.results.final_samples is not None:
-            n_samples = len(self.results.final_samples)
-            n_eff = int(np.sum(self.results.final_weights)**2 / np.sum(self.results.final_weights**2)) if len(self.results.final_weights) > 0 else n_samples
-            stats_lines.extend([f"Final samples: {n_samples}", f"Effective samples: {n_eff}"])
-        
+        # # Sample statistics
+        # if self.results.final_samples is not None:
+        #     n_samples = len(self.results.final_samples)
+        #     n_eff = int(np.sum(self.results.final_weights)**2 / np.sum(self.results.final_weights**2)) if len(self.results.final_weights) > 0 else n_samples
+        #     stats_lines.extend([f"Final samples: {n_samples}", f"Effective samples: {n_eff}"])
+
+        # GP size (number of training points)
+        gp_size = self.results.gp_info.get("gp_training_set_size", "N/A")
+        stats_lines.append(f"GP size: {gp_size}")
+
+        # Classifier info
+        classifier_used = self.results.gp_info.get("classifier_used", False)
+        classifier_type = self.results.gp_info.get("classifier_type", "N/A")
+        if classifier_used:
+            stats_lines.append(f"Classifier: {classifier_type}")
+            total_evals = self.results.gp_info.get("classifier_training_set_size", "N/A")
+        else:
+            stats_lines.append("Classifier: No")
+            total_evals = gp_size  # Total evaluations = GP size if no classifier
+
+        # Total evaluations
+        stats_lines.append(f"Total evaluations: {total_evals}")
+
         # Evidence estimate
         if self.results.final_logz_dict:
             logz_data = self.results.final_logz_dict
@@ -922,16 +932,6 @@ def get_data_format_examples() -> Dict[str, Dict]:
             'Optimization': 30.1,
             'I/O Operations': 5.3
         },
-        'param_evolution_data': {
-            'x1': {
-                'iterations': [1, 5, 10, 15, 20],
-                'values': [0.1, 0.3, 0.5, 0.4, 0.45]
-            },
-            'x2': {
-                'iterations': [1, 5, 10, 15, 20], 
-                'values': [-0.2, 0.0, 0.2, 0.15, 0.18]
-            }
-        }
     }
     
     return examples
