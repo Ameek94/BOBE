@@ -299,8 +299,8 @@ class BOBEResults:
             except Exception:
                 # If parsing fails, keep current start time
                 pass
-    
-    def update_iteration(self, iteration: int, **kwargs):
+
+    def update_iteration(self, iteration: int, save_step: int, gp = None, **kwargs):
         """
         Simplified iteration update - only saves intermediate results periodically.
         
@@ -309,8 +309,8 @@ class BOBEResults:
             **kwargs: Additional arguments (ignored in simplified version)
         """
         # Save intermediate results periodically
-        if iteration % 50 == 0:
-            self.save_intermediate()
+        if iteration % save_step == 0:
+            self.save_intermediate(gp=gp)
 
     def update_acquisition(self, iteration: int, acquisition_value: float, acquisition_function: str):
         """
@@ -767,7 +767,7 @@ class BOBEResults:
             json.dump(stats, f, indent=2)
         log.info(f"Saved summary statistics to {stats_file}")
     
-    def save_intermediate(self):
+    def save_intermediate(self,gp):
         """Save intermediate results for crash recovery and resuming."""
         intermediate = {
             'convergence_history': [conv.to_dict() for conv in self.convergence_history],
@@ -811,6 +811,9 @@ class BOBEResults:
             json_safe_intermediate = convert_jax_to_json_serializable(intermediate)
             json.dump(json_safe_intermediate, f, indent=2)
         log.info(f"Saved intermediate results to {intermediate_file}")
+
+        if gp is not None:
+            gp.save(outfile=f"{self.output_file}_gp")
     
     def get_getdist_samples(self) -> Optional['MCSamples']:
         """

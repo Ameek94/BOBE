@@ -185,7 +185,8 @@ class AcquisitionFunction:
                        maxiter: int = 500,
                        n_restarts: int = 8,
                        verbose: bool = True,
-                       early_stop_patience: int = 25,) -> Tuple[np.ndarray, float]:
+                       early_stop_patience: int = 25,
+                       rng=None) -> Tuple[np.ndarray, float]:
         """
         Optimize the acquisition function to obtain the next point to sample.
 
@@ -208,11 +209,14 @@ class AcquisitionFunction:
                        maxiter: int = 500,
                        n_restarts: int = 8,
                        verbose: bool = True,
-                       early_stop_patience: int = 25,) -> Tuple[np.ndarray, float]:
+                       early_stop_patience: int = 25,
+                       rng=None) -> Tuple[np.ndarray, float]:
 
         """
         Get the next batch of points to sample.
         """
+
+        rng = rng if rng is not None else get_numpy_rng()
 
         dummy_gp = gp.copy()
 
@@ -226,7 +230,8 @@ class AcquisitionFunction:
                                                         maxiter=maxiter,
                                                         n_restarts=n_restarts,
                                                         verbose=verbose,
-                                                        early_stop_patience=early_stop_patience)
+                                                        early_stop_patience=early_stop_patience,
+                                                        rng=rng)
             x_batch.append(x_next)
             acq_vals.append(acq_val_next)
 
@@ -267,7 +272,10 @@ class EI(AcquisitionFunction):
                  maxiter: int = 500,
                  n_restarts: int = 8,
                  verbose: bool = True,
-                 early_stop_patience: int = 25,):
+                 early_stop_patience: int = 25,
+                 rng=None):
+
+        rng = rng if rng is not None else get_numpy_rng()
         zeta = acq_kwargs.get('zeta', self.zeta)
         best_y = acq_kwargs.get('best_y', max(gp.train_y.flatten()))
         fun_args = (gp, best_y, zeta)
@@ -278,7 +286,7 @@ class EI(AcquisitionFunction):
             x0_acq = jnp.vstack([x0_acq, best_x])
         else:
             x0_acq = best_x
-        jitter = np.random.normal(0.,0.001,size=x0_acq.shape)
+        jitter = rng.normal(0.,0.001,size=x0_acq.shape)
         x0_acq = jnp.clip(x0_acq + jitter, 0., 1.)
         return optimize(fun=self.fun,
                         fun_args=fun_args,
@@ -325,16 +333,11 @@ class WIPV(AcquisitionFunction):
                  optimizer_kwargs: Optional[Dict[str, Any]] = {}):
 
         super().__init__(optimizer_kwargs=optimizer_kwargs)
-        self.rng = get_numpy_rng()
 
     def fun(self, x, gp,  mc_points=None, k_train_mc = None):
         var = gp.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc)
         return jnp.mean(var)
 
-    def get_mc_points(self,mc_samples):
-        mc_size = max(mc_samples['x'].shape[0], self.mc_points_size)
-        idxs = self.rng.choice(mc_size, size=self.mc_points_size, replace=False)
-        return mc_samples['x'][idxs]
 
     def get_next_point(self, gp,
                  acq_kwargs,
@@ -344,11 +347,12 @@ class WIPV(AcquisitionFunction):
                  maxiter: int = 200,
                  n_restarts: int = 4,
                  verbose: bool = True,
-                 early_stop_patience: int = 25,):
+                 early_stop_patience: int = 25,
+                 rng=None):
         
         mc_samples = acq_kwargs.get('mc_samples')
         mc_points_size = acq_kwargs.get('mc_points_size', 128)
-        mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size)
+        mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
         k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.outputscale, gp.noise, include_noise=False)
 
         # @jax.jit
@@ -372,11 +376,10 @@ class WIPV(AcquisitionFunction):
         # else:
         #     x0_acq = x0_acq[:n_restarts]
         # k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.outputscale, gp.noise, include_noise=False)
-        fun_kwargs = {'mc_points': mc_points, 'k_train_mc': k_train_mc}
 
         return optimize(fun=self.fun,
                         fun_args=(gp,),
-                        fun_kwargs=fun_kwargs,
+                        fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
                         ndim=gp.ndim,
                         x0=x0_acq,
                         lr=lr,
@@ -387,7 +390,7 @@ class WIPV(AcquisitionFunction):
                         verbose=verbose,
                         early_stop_patience=early_stop_patience)
 
-def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",init_params=None):
+def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",init_params=None,np_rng=None,rng_key=None):
     if method=='NUTS':
         try:
             mc_samples = gp.sample_GP_NUTS(warmup_steps=warmup_steps,
@@ -396,24 +399,25 @@ def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS
         except Exception as e:
             log.error(f"Error in sampling GP NUTS: {e}")
             mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.05,equal_weights=True,
+                                            , dynamic=False, dlogz=0.05,equal_weights=True,rng=np_rng
             )
     elif method=='NS':
         mc_samples, logz, success = nested_sampling_Dy(gp, gp.ndim, maxcall=int(2e6)
-                                            , dynamic=False, dlogz=0.05,equal_weights=True,
+                                            , dynamic=False, dlogz=0.05,equal_weights=True,rng=np_rng
         )
     elif method=='uniform':
         mc_samples = {}
-        points = qmc.Sobol(gp.ndim, scramble=True).random(num_samples)
+        points = qmc.Sobol(gp.ndim, scramble=True, rng=np_rng).random(num_samples)
         mc_samples['x'] = points
     else:
         raise ValueError(f"Unknown method {method} for sampling GP")
     return mc_samples
 
 
-def get_mc_points(mc_samples, mc_points_size=64):
+def get_mc_points(mc_samples, mc_points_size=128, rng=None):
     mc_size = max(mc_samples['x'].shape[0], mc_points_size)
-    idxs = np.random.choice(mc_size, size=mc_points_size, replace=False)
+    rng = rng if rng is not None else get_numpy_rng()   
+    idxs = rng.choice(mc_size, size=mc_points_size, replace=False)
     return mc_samples['x'][idxs]
     
 def get_acquisition_function(name: str, gp, **kwargs) -> AcquisitionFunction:

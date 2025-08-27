@@ -15,12 +15,12 @@ from scipy import stats
 # from .acquisition import WIPV, EI #, logEI
 from .gp import GP, DSLP_GP, SAAS_GP, load_gp #, sample_GP_NUTS
 from .clf_gp import GPwithClassifier, load_clf_gp
-from .loglike import BaseLikelihood, ExternalLikelihood, CobayaLikelihood
+from .likelihood import BaseLikelihood, ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
 from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, compute_kl_divergences, compute_successive_kl
-from .utils.seed_utils import set_global_seed, get_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
-from .nested_sampler import nested_sampling_Dy, nested_sampling_jaxns
+from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
+from .nested_sampler import nested_sampling_Dy
 from .optim import optimize
 from .utils.logging_utils import get_logger
 from .utils.results import BOBEResults
@@ -52,6 +52,7 @@ class BOBE:
                  resume=False,
                  resume_file=None,
                  save=True,
+                 save_step=25,
                  noise = 1e-8,
                  fit_step=10,
                  update_mc_step=1,
@@ -137,6 +138,7 @@ class BOBE:
 
 
         set_global_seed(seed)
+        self.np_rng = get_numpy_rng()
 
         if not isinstance(loglikelihood, BaseLikelihood):
             raise ValueError("loglikelihood must be an instance of ExternalLikelihood")
@@ -147,6 +149,7 @@ class BOBE:
         # Store basic settings needed for results manager early
         self.output_file = self.loglikelihood.name
         self.save = save
+        self.save_step = save_step
         self.return_getdist_samples = return_getdist_samples
         self.do_final_ns = do_final_ns
         self.logz_threshold = logz_threshold
@@ -197,7 +200,7 @@ class BOBE:
             # Resume from explicit file
             log.info(f" Resuming from file {resume_file}")
             # Use the standard naming convention: add _gp if not present
-            gp_file = resume_file
+            gp_file = resume_file+'_gp'
             if use_clf:
                 self.gp = load_clf_gp(gp_file)
             else:
@@ -206,9 +209,9 @@ class BOBE:
             # Fresh start - evaluate initial points
             self.results_manager.start_timing('True Objective Evaluations')
             if isinstance(self.loglikelihood, CobayaLikelihood):
-                init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,n_sobol_init=n_sobol_init)
+                init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,n_sobol_init=n_sobol_init,rng=self.np_rng)
             else:
-                init_points, init_vals = self.loglikelihood.get_initial_points(n_sobol_init=n_sobol_init)
+                init_points, init_vals = self.loglikelihood.get_initial_points(n_sobol_init=n_sobol_init,rng=self.np_rng)
             self.results_manager.end_timing('True Objective Evaluations')
             train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
             train_y = jnp.array(init_vals)
@@ -279,19 +282,11 @@ class BOBE:
             The logz dictionary from the nested sampling run. This contains the upper and lower bounds of the logz.
         """
         
-        results_dict = {}
-
-        # Initial Monte Carlo points for acquisition function
-        self.results_manager.start_timing('MCMC Sampling')
-        self.mc_samples = get_mc_samples(self.gp,warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, 
-                                         thinning=4,method=self.mc_points_method)
-        self.results_manager.end_timing('MCMC Sampling')
-        self.mc_samples['method'] = 'MCMC'        
-        self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
         ns_samples = None
         logz_dict = None
-
         ns_success=False
+
+        results_dict = {}
 
         best_pt_iteration = 0
 
@@ -319,6 +314,16 @@ class BOBE:
 
         current_evals = self.gp.npoints  # Number of evaluations so far
 
+    
+        # Initial Monte Carlo points for acquisition function
+        if n_log_ei_iters==0:
+            self.results_manager.start_timing('MCMC Sampling')
+            self.mc_samples = get_mc_samples(self.gp,warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, 
+                                         thinning=4,method=self.mc_points_method)
+            self.results_manager.end_timing('MCMC Sampling')
+            self.mc_samples['method'] = 'MCMC'        
+            # self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
+
         while current_evals < self.max_eval_budget:
 
             # ideally, we want to decide whether to do the mc_update depending on the results of the previous steps
@@ -332,6 +337,11 @@ class BOBE:
             if (ii - start_iteration > n_log_ei_iters) and self.acquisition.name in ['EI','LogEI']:
                 # change acquisition function to WIPV after a minimum of n_log_ei_iters EI, LogEI
                 self.acquisition = WIPV()
+                self.results_manager.start_timing('MCMC Sampling')
+                self.mc_samples = get_mc_samples(self.gp,warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, 
+                                         thinning=4,method=self.mc_points_method)
+                self.results_manager.end_timing('MCMC Sampling')
+                self.mc_samples['method'] = 'MCMC'                        
 
             acq_str = self.acquisition.name
 
@@ -399,18 +409,16 @@ class BOBE:
             outputscale = float(self.gp.outputscale)
             self.results_manager.update_gp_hyperparams(ii, lengthscales, outputscale)
 
-            # Update results manager with iteration info (simplified)
-            self.results_manager.update_iteration(iteration=ii)
-
-            if (pt_exists_or_below_threshold and self.mc_samples['method'] == 'MCMC'):
+            if (pt_exists_or_below_threshold and self.mc_samples['method'] == 'MCMC'): # can remove update logic now?
                 update_mc = True
             if update_mc and acq_str == 'WIPV':
                 if not refit:
                     self.gp.fit(maxiter=50,n_restarts=1)
                 self.results_manager.start_timing('MCMC Sampling')
+                jax_rng_key = get_jax_key()
                 self.mc_samples = get_mc_samples(
                     self.gp, warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples,
-                    thinning=4, method=self.mc_points_method)
+                    thinning=4, method=self.mc_points_method,np_rng=self.np_rng,rng_key=jax_rng_key)
                 self.results_manager.end_timing('MCMC Sampling')
 
 
@@ -427,20 +435,13 @@ class BOBE:
             self.results_manager.update_best_loglike(ii, self.best_f)
             
             log.info(f" Current best point {self.best} with value = {self.best_f:.4f}, found at iteration {best_pt_iteration}")
-
-            if ii % 4 == 0 and ii > 0:
-                jax.clear_caches()
  
-            if (ii % 10 == 0) and self.save:
-                log.info(" Saving GP to file")
-                self.gp.save(outfile=f"{self.output_file}_gp")
-
             if ns_flag:
                 log.info(" Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01,equal_weights=False
-                )
+                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01,equal_weights=False,
+                    rng=self.np_rng)
                 self.results_manager.end_timing('Nested Sampling')
 
                 log.info(f" NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
@@ -461,7 +462,14 @@ class BOBE:
                         results_dict['termination_reason'] = self.termination_reason
                         break
 
-            self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
+            # self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
+
+    
+            # Update results manager with iteration info, also save results and gp if save_step
+            self.results_manager.update_iteration(iteration=ii, save_step=self.save_step,gp=self.gp)
+
+            if ii % 4 == 0 and ii > 0:
+                jax.clear_caches()        
 
             if self.gp.train_x.shape[0] >= self.max_gp_size:
                 self.termination_reason = "Max GP size reached"
@@ -469,6 +477,7 @@ class BOBE:
                 break
             if self.gp.train_x.shape[0] > 1800:
                 self.ns_step = 25
+    
 
 
         #-------End of BO loop-------
@@ -494,7 +503,7 @@ class BOBE:
             log.info(" Final Nested Sampling")
             self.results_manager.start_timing('Nested Sampling')
             ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                self.gp, self.ndim, maxcall=int(1e7), dynamic=True, dlogz=0.01
+                self.gp, self.ndim, maxcall=int(1e7), dynamic=True, dlogz=0.01,rng=self.np_rng
             )
             self.results_manager.end_timing('Nested Sampling')
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))

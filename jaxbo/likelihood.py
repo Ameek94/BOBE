@@ -92,8 +92,7 @@ class BaseLikelihood:
         sobol_points = scale_from_unit(sobol, self.param_bounds)
         
         # The master process calls this method. It then calls pool.run_map(self, sobol_points)
-        # to get the values, which works in both modes.
-        # To simplify, we assume initial points are always generated on the master.
+        # to get the values, which works in both modes. Initial points are always generated on the master when going through run.py.
         if self.pool.is_master():
              vals = self.pool.run_map(self.__call__, sobol_points)
         else:
@@ -134,11 +133,6 @@ class CobayaLikelihood(BaseLikelihood):
 
         cobaya_model = get_model(info)
 
-        # # Silence cobaya root logger
-        # rootlogger = logging.getLogger()
-        # if rootlogger.handlers:
-        #     rootlogger.handlers.clear()
-
         param_list = list(cobaya_model.parameterization.sampled_params())
         param_bounds = np.array(
             cobaya_model.prior.bounds(confidence_for_unbounded=confidence_for_unbounded)
@@ -160,7 +154,7 @@ class CobayaLikelihood(BaseLikelihood):
         self.cobaya_model = cobaya_model
 
     def __call__(self, X) -> np.ndarray:
-        # This calls the parent's now-functional
+        # Calls the parent's now-functional
         # __call__ method and then applies its specific corrections.
         vals = super().__call__(X)
         vals = np.where(vals <= self.minus_inf, self.minus_inf, vals + self.logprior_vol) # add logprior volume  

@@ -478,30 +478,27 @@ class GP:
         log.info(f"Loaded GP from {filename} with {train_x.shape[0]} training points")
         return gp
 
-    def get_random_point(self):
+    def get_random_point(self,rng=None):
 
-        # chosen_index = np.random.choice(self.npoints, size=1)
-    
-        # result = self.train_x[chosen_index]
-        # log.info(f"Random point sampled with value {self.train_y[chosen_index]}")
 
-        pt = np.random.uniform(0, 1, size=self.train_x.shape[1])
+        rng = rng if rng is not None else get_numpy_rng()
+
+        pt = rng.uniform(0, 1, size=self.train_x.shape[1])
 
         return pt
 
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
-                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=2):
-        
+                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=2, np_rng=None, rng_key=None):
+
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
         Optionally restarts MCMC if all logp values are the same or if HMC fails.
         """        
 
-        rng_mcmc = get_numpy_rng()
+        rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
         high_temp = rng_mcmc.uniform(1., 2.) ** 2
         temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
         def model():
@@ -523,12 +520,13 @@ class GP:
                 samples_x = mcmc.get_samples()['x']
                 logps = mcmc.get_samples()['logp']
                 return samples_x,logps
-    
-        # rng_key = get_new_jax_key()
-        rng_keys = jax.random.split(jax.random.PRNGKey(seed_int), num_chains)
-        num_devices = jax.device_count()
 
+
+        num_devices = jax.device_count()
         num_chains = min(num_devices,num_chains)
+
+        rng_key = rng_key if rng_key is not None else get_new_jax_key()
+        rng_keys = jax.random.split(rng_key, num_chains)
 
         log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
 

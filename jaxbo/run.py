@@ -1,5 +1,5 @@
 from .bo import BOBE
-from .loglike import CobayaLikelihood, ExternalLikelihood
+from .likelihood import CobayaLikelihood, ExternalLikelihood
 from .utils.pool import MPI_Pool
 from .utils.logging_utils import setup_logging, get_logger
 from typing import Union, Callable, Dict, Any, Optional

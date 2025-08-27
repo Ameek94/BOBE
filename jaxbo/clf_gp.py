@@ -284,7 +284,9 @@ class GPwithClassifier:
         """
         return self.gp.kernel(x1,x2,lengthscales,outputscale,noise,include_noise=include_noise)
 
-    def get_random_point(self):
+    def get_random_point(self,rng=None):
+
+        rng = rng if rng is not None else get_numpy_rng()
 
         if self.use_clf:
             pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold
@@ -292,15 +294,14 @@ class GPwithClassifier:
             # Sample a random point from the filtered points
             valid_indices = jnp.where(pts_idx)[0]
     
-            # Use np.random for random selection
-            chosen_index = np.random.choice(valid_indices, size=1)[0]
-    
+            chosen_index = rng.choice(valid_indices, size=1)[0]
+
             pt = self.train_x_clf[chosen_index]
             log.debug(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
         else:
             log.debug(f"Getting random point in unit cube")
 
-            pt = np.random.uniform(0, 1, size=self.ndim)
+            pt = rng.uniform(0, 1, size=self.ndim)
 
         return pt
     
@@ -425,15 +426,15 @@ class GPwithClassifier:
         return gp_clf
         
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
-                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4):
+                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4,np_rng=None, rng_key=None):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
         Optionally restarts MCMC if all logp values are the same or if HMC fails. (RESTART LOGIC TO BE IMPLEMENTED)
         """        
 
-        rng_mcmc = get_numpy_rng()
-        prob = rng_mcmc.uniform(0., 1.)
+        rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
+        prob = rng_mcmc.uniform(0, 1)
         high_temp = rng_mcmc.uniform(1.5,6.) 
         # high_temp = rng_mcmc.uniform(1.,2.) ** 2
         temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
@@ -463,11 +464,15 @@ class GPwithClassifier:
     
 
         num_devices = jax.device_count()
-        rng_keys = jax.random.split(jax.random.PRNGKey(seed_int), num_chains) # handle properly the keys [get_new_jax_key() for _ in range(num_chains)] #
+        num_chains = min(num_devices,num_chains)
+
+        rng_key = rng_key if rng_key is not None else get_new_jax_key()
+        rng_keys = jax.random.split(rng_key, num_chains)
+        
         if num_chains == 1: 
-            inits = jnp.array([self.get_random_point()])
+            inits = jnp.array([self.get_random_point(rng=np_rng)])
         else:
-            inits = jnp.vstack([self.get_random_point() for _ in range(num_chains-1)])
+            inits = jnp.vstack([self.get_random_point(rng=np_rng) for _ in range(num_chains-1)])
             inits = jnp.vstack([inits, self.train_x_clf[jnp.argmax(self.train_y_clf)]])
 
         log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")

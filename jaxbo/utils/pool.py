@@ -49,8 +49,7 @@ class MPI_Pool:
         if not self.is_mpi:
             return function(tasks)
 
-        # This MPI-specific block is now safe because if we reach here,
-        # we know 'is_mpi' is True, which means the MPI import succeeded.
+        # mpi specific block
         n_tasks = len(tasks)
         results = [None] * n_tasks
         task_index = 0
@@ -68,6 +67,7 @@ class MPI_Pool:
             results[original_index] = result
             
             if task_index < n_tasks:
+                # since the worker is free send it another taskx
                 self.comm.send((tasks[task_index], task_index), dest=worker_rank)
                 task_index += 1
         
