@@ -28,14 +28,12 @@ def run_bobe(likelihood: Union[Callable,str],
         Additional keyword arguments to pass to the sampler. See bo.py for details.
     """
 
-    try:
-        from mpi4py import MPI
-        rank = MPI.COMM_WORLD.Get_rank()
-        size = MPI.COMM_WORLD.Get_size()
-        # Use a raw print that cannot be misconfigured
-        print(f"[SANITY CHECK] Hello from rank {rank}/{size} inside run_bobe.", flush=True)
-    except Exception as e:
-        print(f"[SANITY CHECK] Rank unknown. Error: {e}", flush=True)
+    # try:
+    #     from mpi4py import MPI
+    #     rank = MPI.COMM_WORLD.Get_rank()
+    #     size = MPI.COMM_WORLD.Get_size()
+    # except Exception as e:
+    #     print(f"[SANITY CHECK] Rank unknown. Error: {e}", flush=True)
 
 
     setup_logging(verbosity=verbosity,log_file=log_file)
@@ -44,22 +42,21 @@ def run_bobe(likelihood: Union[Callable,str],
 
     # setup likelihood
     if isinstance(likelihood, Callable):
-        likelihood = ExternalLikelihood(loglikelihood=likelihood,pool=pool,**likelihood_kwargs)
+        My_Likelihood = ExternalLikelihood(loglikelihood=likelihood,pool=pool,**likelihood_kwargs)
     elif isinstance(likelihood, str):
-        likelihood = CobayaLikelihood(input_file_dict=likelihood,pool=pool,**likelihood_kwargs)
+        My_Likelihood = CobayaLikelihood(input_file_dict=likelihood,pool=pool,**likelihood_kwargs)
 
-
-    likelihood.pool = pool
+    My_Likelihood.pool = pool
 
     if pool.is_master():
 
-        print(f"Rank {pool.rank} running BOBE with likelihood: {likelihood.name}")
+        print(f"Rank {pool.rank} running BOBE with likelihood: {My_Likelihood.name}")
         # here should setup default arguments for all necessary parameters
         n_log_ei_iters = sampler_kwargs.pop('n_log_ei_iters', 20)
 
         # Master creates the sampler and runs it
         sampler = BOBE(
-            loglikelihood=likelihood,
+            loglikelihood=My_Likelihood,
             pool=pool,
             **sampler_kwargs
         )
@@ -69,5 +66,5 @@ def run_bobe(likelihood: Union[Callable,str],
     else:
         print(f"Rank {pool.rank} running only likelihood evaluations")
         # Workers wait for tasks
-        pool.worker_wait(likelihood)
+        pool.worker_wait(My_Likelihood)
         return None

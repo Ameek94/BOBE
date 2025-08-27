@@ -332,7 +332,7 @@ class BOBE:
             ii+=1
             refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and ii >= self.min_iters
-            update_mc = not ns_flag # (ii % self.update_mc_step == 0) and
+            update_mc = not ns_flag
 
             if (ii - start_iteration > n_log_ei_iters) and self.acquisition.name in ['EI','LogEI']:
                 # change acquisition function to WIPV after a minimum of n_log_ei_iters EI, LogEI
@@ -413,7 +413,9 @@ class BOBE:
                 update_mc = True
             if update_mc and acq_str == 'WIPV':
                 if not refit:
+                    self.results_manager.start_timing('GP Training')
                     self.gp.fit(maxiter=50,n_restarts=1)
+                    self.results_manager.end_timing('GP Training')
                 self.results_manager.start_timing('MCMC Sampling')
                 jax_rng_key = get_jax_key()
                 self.mc_samples = get_mc_samples(
@@ -461,9 +463,6 @@ class BOBE:
                         results_dict['logz'] = logz_dict
                         results_dict['termination_reason'] = self.termination_reason
                         break
-
-            # self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
-
     
             # Update results manager with iteration info, also save results and gp if save_step
             self.results_manager.update_iteration(iteration=ii, save_step=self.save_step,gp=self.gp)

@@ -7,10 +7,10 @@ import time
 from .logging_utils import get_logger
 log = get_logger("pool")
 
-
 # A reusable module for MPI-based or serial task parallelism. 
-# In BOBE, this is used to evaluate the likelihood in parallel for a batch of candidate points.
-# Later will be modified to run more operations in parallel, most importantly gp fitting, maybe acquisition optimisations and possibly MCMC/Nested sampling.
+# In BOBE, this is used to evaluate the likelihood in parallel for a batch of candidate points. Useful for slow likelihoods (t>1s)
+
+# To implement in the future: modify to run more operations in parallel, most importantly gp fitting, maybe acquisition optimisations and possibly MCMC/Nested sampling.
 
 try:
     from mpi4py import MPI
@@ -41,7 +41,7 @@ class MPI_Pool:
     
     def run_map(self, function, tasks):
         """
-        MASTER METHOD: Manages task distribution.
+        MASTER METHOD: Manages task distribution, does not execute tasks itself.
         """
         if not self.is_master():
             return None

@@ -10,12 +10,11 @@ import optax
 from typing import Callable, Dict, Any, Union, List, Optional, Tuple
 from functools import partial
 from .utils.logging_utils import get_logger 
-from .utils.seed_utils import get_numpy_rng, get_new_jax_key
+from .utils.seed_utils import get_numpy_rng
 log = get_logger("clf")
 
 try:
     from flax import linen as nn
-    from flax.core import freeze
 except ImportError:
     log.warning("Flax is not available. Only SVM classifier will be available.")
 
@@ -24,7 +23,7 @@ except ImportError:
 # -----------------------------------------------------------------------------
 
 @jax.jit
-def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
+def svm_predict(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: jnp.ndarray, intercept: float, gamma: float):
     """
     Compute the decision function for SVM with RBF kernel.
     
@@ -47,18 +46,18 @@ def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
     decision = jnp.sum(dual_coef * kernel_vals) + intercept
     return decision
 
-def svm_predict_proba(x, support_vectors, dual_coef, intercept, gamma):
+def svm_predict_proba(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: jnp.ndarray, intercept: float, gamma: float):
     decision = svm_predict(x, support_vectors, dual_coef, intercept, gamma)
     return jnp.where(decision >= 0, 1.0, 0.0)  # Binary classification: 1 if decision >= 0, else 0
 
-def svm_predict_batch(x, support_vectors, dual_coef, intercept, gamma,batch_size=200):
+def svm_predict_batch(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: jnp.ndarray, intercept: float, gamma: float, batch_size: int = 200):
     """
     Compute the decision function for SVM with RBF kernel for a batch of inputs.    
     """
     batched_predict = lambda x: svm_predict(x, support_vectors, dual_coef, intercept, gamma)
     return jax.lax.map(batched_predict, x, batch_size=batch_size)
 
-def train_svm(x,y, svm_settings = {} ,gamma="scale",C=1e7, init_params=None, **kwargs):
+def train_svm(x: np.ndarray, y: np.ndarray, svm_settings: Dict[str, Any] = {}, gamma: str = "scale", C: float = 1e7, init_params: Optional[Dict[str, Any]] = None, **kwargs):
     """
     Train the SVM on the data.
     """
@@ -66,7 +65,6 @@ def train_svm(x,y, svm_settings = {} ,gamma="scale",C=1e7, init_params=None, **k
     gamma = svm_settings.get('gamma', "scale")
     C = svm_settings.get('C', 1e7)
     kernel = svm_settings.get('kernel', 'rbf')
-
 
     # Currently missing method to handle case where data has only 1 label
 
@@ -96,7 +94,6 @@ def train_svm(x,y, svm_settings = {} ,gamma="scale",C=1e7, init_params=None, **k
     return predict_fn, params, metrics
 
 
-# The methods below are currently in development
 # -----------------------------------------------------------------------------
 # Neural Network Classifier with train/validation split
 # -----------------------------------------------------------------------------
@@ -299,13 +296,13 @@ def nn_predict_batch(x: jnp.ndarray, apply_fn):
     """
     return apply_fn(x).squeeze(-1)
 
-def nn_predict_proba(x,  apply_fn):
-    return jax.nn.sigmoid(nn_predict(x,  apply_fn))
+def nn_predict_proba(x: jnp.ndarray, apply_fn):
+    return jax.nn.sigmoid(nn_predict(x, apply_fn))
 
-def nn_predict_proba_batch(x, apply_fn):
-    return jax.nn.sigmoid(nn_predict_batch(x,  apply_fn))
+def nn_predict_proba_batch(x: jnp.ndarray, apply_fn):
+    return jax.nn.sigmoid(nn_predict_batch(x, apply_fn))
 
-# Ellipsoid Classifier
+# Ellipsoid Classifier with center at best fit point 
 class EllipsoidClassifier(nn.Module):
     d: int
     mu: jnp.ndarray

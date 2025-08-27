@@ -62,7 +62,8 @@ class ConvergenceInfo:
     converged: bool
     delta: float
     threshold: float
-    
+    dlogz_sampler: float
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -70,7 +71,8 @@ class ConvergenceInfo:
             'logz_dict': self.logz_dict,
             'converged': bool(self.converged),
             'delta': float(self.delta),
-            'threshold': float(self.threshold)
+            'threshold': float(self.threshold),
+            'dlogz_sampler': float(self.dlogz_sampler),
         }
 
 
@@ -370,7 +372,8 @@ class BOBEResults:
             logz_dict=logz_dict.copy(),
             converged=converged,
             delta=delta,
-            threshold=threshold
+            threshold=threshold,
+            dlogz_sampler=logz_dict.get('dlogz_sampler', np.nan)
         )
         
         self.convergence_history.append(conv_info)
@@ -383,7 +386,8 @@ class BOBEResults:
             'logz_lower': logz_dict.get('lower', np.nan),
             'logz_err': delta,
             'logz_var': logz_dict.get('var', np.nan),
-            'logz_std': logz_dict.get('std', np.nan)
+            'logz_std': logz_dict.get('std', np.nan),
+            'dlogz_sampler': logz_dict.get('dlogz_sampler', np.nan)
         })
     
     def update_kl_divergences(self,
@@ -575,6 +579,7 @@ class BOBEResults:
             # === EVIDENCE INFORMATION ===
             'logz': self.final_logz_dict.get('mean', np.nan),
             'logzerr': self.final_logz_dict.get('upper', 0) - self.final_logz_dict.get('lower', 0),
+            'dlogz_sampler': float(self.final_logz_dict.get('dlogz_sampler', np.nan)),
             'logz_bounds': {
                 'lower': self.final_logz_dict.get('lower', np.nan),
                 'upper': self.final_logz_dict.get('upper', np.nan),
@@ -736,7 +741,8 @@ class BOBEResults:
                 "logz": float(self.final_logz_dict.get('mean', np.nan)),
                 "logz_err": float(self.final_logz_dict.get('upper', 0) - self.final_logz_dict.get('lower', 0)),
                 "logz_lower": float(self.final_logz_dict.get('lower', np.nan)),
-                "logz_upper": float(self.final_logz_dict.get('upper', np.nan))
+                "logz_upper": float(self.final_logz_dict.get('upper', np.nan)),
+                "dlogz_sampler": float(self.final_logz_dict.get('dlogz_sampler', np.nan))
             },
             "diagnostics": {
                 "n_samples": int(len(self.final_samples)),
@@ -756,7 +762,9 @@ class BOBEResults:
                 "logz_value": float(self.convergence_history[-1].logz_dict.get('mean', np.nan)),
                 "logz_error": float(self.convergence_history[-1].delta),
                 "threshold": float(self.convergence_history[-1].threshold),
-                "converged": bool(self.convergence_history[-1].converged)
+                "converged": bool(self.convergence_history[-1].converged),
+                "dlogz_sampler": self.convergence_history[-1].logz_dict.get('dlogz_sampler', np.nan)
+
             } if self.convergence_history else {},
             "parameters": param_stats,
 

@@ -160,7 +160,7 @@ def nested_sampling_Dy(gp: GP
     mean = res['logz'][-1]
     logz_err = res['logzerr'][-1]
     logz_dict = {'mean': mean}
-    logz_dict['dlogz sampler'] = logz_err
+    logz_dict['dlogz_sampler'] = logz_err
     samples_x = res['samples']
     logl = res['logl']
     success = ~np.all(logl == logl[0]) # in case of failure do not check convergence
