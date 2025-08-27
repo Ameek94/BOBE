@@ -118,8 +118,8 @@ def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=N
 
     g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
     g.settings.legend_fontsize = 22
-    g.settings.axes_fontsize = 18
-    g.settings.axes_labelsize = 18
+    g.settings.axes_fontsize = 20
+    g.settings.axes_labelsize = 20
     g.settings.title_limit_fontsize = 14   
     g.triangle_plot(plot_samples, params=plot_params, filled=[True, False],
                     contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
@@ -548,8 +548,8 @@ class BOBESummaryPlotter:
         conv_data = [(conv.iteration, conv.delta, conv.threshold, conv.converged) 
                      for conv in self.results.convergence_history]
         iterations, deltas, thresholds, converged_flags = zip(*conv_data)
-        
-        ax.plot(iterations, deltas, 'b-', linewidth=2, label='Δlog Z', alpha=0.8)
+
+        ax.plot(iterations, deltas, 'b-', linewidth=2, label=r'$\Delta \log Z$', alpha=0.8)
         ax.plot(iterations, thresholds, 'r--', linewidth=2, label='Threshold', alpha=0.7)
         
         # Mark convergence points
@@ -560,7 +560,7 @@ class BOBESummaryPlotter:
                       marker='o', zorder=5, label='Converged points')
         
         ax.set_xlabel('Iteration')
-        ax.set_ylabel('Δlog Z')
+        ax.set_ylabel(r'$\Delta \log Z$')
         ax.set_title('Convergence Diagnostics')
         ax.set_yscale('log')
         ax.legend()
@@ -630,7 +630,7 @@ class BOBESummaryPlotter:
         ax.text(0.02, 0.98, 'KL divergences between successive NS iterations\n'
                             'Invalid values shown as 1000', 
                transform=ax.transAxes, va='top', ha='left', 
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7), fontsize=9)
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7), fontsize=10)
         
         return ax
     
@@ -735,12 +735,12 @@ class BOBESummaryPlotter:
         self.plot_summary_stats(ax=ax9)
         
         # Add overall title
-        fig.suptitle(f'BOBE Summary Dashboard: {self.output_file}', 
+        fig.suptitle(f'BOBE Summary: {self.output_file}', 
                     fontsize=18*self.figsize_scale, y=0.95)
         
         if save_path:
             plt.savefig(save_path, bbox_inches='tight')
-            log.info(f"Saved summary dashboard to {save_path}")
+            log.info(f"Saved summary plot to {save_path}")
         
         return fig
     
@@ -806,13 +806,13 @@ class BOBESummaryPlotter:
         
         # Display formatted text
         ax.text(0.05, 0.95, '\n'.join(stats_lines), transform=ax.transAxes, 
-               fontsize=11*self.figsize_scale, verticalalignment='top',
+               fontsize=12*self.figsize_scale, verticalalignment='top',
                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.3))
         
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis('off')
-        ax.set_title('Run Summary')
+        ax.set_title('Run summary')
         
         return ax
     

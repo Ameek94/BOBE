@@ -5,6 +5,7 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 import time
 import matplotlib.pyplot as plt
+import seaborn as sns
 from jaxbo.utils.logging_utils import get_logger
 from jaxbo.run import run_bobe
 
@@ -67,6 +68,35 @@ def main():
         comprehensive_results = results['comprehensive']
         timing_data = comprehensive_results['timing']
 
+        plt.style.use('default')
+
+        # Enable LaTeX rendering for mathematical expressions
+        plt.rcParams['text.usetex'] = True 
+        plt.rcParams['font.family'] = 'serif'
+
+
+        # Create parameter samples plot
+        log.info("Creating parameter samples plot...")
+        if hasattr(samples, 'samples'):  # GetDist samples
+            sample_array = samples.samples
+            weights_array = samples.weights
+        else:  # Dictionary format
+            sample_array = samples['x']
+            weights_array = samples['weights']
+
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            output_file=likelihood.name,
+            reference_file='./cosmo_input/chains/Planck_lite_LCDM',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
+            scatter_points=False
+        )
+
         # Print detailed timing analysis
         log.info("\n" + "="*60)
         log.info("DETAILED TIMING ANALYSIS")
@@ -96,6 +126,9 @@ def main():
         if any(t > 0 for t in timing_data['phase_times'].values()):
             max_phase = max(timing_data['phase_times'].items(), key=lambda x: x[1])
             log.info(f"Dominant phase: {max_phase[0]} ({timing_data['percentages'][max_phase[0]]:.1f}%)")
+
+
+        sns.set_theme('notebook','ticks',palette='husl')
 
         # Print convergence info
         log.info("\n" + "="*60)
@@ -166,27 +199,6 @@ def main():
         else:
             log.info("No acquisition function data available for plotting.")
 
-        # Create parameter samples plot
-        log.info("Creating parameter samples plot...")
-        if hasattr(samples, 'samples'):  # GetDist samples
-            sample_array = samples.samples
-            weights_array = samples.weights
-        else:  # Dictionary format
-            sample_array = samples['x']
-            weights_array = samples['weights']
-
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            output_file=likelihood.name,
-            reference_file='./cosmo_input/chains/Planck_lite_LCDM',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
-            scatter_points=False
-        )
 
         # Save comprehensive results
         log.info("\n" + "="*60)

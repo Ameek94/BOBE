@@ -7,6 +7,7 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 import time
 import matplotlib.pyplot as plt
+import seaborn as sns   
 from jaxbo.run import run_bobe
 from jaxbo.utils.logging_utils import get_logger
 
@@ -22,7 +23,7 @@ def main():
 
     clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 
-    likelihood_name = f'Planck_DESI_PP_Omk_{name}'
+    likelihood_name = f'Planck_DESI_PP_Omk_{name}_{clf_type}'
     
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -80,6 +81,42 @@ def main():
         logz_dict = results.get('logz', {})
         comprehensive_results = results['comprehensive']
         timing_data = comprehensive_results['timing']
+
+
+        plt.style.use('default')
+
+        # Enable LaTeX rendering for mathematical expressions
+        plt.rcParams['text.usetex'] = True 
+        plt.rcParams['font.family'] = 'serif'
+
+        param_list_LCDM = ['omk','omch2','ombh2','logA','ns','H0','tau']
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            plot_params=param_list_LCDM,
+            output_file=f'{likelihood.name}_cosmo',
+            reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
+            scatter_points=False
+        )
+
+
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            output_file=f'{likelihood.name}_full',
+            reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
+            scatter_points=False
+        )
 
         # Print detailed timing analysis
         log.info("\n" + "="*60)
@@ -189,34 +226,7 @@ def main():
             weights_array = samples['weights']
 
 
-        param_list_LCDM = ['omk','omch2','ombh2','logA','ns','H0','tau']
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            plot_params=param_list_LCDM,
-            output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
-            scatter_points=False
-        )
 
-
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            output_file=f'{likelihood.name}_full',
-            reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
-            scatter_points=False
-        )
 
 if __name__ == "__main__":
     # Run the analysis

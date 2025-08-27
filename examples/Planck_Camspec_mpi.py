@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # --- Command line arguments ---
 # Arg 1: Number of devices for XLA
@@ -55,10 +56,10 @@ def main():
         n_sobol_init=32,
         min_iters=250,
         max_eval_budget=2500,
-        max_gp_size=1400,
+        max_gp_size=1500,
         
         # Step settings
-        fit_step=10,
+        fit_step=5,
         update_mc_step=1,
         wipv_batch_size=5,
         ns_step=5,
@@ -113,6 +114,51 @@ def main():
         comprehensive_results = results['comprehensive']
         timing_data = comprehensive_results['timing']
 
+        log.info("Creating parameter samples plot...")
+        if hasattr(samples, 'samples'):
+            sample_array = samples.samples
+            weights_array = samples.weights
+        else:
+            sample_array = samples['x']
+            weights_array = samples['weights']
+
+        plt.style.use('default')
+
+        # Enable LaTeX rendering for mathematical expressions
+        plt.rcParams['text.usetex'] = True 
+        plt.rcParams['font.family'] = 'serif'
+
+        param_list_LCDM = ['omch2','ombh2','logA','ns','H0','tau']
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            plot_params=param_list_LCDM,
+            output_file=f'{likelihood.name}_cosmo',
+            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
+            reference_ignore_rows=0.0,
+            reference_label='PolyChord',
+            scatter_points=False,
+        )
+
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            output_file=f'{likelihood.name}_full',
+            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
+            reference_ignore_rows=0.0,
+            reference_label='PolyChord',
+            scatter_points=False,
+        )
+
+ 
+        sns.set_theme('notebook','ticks',palette='husl')
+
         # --- Timing Analysis ---
         log.info("\n" + "="*60)
         log.info("DETAILED TIMING ANALYSIS")
@@ -155,42 +201,6 @@ def main():
             best_loglike_data=best_loglike_data,
             timing_data=timing_data,
             save_path=f"{likelihood.name}_dashboard.pdf"
-        )
-
-        log.info("Creating parameter samples plot...")
-        if hasattr(samples, 'samples'):
-            sample_array = samples.samples
-            weights_array = samples.weights
-        else:
-            sample_array = samples['x']
-            weights_array = samples['weights']
-
-        param_list_LCDM = ['omch2','ombh2','logA','ns','H0','tau']
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            plot_params=param_list_LCDM,
-            output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
-            scatter_points=False,
-        )
-
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            output_file=f'{likelihood.name}_full',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
-            scatter_points=False,
         )
 
 if __name__ == "__main__":
