@@ -6,21 +6,24 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from sklearn.svm import SVC
-from flax import linen as nn
-from flax.core import freeze
 import optax
 from typing import Callable, Dict, Any, Union, List, Optional, Tuple
 from functools import partial
 from .utils.logging_utils import get_logger 
-from .utils.seed_utils import get_numpy_rng, get_new_jax_key
-log = get_logger("[clf]")
+from .utils.seed_utils import get_numpy_rng
+log = get_logger("clf")
+
+try:
+    from flax import linen as nn
+except ImportError:
+    log.warning("Flax is not available. Only SVM classifier will be available.")
 
 # -----------------------------------------------------------------------------
 # Scikit-learn SVM Classifier using JAX for prediction.
 # -----------------------------------------------------------------------------
 
 @jax.jit
-def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
+def svm_predict(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: jnp.ndarray, intercept: float, gamma: float):
     """
     Compute the decision function for SVM with RBF kernel.
     
@@ -43,18 +46,18 @@ def svm_predict(x, support_vectors, dual_coef, intercept, gamma):
     decision = jnp.sum(dual_coef * kernel_vals) + intercept
     return decision
 
-def svm_predict_proba(x, support_vectors, dual_coef, intercept, gamma):
+def svm_predict_proba(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: jnp.ndarray, intercept: float, gamma: float):
     decision = svm_predict(x, support_vectors, dual_coef, intercept, gamma)
     return jnp.where(decision >= 0, 1.0, 0.0)  # Binary classification: 1 if decision >= 0, else 0
 
-def svm_predict_batch(x, support_vectors, dual_coef, intercept, gamma,batch_size=200):
+def svm_predict_batch(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: jnp.ndarray, intercept: float, gamma: float, batch_size: int = 200):
     """
     Compute the decision function for SVM with RBF kernel for a batch of inputs.    
     """
     batched_predict = lambda x: svm_predict(x, support_vectors, dual_coef, intercept, gamma)
     return jax.lax.map(batched_predict, x, batch_size=batch_size)
 
-def train_svm(x,y, svm_settings = {} ,gamma="scale",C=1e7, init_params=None, **kwargs):
+def train_svm(x: np.ndarray, y: np.ndarray, svm_settings: Dict[str, Any] = {}, gamma: str = "scale", C: float = 1e7, init_params: Optional[Dict[str, Any]] = None, **kwargs):
     """
     Train the SVM on the data.
     """
@@ -62,7 +65,6 @@ def train_svm(x,y, svm_settings = {} ,gamma="scale",C=1e7, init_params=None, **k
     gamma = svm_settings.get('gamma', "scale")
     C = svm_settings.get('C', 1e7)
     kernel = svm_settings.get('kernel', 'rbf')
-
 
     # Currently missing method to handle case where data has only 1 label
 
@@ -92,7 +94,6 @@ def train_svm(x,y, svm_settings = {} ,gamma="scale",C=1e7, init_params=None, **k
     return predict_fn, params, metrics
 
 
-# The methods below are currently in development
 # -----------------------------------------------------------------------------
 # Neural Network Classifier with train/validation split
 # -----------------------------------------------------------------------------
@@ -148,15 +149,15 @@ def train_with_restarts(
 
     for i in range(n_restarts):
         current_seed = rng.integers(0, 2**32 - 1)
-        log.info(f"[Restart {i+1}/{n_restarts}] Starting training with seed {current_seed}")
+        log.debug(f"[Restart {i+1}/{n_restarts}] Starting training with seed {current_seed}")
         
         # Use initial params for first restart, None for others
         restart_init_params = init_params if i == 0 else None
         
         if i == 0 and init_params is not None:
-            log.info(f"[Restart {i+1}/{n_restarts}] Using provided initial parameters")
+            log.debug(f"[Restart {i+1}/{n_restarts}] Using provided initial parameters")
         elif i > 0:
-            log.info(f"[Restart {i+1}/{n_restarts}] Using random initialization")
+            log.debug(f"[Restart {i+1}/{n_restarts}] Using random initialization")
 
         # Pass the pre-split data to avoid re-splitting
         predict_fn, params, metrics = train_fn(
@@ -174,9 +175,9 @@ def train_with_restarts(
             best_predict_fn = predict_fn
             best_params = params
             best_metrics = metrics
-            log.info(f"[Restart {i+1}/{n_restarts}] New best val_loss: {val_loss:.4e}")
+            log.debug(f"[Restart {i+1}/{n_restarts}] New best val_loss: {val_loss:.4e}")
 
-    log.info(f"[Training] Best model selected with val_loss = {best_val_loss:.4e}")
+    log.debug(f"[Training] Best model selected with val_loss = {best_val_loss:.4e}")
     return best_predict_fn, best_params, best_metrics
 
 
@@ -201,9 +202,9 @@ def train_nn(
     dropout_rate=0.1,
     lr=1e-3,
     weight_decay=1e-4,
-    n_epochs=750,
+    n_epochs=500,
     batch_size=128,
-    early_stop_patience=100,
+    early_stop_patience=50,
     seed=0,
     init_params=None,  # Add this parameter
     **kwargs
@@ -263,7 +264,7 @@ def train_nn(
         else:
             patience -= 1
             if patience <= 0:
-                log.info(f"[NN] early stopping at epoch {epoch}")
+                log.debug(f"[NN] early stopping at epoch {epoch}")
                 break
 
     apply_fn = lambda xx: model.apply(best_params, xx, train=False)
@@ -295,13 +296,13 @@ def nn_predict_batch(x: jnp.ndarray, apply_fn):
     """
     return apply_fn(x).squeeze(-1)
 
-def nn_predict_proba(x,  apply_fn):
-    return jax.nn.sigmoid(nn_predict(x,  apply_fn))
+def nn_predict_proba(x: jnp.ndarray, apply_fn):
+    return jax.nn.sigmoid(nn_predict(x, apply_fn))
 
-def nn_predict_proba_batch(x, apply_fn):
-    return jax.nn.sigmoid(nn_predict_batch(x,  apply_fn))
+def nn_predict_proba_batch(x: jnp.ndarray, apply_fn):
+    return jax.nn.sigmoid(nn_predict_batch(x, apply_fn))
 
-# Ellipsoid Classifier
+# Ellipsoid Classifier with center at best fit point 
 class EllipsoidClassifier(nn.Module):
     d: int
     mu: jnp.ndarray
@@ -334,10 +335,10 @@ def train_ellipsoid(
     x_val: jnp.ndarray, y_val: jnp.ndarray,
     lr: float = 1e-2,
     weight_decay: float = 1e-4,
-    n_epochs: int = 1000,
+    n_epochs: int = 500,
     batch_size: int = 32,
     seed: int = 0,
-    patience: int = 250,
+    patience: int = 50,
     init_params=None,  # Add this parameter
     **kwargs
 ):
@@ -392,7 +393,7 @@ def train_ellipsoid(
         else:
             patience_counter += 1
             if patience_counter > patience:
-                log.info(f"Early stopping at epoch {epoch}")
+                log.debug(f"Early stopping at epoch {epoch}")
                 break
 
     train_loss = loss_fn(best_params, x_train, y_train)

@@ -15,7 +15,7 @@ from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
 from .utils.logging_utils import get_logger
-log = get_logger("[gp]")
+log = get_logger("gp")
 from optax import adam, apply_updates
 import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -170,13 +170,16 @@ class GP:
         if train_x.ndim != 2:
             raise ValueError("train_x must be 2D")
         
-        log.info(f"GP training size = {self.train_x.shape[0]}")
+        log.debug(f"GP training size = {self.train_x.shape[0]}")
 
         self.ndim = train_x.shape[1]
-        self.y_mean = jnp.mean(train_y.flatten(),axis=0)
-        self.y_std = jnp.std(train_y.flatten(),axis=0)
+        self.y_mean = jnp.mean(train_y)
+        self.y_std = jnp.std(train_y)
+        self.kernel_name = kernel if kernel=="rbf" else "matern"
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
         self.noise = noise
+
+        log.debug(f"GP y_mean: {self.y_mean:.4f}, y_std: {self.y_std:.4f}, noise: {self.noise:.2e}")
 
         self.train_y = (train_y - self.y_mean) / self.y_std
         self.lengthscales = jnp.ones(self.ndim) if lengthscales is None else jnp.array(lengthscales)
@@ -184,7 +187,7 @@ class GP:
         self.lengthscale_bounds = lengthscale_bounds
         self.outputscale_bounds = outputscale_bounds
         self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.outputscale_bounds]
-        log.info(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
+        log.debug(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
 
         self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True))
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
@@ -252,7 +255,7 @@ class GP:
         x = jnp.atleast_2d(x)
         return jax.vmap(self.predict_single, in_axes=0,out_axes=(0,0))(x)
 
-    def update(self,new_x,new_y,refit=True,lr=5e-3,maxiter=300,n_restarts=4,step=0):
+    def update(self,new_x,new_y,refit=True,lr=5e-3,maxiter=300,n_restarts=4):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 
@@ -273,35 +276,37 @@ class GP:
             Whether the point new_x, new_y already exists in the training set.
 
         """
-        if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x, atol=1e-6,rtol=1e-4), axis=1)):
-            log.info(f"Point {new_x} already exists in the training set, not updating")
-            return True
-        else:
-            k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
-                        noise=self.noise,include_noise=False).flatten()           # shape (n,)
-            k_self = self.kernel(new_x,new_x,self.lengthscales,
-                          self.outputscale,noise=self.noise,include_noise=True)[0, 0]  # scalar            
-            self.add(new_x,new_y)
-            if refit:
-                self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+        new_x = jnp.atleast_2d(new_x)
+        new_y = jnp.atleast_2d(new_y)
+
+        duplicate = False
+        for i in range(new_x.shape[0]):
+            if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x[i], atol=1e-6,rtol=1e-4), axis=1)):
+                log.debug(f"Point {new_x[i]} already exists in the training set, not updating")
+                duplicate = True
             else:
-                # self.fit(lr=lr,maxiter=100,n_restarts=1)
-                self.cholesky = fast_update_cholesky(self.cholesky,k,k_self)
-                self.alphas = cho_solve((self.cholesky, True), self.train_y)
-            return False
+                self.add(new_x[i],new_y[i])
+        if refit:
+            self.fit(lr=lr,maxiter=maxiter,n_restarts=n_restarts)
+        else:
+            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True)
+            self.cholesky = jnp.linalg.cholesky(K)
+            self.alphas = cho_solve((self.cholesky, True), self.train_y)
+        return duplicate
 
     def add(self,new_x,new_y):
         """
         Updates the GP with new training points.
         """
+        new_x = jnp.atleast_2d(new_x)
+        new_y = jnp.atleast_2d(new_y)
         self.train_x = jnp.concatenate([self.train_x,new_x])
         self.train_y = self.train_y*self.y_std + self.y_mean 
         self.train_y = jnp.concatenate([self.train_y,new_y])
         self.y_mean = jnp.mean(self.train_y.flatten(),axis=0)
         self.y_std = jnp.std(self.train_y.flatten(),axis=0)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
-        log.info("Updated GP with new point.")
-        log.info(f" GP training size = {self.npoints}")
+
 
     def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
@@ -345,7 +350,7 @@ class GP:
         val = gp_mll(k,self.train_y,self.train_y.shape[0])
         return -val
 
-    def fit(self, lr=5e-3,maxiter=300,n_restarts=4,early_stop_patience=50):
+    def fit(self, lr=5e-3,maxiter=200,n_restarts=4,early_stop_patience=25):
         """ 
         Fits the GP using maximum likelihood hyperparameters with the optax adam optimizer. Starts from current hyperparameters.
 
@@ -360,7 +365,7 @@ class GP:
 
         """
 
-        # NEED TO HANDLE CASE WHERE ONLY 1 ADDED TO TRAINING SET
+        # NEED TO HANDLE CASE WHERE ONLY 1 POINT ADDED TO TRAINING SET
 
         outputscale = jnp.array([self.outputscale])
         init_params = jnp.log10(jnp.concatenate([self.lengthscales,outputscale]))
@@ -472,30 +477,27 @@ class GP:
         log.info(f"Loaded GP from {filename} with {train_x.shape[0]} training points")
         return gp
 
-    def get_random_point(self):
+    def get_random_point(self,rng=None):
 
-        # chosen_index = np.random.choice(self.npoints, size=1)
-    
-        # result = self.train_x[chosen_index]
-        # log.info(f"Random point sampled with value {self.train_y[chosen_index]}")
 
-        pt = np.random.uniform(0, 1, size=self.train_x.shape[1])
+        rng = rng if rng is not None else get_numpy_rng()
+
+        pt = rng.uniform(0, 1, size=self.train_x.shape[1])
 
         return pt
 
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
-                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=2):
-        
+                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=2, np_rng=None, rng_key=None):
+
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
         Optionally restarts MCMC if all logp values are the same or if HMC fails.
         """        
 
-        rng_mcmc = get_numpy_rng()
+        rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
         high_temp = rng_mcmc.uniform(1., 2.) ** 2
         temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
         def model():
@@ -517,12 +519,13 @@ class GP:
                 samples_x = mcmc.get_samples()['x']
                 logps = mcmc.get_samples()['logp']
                 return samples_x,logps
-    
-        # rng_key = get_new_jax_key()
-        rng_keys = jax.random.split(jax.random.PRNGKey(seed_int), num_chains)
-        num_devices = jax.device_count()
 
+
+        num_devices = jax.device_count()
         num_chains = min(num_devices,num_chains)
+
+        rng_key = rng_key if rng_key is not None else get_new_jax_key()
+        rng_keys = jax.random.split(rng_key, num_chains)
 
         log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
 
@@ -554,6 +557,32 @@ class GP:
         }
 
         return samples_dict
+    
+    def copy(self):
+        """
+        Returns a deep copy of the GP with the same training data, hyperparameters,
+        and fitted state. The copy is independent: modifications to the new GP do 
+        not affect the original.
+        """
+        train_y= self.train_y * self.y_std + self.y_mean
+
+        gp_copy = GP(
+            train_x=self.train_x,
+            train_y=train_y,
+            noise=float(self.noise),
+            kernel=self.kernel_name,
+            optimizer="adam",  # or pass through if you extend GP further
+            outputscale_bounds=self.outputscale_bounds,
+            lengthscale_bounds=self.lengthscale_bounds,
+            lengthscales=jnp.array(self.lengthscales, copy=True),
+            outputscale=float(self.outputscale)
+        )
+
+        gp_copy.alphas = jnp.array(self.alphas, copy=True)
+        gp_copy.cholesky = jnp.array(self.cholesky, copy=True)
+        gp_copy.fitted = self.fitted
+
+        return gp_copy
 
     @property
     def hyperparams(self):
@@ -571,6 +600,8 @@ class GP:
         Returns the number of training points.
         """
         return self.train_x.shape[0]
+    
+
     
 
 

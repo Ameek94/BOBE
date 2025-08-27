@@ -1,0 +1,58 @@
+theory:
+  camb:
+    path: 'global'
+    extra_args:
+      halofit_version: mead
+      bbn_predictor: PArthENoPE_880.2_standard.dat
+      lens_potential_accuracy: 1
+      num_massive_neutrinos: 1
+      nnu: 3.044
+      dark_energy_model: 'fluid'
+likelihood:
+  like_ombh2:
+    external: "lambda _self: stats.norm.logpdf(_self.provider.get_param('ombh2'), loc=0.02218, scale=0.0006)"
+    requires: ombh2
+  bao.desi_dr2.desi_bao_all: null
+  sn.union3: null
+params:
+  omch2: 
+    latex: \Omega_\mathrm{c} h^2
+    prior:
+      min: 0.114
+      max: 0.126
+    ref:
+      dist: norm
+      loc: 0.117729
+      scale: 0.001
+    proposal: 0.0005
+  ombh2: 
+    prior:
+      min: 0.020
+      max: 0.024
+    ref:
+      dist: norm
+      loc: 0.022321
+      scale: 0.0001
+    proposal: 0.0001
+    latex: \Omega_\mathrm{b} h^2
+  H0: 
+    latex: H_0
+    prior:
+      min: 62
+      max: 72
+    ref:
+      dist: norm
+      loc: 67.5
+      scale: 0.1
+    proposal: 0.05
+  mnu: 0.06
+sampler:
+  mcmc:
+    drag: False
+    oversample_power: 0.4
+    proposal_scale: 1.9
+    covmat: auto
+    Rminus1_stop: 0.01
+    Rminus1_cl_stop: 0.2   
+output: chains/BAO_SN_no_cmb
+# minimize: true

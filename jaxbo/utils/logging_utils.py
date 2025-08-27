@@ -1,8 +1,22 @@
 # logging_config.py
+
 import sys
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+
+# ⭐ 1. Add MPI awareness at the top of the module.
+# This block will determine the process rank, defaulting to 0 for serial runs.
+try:
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    is_mpi = size > 1
+except ImportError:
+    rank = 0
+    size = 1
+    is_mpi = False
 
 class LevelFilter(logging.Filter):
     """Filter to allow specific log levels"""
@@ -13,94 +27,92 @@ class LevelFilter(logging.Filter):
     def filter(self, record):
         return record.levelno in self.levels
 
-class VerbosityFilter(logging.Filter):
-    """Filter based on verbosity level"""
-    def __init__(self, max_level):
-        super().__init__()
-        self.max_level = max_level
-    
-    def filter(self, record):
-        return record.levelno <= self.max_level
-
 def setup_logging(verbosity='INFO', log_file=None):
     """
-    Configure logging with different verbosity levels
+    Configure logging for serial or MPI runs.
     
     Args:
         verbosity: String level - 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'QUIET'
-        log_file: Optional file to log to
+        log_file: Optional file to log to. In MPI runs, will be post-fixed with rank.
     """
     
-    # Map verbosity strings to logging levels
     verbosity_levels = {
         'DEBUG': logging.DEBUG,
         'INFO': logging.INFO,
         'WARNING': logging.WARNING,
         'ERROR': logging.ERROR,
         'CRITICAL': logging.CRITICAL,
-        'QUIET': logging.CRITICAL  # Only critical messages
     }
     
-    # Set the base logging level
+    # QUIET is a special case, handled below
+    if verbosity.upper() == 'QUIET':
+        logging.getLogger().setLevel(logging.CRITICAL + 1)
+        return
+
     base_level = verbosity_levels.get(verbosity.upper(), logging.INFO)
     
-    # Clear any existing handlers
+    # Add rank to the log format for clarity in files
+    log_format = f'[{rank}: %(name)s] %(levelname)s: %(message)s' # %(asctime)s 
+    formatter = logging.Formatter(log_format)
+
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
+    root_logger.setLevel(base_level)
     
-    # Configure handlers based on verbosity
     handlers = []
     
-    if verbosity.upper() != 'QUIET':
-        # Stdout handler - INFO and DEBUG (filtered by verbosity)
+    # Only the master process should log to stdout/stderr
+    if rank == 0:
+        # Stdout handler for INFO and DEBUG
         stdout_handler = logging.StreamHandler(sys.stdout)
-        stdout_handler.setLevel(logging.DEBUG)  # Accept all levels, filter later
-        
+        stdout_handler.setFormatter(formatter)
         if verbosity.upper() == 'DEBUG':
-            # In debug mode, show DEBUG and INFO on stdout
+            stdout_handler.setLevel(logging.DEBUG)
             stdout_handler.addFilter(LevelFilter([logging.DEBUG, logging.INFO]))
-            stdout_fmt = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
         else:
-            # Normal mode - only INFO on stdout
+            stdout_handler.setLevel(logging.INFO)
             stdout_handler.addFilter(LevelFilter(logging.INFO))
-            stdout_fmt = logging.Formatter('%(asctime)s [%(name)s] %(message)s')
-            
-        stdout_handler.setFormatter(stdout_fmt)
         handlers.append(stdout_handler)
-    
-    # Stderr handler for WARNING and above (always shown unless quiet)
-    if verbosity.upper() != 'QUIET':
+        
+        # Stderr handler for WARNING and above
         stderr_handler = logging.StreamHandler(sys.stderr)
+        stderr_handler.setFormatter(formatter)
         stderr_handler.setLevel(logging.WARNING)
-        stderr_fmt = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
-        stderr_handler.setFormatter(stderr_fmt)
         handlers.append(stderr_handler)
-    
-    # Optional file handler (logs everything regardless of verbosity)
+
+    # All processes log to a file, but to rank-specific files
     if log_file:
-        file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
-        file_handler.setLevel(logging.DEBUG)
-        file_fmt = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
-        file_handler.setFormatter(file_fmt)
+        if is_mpi:
+            # Create rank-specific log files, e.g., 'my_run_master.log', 'my_run_rank_1.log'
+            base, ext = os.path.splitext(log_file)
+            rank_str = "master" if rank == 0 else f"rank_{rank}"
+            final_log_file = f"{base}_{rank_str}{ext}"
+        else:
+            final_log_file = log_file
+
+        file_handler = RotatingFileHandler(final_log_file, maxBytes=10*1024*1024, backupCount=5)
+        file_handler.setLevel(logging.DEBUG) # Log all levels to file
+        file_handler.setFormatter(formatter)
         handlers.append(file_handler)
-    
-    # Configure root logger
-    logging.basicConfig(
-        level=base_level,
-        handlers=handlers,
-        force=True
-    )
+
+    # Add all configured handlers to the root logger
+    for handler in handlers:
+        root_logger.addHandler(handler)
 
 def get_logger(name):
-    """
-    Get a logger with the specified name
+    """Gets a logger. The root logger should be configured first via setup_logging."""
+    return logging.getLogger(name)
+
+# def get_logger(name):
+#     """
+#     Get a logger with the specified name
     
-    Args:
-        name: Logger name (typically __name__ from the calling module)
-    """
-    logger = logging.getLogger(name)
-    logger.propagate = True
-    return logger
+#     Args:
+#         name: Logger name (typically __name__ from the calling module)
+#     """
+#     logger = logging.getLogger(name)
+#     logger.propagate = True
+#     return logger
 
 def update_verbosity(verbosity):
     """Update the logging verbosity at runtime"""

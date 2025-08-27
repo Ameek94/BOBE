@@ -14,12 +14,12 @@ import warnings
 from pathlib import Path
 import json
 
-try:
-    import seaborn as sns
-    HAS_SEABORN = True
-except ImportError:
-    HAS_SEABORN = False
-    warnings.warn("Seaborn not available. Using matplotlib defaults.")
+# try:
+#     import seaborn as sns
+#     HAS_SEABORN = True
+# except ImportError:
+#     HAS_SEABORN = False
+#     warnings.warn("Seaborn not available. Using matplotlib defaults.")
 
 try:
     import getdist
@@ -30,17 +30,19 @@ except ImportError:
     warnings.warn("GetDist not available. Triangle plots will be limited.")
 
 from .results import BOBEResults, load_bobe_results
+from .core_utils import scale_from_unit, scale_to_unit
 from .logging_utils import get_logger
 
-log = get_logger("[plots]")
+log = get_logger("plots")
 
+# Set default plotting style
+plt.style.use('default')
 
-def scale_from_unit(x, param_bounds):
-    """
-    Project from unit hypercube to original domain, X is N x d shaped, param_bounds are 2 x d
-    """
-    x = x * (param_bounds[1] - param_bounds[0]) + param_bounds[0]
-    return x
+# Enable LaTeX rendering for mathematical expressions
+plt.rcParams['text.usetex'] = False  # Use mathtext instead of full LaTeX for compatibility
+plt.rcParams['font.family'] = 'serif'
+# plt.rcParams['mathtext.fontset'] = 'cm'  # Computer Modern font for math
+
 
 
 def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=None, param_bounds=None,
@@ -116,8 +118,8 @@ def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=N
 
     g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
     g.settings.legend_fontsize = 22
-    g.settings.axes_fontsize = 18
-    g.settings.axes_labelsize = 18
+    g.settings.axes_fontsize = 20
+    g.settings.axes_labelsize = 20
     g.settings.title_limit_fontsize = 14   
     g.triangle_plot(plot_samples, params=plot_params, filled=[True, False],
                     contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
@@ -131,18 +133,9 @@ def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=N
                 ax = g.subplots[j, i]
                 ax.scatter(points[:, i], points[:, j], alpha=0.5, color='forestgreen', s=5)
 
-    g.export(output_file + '_samples.pdf')
+    g.export(output_file + '_param_posteriors.pdf')
 
 
-# Set default plotting style
-plt.style.use('default')
-if HAS_SEABORN:
-    sns.set_palette("husl")
-
-# Enable LaTeX rendering for mathematical expressions
-plt.rcParams['text.usetex'] = False  # Use mathtext instead of full LaTeX for compatibility
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['mathtext.fontset'] = 'cm'  # Computer Modern font for math
 
 
 class BOBESummaryPlotter:
@@ -216,8 +209,8 @@ class BOBESummaryPlotter:
 
         # Plot evolution with uncertainty
         ax.plot(iterations, logz_values, 'b-', linewidth=2, label='Mean log Z', alpha=0.9)
-        ax.fill_between(iterations, logz_values - logz_std, logz_values + logz_std, 
-                       alpha=0.2, color='red', label='2$\sigma$ region')
+        # ax.fill_between(iterations, logz_values - logz_std, logz_values + logz_std, 
+        #                alpha=0.2, color='red', label='1$\sigma$ region')
         ax.plot(iterations, logz_upper, 'r--', linewidth=1.5, alpha=0.7, label='Upper bound')
         ax.plot(iterations, logz_lower, 'g--', linewidth=1.5, alpha=0.7, label='Lower bound')
         ax.fill_between(iterations, logz_lower, logz_upper, 
@@ -243,7 +236,7 @@ class BOBESummaryPlotter:
         ax.set_xlabel('Iteration')
         ax.set_ylabel('log Z')
         # limit plot range to +-10 of final logz
-        # ax.set_ylim(final_logz - 25, final_logz + 25)
+        ax.set_ylim(final_logz - 25, final_logz + 25)
         ax.set_title('Evidence Evolution')
         ax.legend()
         ax.grid(True, alpha=0.3)
@@ -555,8 +548,8 @@ class BOBESummaryPlotter:
         conv_data = [(conv.iteration, conv.delta, conv.threshold, conv.converged) 
                      for conv in self.results.convergence_history]
         iterations, deltas, thresholds, converged_flags = zip(*conv_data)
-        
-        ax.plot(iterations, deltas, 'b-', linewidth=2, label='Δlog Z', alpha=0.8)
+
+        ax.plot(iterations, deltas, 'b-', linewidth=2, label=r'$\Delta \log Z$', alpha=0.8)
         ax.plot(iterations, thresholds, 'r--', linewidth=2, label='Threshold', alpha=0.7)
         
         # Mark convergence points
@@ -567,7 +560,7 @@ class BOBESummaryPlotter:
                       marker='o', zorder=5, label='Converged points')
         
         ax.set_xlabel('Iteration')
-        ax.set_ylabel('Δlog Z')
+        ax.set_ylabel(r'$\Delta \log Z$')
         ax.set_title('Convergence Diagnostics')
         ax.set_yscale('log')
         ax.legend()
@@ -637,7 +630,7 @@ class BOBESummaryPlotter:
         ax.text(0.02, 0.98, 'KL divergences between successive NS iterations\n'
                             'Invalid values shown as 1000', 
                transform=ax.transAxes, va='top', ha='left', 
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7), fontsize=9)
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7), fontsize=10)
         
         return ax
     
@@ -742,12 +735,12 @@ class BOBESummaryPlotter:
         self.plot_summary_stats(ax=ax9)
         
         # Add overall title
-        fig.suptitle(f'BOBE Summary Dashboard: {self.output_file}', 
+        fig.suptitle(f'BOBE Summary: {self.output_file}', 
                     fontsize=18*self.figsize_scale, y=0.95)
         
         if save_path:
             plt.savefig(save_path, bbox_inches='tight')
-            log.info(f"Saved summary dashboard to {save_path}")
+            log.info(f"Saved summary plot to {save_path}")
         
         return fig
     
@@ -766,16 +759,33 @@ class BOBESummaryPlotter:
         
         # Basic run info
         stats_lines = [
-            f"Problem: {self.ndim}D",
+            f"Dimensions: {self.ndim}D",
             f"Likelihood: {self.results.likelihood_name}"
         ]
         
-        # Sample statistics
-        if self.results.final_samples is not None:
-            n_samples = len(self.results.final_samples)
-            n_eff = int(np.sum(self.results.final_weights)**2 / np.sum(self.results.final_weights**2)) if len(self.results.final_weights) > 0 else n_samples
-            stats_lines.extend([f"Final samples: {n_samples}", f"Effective samples: {n_eff}"])
-        
+        # # Sample statistics
+        # if self.results.final_samples is not None:
+        #     n_samples = len(self.results.final_samples)
+        #     n_eff = int(np.sum(self.results.final_weights)**2 / np.sum(self.results.final_weights**2)) if len(self.results.final_weights) > 0 else n_samples
+        #     stats_lines.extend([f"Final samples: {n_samples}", f"Effective samples: {n_eff}"])
+
+        # GP size (number of training points)
+        gp_size = self.results.gp_info.get("gp_training_set_size", "N/A")
+        stats_lines.append(f"GP size: {gp_size}")
+
+        # Classifier info
+        classifier_used = self.results.gp_info.get("classifier_used", False)
+        classifier_type = self.results.gp_info.get("classifier_type", "N/A")
+        if classifier_used:
+            stats_lines.append(f"Classifier: {classifier_type}")
+            total_evals = self.results.gp_info.get("classifier_training_set_size", "N/A")
+        else:
+            stats_lines.append("Classifier: No")
+            total_evals = gp_size  # Total evaluations = GP size if no classifier
+
+        # Total evaluations
+        stats_lines.append(f"Total evaluations: {total_evals}")
+
         # Evidence estimate
         if self.results.final_logz_dict:
             logz_data = self.results.final_logz_dict
@@ -796,13 +806,13 @@ class BOBESummaryPlotter:
         
         # Display formatted text
         ax.text(0.05, 0.95, '\n'.join(stats_lines), transform=ax.transAxes, 
-               fontsize=11*self.figsize_scale, verticalalignment='top',
+               fontsize=12*self.figsize_scale, verticalalignment='top',
                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.3))
         
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis('off')
-        ax.set_title('Run Summary')
+        ax.set_title('Run summary')
         
         return ax
     
@@ -922,16 +932,6 @@ def get_data_format_examples() -> Dict[str, Dict]:
             'Optimization': 30.1,
             'I/O Operations': 5.3
         },
-        'param_evolution_data': {
-            'x1': {
-                'iterations': [1, 5, 10, 15, 20],
-                'values': [0.1, 0.3, 0.5, 0.4, 0.45]
-            },
-            'x2': {
-                'iterations': [1, 5, 10, 15, 20], 
-                'values': [-0.2, 0.0, 0.2, 0.15, 0.18]
-            }
-        }
     }
     
     return examples

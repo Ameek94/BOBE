@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 cobaya_input_file = './cosmo_input/LCDM_6D_wide_priors.yaml'
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0, name='Planck_lite_clf_logEI_WIPV_wp')
+        minus_inf=-1e5, noise_std=0.0, name='Planck_lite_clf_logEI_WIPV_wp_mcacq')
 
 print("="*60)
 print("PLANCK LITE CLF TIMING TEST")
@@ -44,14 +44,14 @@ sampler = BOBE(
     clf_update_step=1,  # SVM update step
     clf_type='svm',  # Using SVM for classification
     minus_inf=-1e5,
-    logz_threshold=0.5,
-    seed=10,  # For reproducibility
+    logz_threshold=0.1,
+    seed=100,  # For reproducibility
     do_final_ns=False,
 )
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=100)
+results = sampler.run(n_log_ei_iters=150)
 
 end = time.time()
 manual_timing = end - start
@@ -140,7 +140,7 @@ fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
 plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
 ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
 plt.tight_layout()
-plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
+plt.savefig(f"{likelihood.name}_timing_detailed.pdf",  bbox_inches='tight')
 plt.show()
 
 # Create evidence evolution plot if available
@@ -150,7 +150,7 @@ if comprehensive_results.get('logz_history'):
     plotter.plot_evidence_evolution(ax=ax_evidence)
     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
     plt.tight_layout()
-    plt.savefig(f"{likelihood.name}_evidence.pdf",  bbox_inches='tight')
+    plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
     plt.show()
 
 # Create acquisition function evolution plot
@@ -161,7 +161,7 @@ if acquisition_data and acquisition_data.get('iterations'):
     plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
     plt.tight_layout()
-    plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf",  bbox_inches='tight')
+    plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
     plt.show()
 else:
     print("No acquisition function data available for plotting.")

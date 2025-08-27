@@ -1,8 +1,5 @@
 # This module manages the nested samplers used to compute the Bayesian evidence with the GP model as a surrogate for the objective function
-
-import os
-# print(f"Setting XLA flags for JAX: {os.cpu_count()} CPU cores")
-# os.environ['XLA_FLAGS'] = f'--xla_force_host_platform_device_count={os.cpu_count()}'
+# The module contains two functions, one for the Dynesty sampler (preferred) and the other for the JaxNS sampler 
 import time
 from typing import Any, List, Optional, Dict, Union
 import jax.numpy as jnp
@@ -14,15 +11,13 @@ from .gp import GP
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
 from scipy.special import logsumexp
-log = get_logger("[ns]")
+log = get_logger("ns")
 
-# try:
-from dynesty import NestedSampler as StaticNestedSampler,DynamicNestedSampler, pool
+from dynesty import NestedSampler as StaticNestedSampler, DynamicNestedSampler
 import math
 
-
 # dynesty utility function for computing evidence
-def compute_integrals(logl=None, logvol=None, reweight=None):
+def compute_integrals(logl=None, logvol=None, reweight=None,squared=False):
     assert logl is not None
     assert logvol is not None
     loglstar_pad = np.concatenate([[-1.e300], logl])
@@ -33,6 +28,8 @@ def compute_integrals(logl=None, logvol=None, reweight=None):
     # = LV_{i+1} - (LV_{i+1} -LV_i) + log(1-exp(LV_{i+1}-LV{i}))
     dlogvol = np.diff(logvol, prepend=0)
     logdvol = logvol - dlogvol + np.log1p(-np.exp(dlogvol))
+    if squared:
+        logdvol = 2 * logdvol
     # logdvol is log(delta(volumes)) i.e. log (X_i-X_{i-1})
     logdvol2 = logdvol + math.log(0.5)
     # These are log(1/2(X_(i+1)-X_i))
@@ -50,8 +47,8 @@ def renormalise_log_weights(log_weights):
     normalized_weights = np.exp(log_weights - log_total)
     return normalized_weights
 
-def resample_equal(samples, aux, weights=None, logwts=None):
-    rstate = get_numpy_rng()
+def resample_equal(samples, aux, weights=None, logwts=None, rng = None):
+    rng = get_numpy_rng() if rng is None else rng
     # Resample samples to obtain equal weights. Taken from jaxns
     if logwts is not None:
         wts = renormalise_log_weights(logwts)
@@ -61,7 +58,7 @@ def resample_equal(samples, aux, weights=None, logwts=None):
     cumulative_sum = np.cumsum(weights)
     cumulative_sum /= cumulative_sum[-1]
     nsamples = len(weights)
-    positions = (rstate.random() + np.arange(nsamples)) / nsamples
+    positions = (rng.random() + np.arange(nsamples)) / nsamples
     idx = np.zeros(nsamples, dtype=int)
     i, j = 0, 0
     while i < nsamples:
@@ -70,7 +67,7 @@ def resample_equal(samples, aux, weights=None, logwts=None):
             i += 1
         else:
             j += 1
-    perm = rstate.permutation(nsamples)
+    perm = rng.permutation(nsamples)
     resampled_samples = samples[idx][perm]
     resampled_aux = aux[idx][perm]
     return resampled_samples, resampled_aux
@@ -88,8 +85,9 @@ def nested_sampling_Dy(gp: GP
                         ,boost_maxcall: Optional[int] = 1
                         ,print_progress : bool = True
                         ,equal_weights: bool = False
-                        ,sample_method='rwalk'
-                       ,) -> tuple[np.ndarray,Dict]:
+                        ,sample_method='rwalk',
+                        rng=None,
+                       ) -> tuple[np.ndarray,Dict,bool]:
     """
     Nested Sampling using Dynesty
 
@@ -131,12 +129,7 @@ def nested_sampling_Dy(gp: GP
     @jax.jit
     def loglike(x):
         mu = gp.predict_mean_single(x) 
-        # var = gp.predict_var(x) 
-        # std = jnp.sqrt(var)
-        # mu = mu 
-        return mu #jnp.reshape(mu,()) #, jnp.reshape(std,()) 
-
-    # loglike = gp.jitted_single_predict_mean
+        return mu 
 
     start = time.time()
 
@@ -146,11 +139,11 @@ def nested_sampling_Dy(gp: GP
 
     if dynamic:
         sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
-                                       sample=sample_method,nlive=nlive)
+                                       sample=sample_method,nlive=nlive,rstate=rng)
         sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)
     else:
         sampler = StaticNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
-                                      sample=sample_method,nlive=nlive) 
+                                      sample=sample_method,nlive=nlive,rstate=rng)
         sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
         res = sampler.results  # type: ignore # grab our results
         logl = res['logl']
@@ -167,7 +160,7 @@ def nested_sampling_Dy(gp: GP
     mean = res['logz'][-1]
     logz_err = res['logzerr'][-1]
     logz_dict = {'mean': mean}
-    logz_dict['dlogz sampler'] = logz_err
+    logz_dict['dlogz_sampler'] = logz_err
     samples_x = res['samples']
     logl = res['logl']
     success = ~np.all(logl == logl[0]) # in case of failure do not check convergence
@@ -175,18 +168,20 @@ def nested_sampling_Dy(gp: GP
     log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
     log.info(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
 
-    var = jax.lax.map(gp.predict_var,samples_x,batch_size=100)
-    var = var.squeeze(-1)
+    var = jax.lax.map(gp.predict_var_single,samples_x,batch_size=100)
     std = np.sqrt(var)
     logl_lower,logl_upper = logl - std, logl + std
     logvol = res['logvol']
     upper = compute_integrals(logl=logl_upper,logvol=logvol)
     lower = compute_integrals(logl=logl_lower,logvol=logvol)
-    varintegrand = 2*logl + np.log(var+1e-300)
-    log_var_delta = compute_integrals(logl=varintegrand,logvol=2*logvol)[-1]
-    log_var_logz = log_var_delta - 2*mean 
+
+    var = np.clip(var,a_min=1e-6,a_max=1e2)
+    E_Z = compute_integrals(logl=logl + 0.5*var ,logvol=logvol)[-1] 
+    varintegrand = 2*logl + np.log(var) + np.log1p(1+var) # var + np.log(np.expm1(var)) #+ 
+    log_var_delta = compute_integrals(logl=varintegrand,logvol=logvol,squared=True)[-1]
+    log_var_logz = log_var_delta - 2*mean #2*E_Z 
     log_var_logz = np.clip(log_var_logz, a_min=-100, a_max=100)  # Avoid numerical issues with very small variances
-    log.info(f"Log variance of logZ: {log_var_logz:.4f}, log_var_delta: {log_var_delta:.4f}, mean: {mean:.4f}")
+    log.info(f"Log variance of logZ: {log_var_logz:.4f}, log_var_delta: {log_var_delta:.4f}, E_Z: {E_Z:.4f}")
     var_logz = np.exp(log_var_logz)
     logz_dict['upper'] = upper[-1]
     logz_dict['lower'] = lower[-1]
@@ -197,7 +192,7 @@ def nested_sampling_Dy(gp: GP
     samples_dict['best'] = best_pt
     weights = renormalise_log_weights(res['logwt'])
     if equal_weights: #for MC points
-        samples_x, logl = resample_equal(samples_x, logl, weights=weights)
+        samples_x, logl = resample_equal(samples_x, logl, weights=weights,rng=rng)
         weights = np.ones(samples_x.shape[0])  # Equal weights after resampling
     samples_dict['x'] = samples_x
     samples_dict['weights'] = weights    

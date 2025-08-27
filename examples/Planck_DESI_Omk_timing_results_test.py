@@ -1,7 +1,12 @@
+import sys
+clf = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
+clf_update_step = 1 if clf == 'svm' else 5
+num_devices = int(sys.argv[2]) if len(sys.argv) > 2 else 8
 import os
-os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
-    os.cpu_count()
-)
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(num_devices)
+# os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+#     os.cpu_count()
+# )
 from jaxbo.bo import BOBE
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 from jaxbo.loglike import CobayaLikelihood
@@ -15,7 +20,7 @@ clf_type = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
 clf_update_step = 1 if clf_type == 'svm' else 2
 
 likelihood = CobayaLikelihood(cobaya_input_file, confidence_for_unbounded=0.9999995,
-        minus_inf=-1e5, noise_std=0.0,name=f'Planck_DESI_Omk_{clf_type}_mix_acq')
+        minus_inf=-1e5, noise_std=0.0,name=f'Planck_DESI_Omk_{clf_type}_mix_mcacq')
 
 
 print("="*60)
@@ -31,21 +36,21 @@ print("="*60)
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=16, n_sobol_init=32,
-        min_iters=500, max_eval_budget=3000, max_gp_size=2000,
+        min_iters=800, max_eval_budget=3000, max_gp_size=1800,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}.npz',
         save=True,
-        fit_step=50, update_mc_step=5, ns_step=50,
-        num_hmc_warmup=512, num_hmc_samples=4000, mc_points_size=160,
+        fit_step=50, update_mc_step=10, ns_step=40,
+        num_hmc_warmup=512, num_hmc_samples=4096, mc_points_size=512,
         lengthscale_priors='DSLP',
         use_clf=True, clf_type=clf_type, clf_use_size=50, clf_update_step=clf_update_step,
-        clf_threshold=300, gp_threshold=500,
+        clf_threshold=300, gp_threshold=300,
         minus_inf=-1e5, logz_threshold=1.)
 
 # Run BOBE with automatic timing collection
 print("Starting BOBE run with automatic timing measurement...")
-results = sampler.run(n_log_ei_iters=250)
+results = sampler.run(n_log_ei_iters=500)
 
 end = time.time()
 manual_timing = end - start
@@ -123,7 +128,7 @@ fig_dashboard = plotter.create_summary_dashboard(
     gp_data=gp_data,
     best_loglike_data=best_loglike_data,
     timing_data=timing_data,
-    save_path=f"{likelihood.name}_dashboard.png"
+    save_path=f"{likelihood.name}_dashboard.pdf"
 )
 # plt.show()
 
@@ -133,7 +138,7 @@ fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
 plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
 ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
 plt.tight_layout()
-plt.savefig(f"{likelihood.name}_timing_detailed.png", dpi=300, bbox_inches='tight')
+plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
 # plt.show()
 
 # Create evidence evolution plot if available
@@ -143,7 +148,7 @@ if comprehensive_results.get('logz_history'):
     plotter.plot_evidence_evolution(ax=ax_evidence)
     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
     plt.tight_layout()
-    plt.savefig(f"{likelihood.name}_evidence.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
     # plt.show()
 
 # Create parameter samples plot
@@ -165,12 +170,26 @@ plot_final_samples(
     param_bounds=likelihood.param_bounds,
     plot_params=param_list_LCDM,
     param_labels=likelihood.param_labels,
-    output_file=likelihood.name,
+    output_file=f"{likelihood.name}_cosmo",
     reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
     reference_ignore_rows=0.3,
     reference_label='MCMC',
     scatter_points=False,
 )
+
+plot_final_samples(
+    gp, 
+    {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+    param_list=likelihood.param_list,
+    param_bounds=likelihood.param_bounds,
+    param_labels=likelihood.param_labels,
+    output_file=f"{likelihood.name}_full",
+    reference_file='./cosmo_input/chains/PPlus_curved_LCDM',
+    reference_ignore_rows=0.3,
+    reference_label='MCMC',
+    scatter_points=False,
+)
+
 
 # Save comprehensive results
 print("\n" + "="*60)
@@ -181,10 +200,10 @@ print("="*60)
 print(f"✓ Main results: {likelihood.name}_results.pkl")
 print(f"✓ Timing data: {likelihood.name}_timing.json")
 print(f"✓ Legacy samples: {likelihood.name}_samples.npz")
-print(f"✓ Summary dashboard: {likelihood.name}_dashboard.png")
-print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.png")
+print(f"✓ Summary dashboard: {likelihood.name}_dashboard.pdf")
+print(f"✓ Detailed timing: {likelihood.name}_timing_detailed.pdf")
 if comprehensive_results.get('logz_history'):
-    print(f"✓ Evidence evolution: {likelihood.name}_evidence.png")
+    print(f"✓ Evidence evolution: {likelihood.name}_evidence.pdf")
 print(f"✓ Parameter samples: {likelihood.name}_samples.pdf")
 
 print("\n" + "="*60)

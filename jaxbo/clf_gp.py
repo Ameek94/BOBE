@@ -3,17 +3,18 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
-from .clf import train_svm, svm_predict_proba, train_nn, train_nn_multiple_restarts,train_ellipsoid_multiple_restarts, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
-from .utils.seed_utils import get_new_jax_key, get_numpy_rng
-from .utils.logging_utils import get_logger
+import copy
 import numpyro
 from numpyro.infer import MCMC, NUTS, SA, AIES
 import numpyro.distributions as dist
 from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
-log = get_logger("[clf_gp]")
+from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
+from .clf import train_svm, svm_predict_proba, train_nn, train_nn_multiple_restarts,train_ellipsoid_multiple_restarts, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
+from .utils.seed_utils import get_new_jax_key, get_numpy_rng
+from .utils.logging_utils import get_logger
+log = get_logger("clf_gp")
 
 
 available_classifiers = {
@@ -34,11 +35,12 @@ class GPwithClassifier:
                  clf_type='svm', clf_settings={},
                  clf_use_size=400, clf_update_step=5,
                  probability_threshold=0.5, minus_inf=-1e5,
-                 clf_threshold=250, gp_threshold=1000,
+                 clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", optimizer="adam", 
                  outputscale_bounds=[-4, 4], lengthscale_bounds=[np.log10(0.05), 2],
                  lengthscale_priors='DSLP', lengthscales=None, outputscale=1.0,
-                 tausq=None, tausq_bounds=[-4, 4]
+                 tausq=None, tausq_bounds=[-4, 4],train_clf_on_init=True,  # Prevent retraining on copy
+
                  ):
         """
         Generic Classifier-GP class combining a GP with a classifier. The GP is trained on the data points
@@ -116,7 +118,8 @@ class GPwithClassifier:
         self._clf_predict_func = None # Will hold the jitted prediction function
 
         if self.use_clf and self.clf_type in available_classifiers:
-             self._train_classifier() # Initial training if enough data
+             if train_clf_on_init:
+                 self._train_classifier() # Initial training if enough data
         elif self.use_clf and self.clf_type not in available_classifiers:
              raise ValueError(f"Classifier type '{self.clf_type}' not supported. Available: {list(available_classifiers.keys())}")
         else:
@@ -133,7 +136,7 @@ class GPwithClassifier:
             0, 1
         )
 
-        log.info(f" Number of labels 0: {np.sum(labels == 0)}, 1: {np.sum(labels == 1)}")
+        log.debug(f" Number of labels 0: {np.sum(labels == 0)}, 1: {np.sum(labels == 1)}")
 
         # Add method to handle if only class is present
         if np.all(labels == labels[0]):
@@ -157,8 +160,8 @@ class GPwithClassifier:
                                                                                labels, init_params = self.clf_params,
                                                                                **kwargs)
 
-        log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
-        log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
+        log.debug(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
+        log.debug(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
 
     def fit(self, lr=5e-3, maxiter=300, n_restarts=4):
         """Fits the GP hyperparameters."""
@@ -188,18 +191,21 @@ class GPwithClassifier:
         x = jnp.atleast_2d(x)
         return jax.vmap(self.predict_var_single)(x)
 
-    def predict_mean(self, x):
-        """
-        Predicts the GP mean, adjusted by the classifier.
-        If classifier predicts infeasible (prob < threshold), return minus_inf.
-        """
-        gp_mean = self.gp.predict_mean(x)
+    def predict_mean(self,x):
+        res = self.gp.predict_mean(x)
         if not self.use_clf or self._clf_predict_func is None:
-            return gp_mean
+            return res
 
         clf_probs = self._clf_predict_func(x)
-        res = jnp.where(clf_probs >= self.probability_threshold, gp_mean, self.minus_inf)
-        return res
+        return jnp.where(clf_probs >= self.probability_threshold, res, self.minus_inf)
+    
+    def predict_var(self,x):
+        var = self.gp.predict_var(x)
+        if not self.use_clf or self._clf_predict_func is None:
+            return var
+
+        clf_probs = self._clf_predict_func(x)
+        return jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
 
     def predict_single(self,x):
         mean, var = self.gp.predict_single(x)
@@ -211,27 +217,6 @@ class GPwithClassifier:
         var = jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
         return mean, var
 
-    # def batched_predict_mean(self,x):
-    #     x = jnp.atleast_2d(x)
-    #     return jax.vmap(self.predict_mean)(x)
-
-    def predict_var(self, x):
-        """
-        Predicts the GP variance, adjusted by the classifier.
-        If classifier predicts infeasible (prob < threshold), return 0 variance.
-        """
-        var = self.gp.predict_var(x)
-        if not self.use_clf or self._clf_predict_func is None:
-            return var
-
-        clf_probs = self._clf_predict_func(x)
-        res = jnp.where(clf_probs >= self.probability_threshold, var, 0.0)
-        return res
-
-    # def batched_predict_var(self,x):
-    #     x = jnp.atleast_2d(x)
-    #     return jax.vmap(self.predict_var)(x)
-
     def fantasy_var(self, new_x, mc_points,k_train_mc):
         """
         Computes the fantasy variance, see gp.py for more details.
@@ -239,7 +224,7 @@ class GPwithClassifier:
         """
         return self.gp.fantasy_var(new_x, mc_points,k_train_mc)
 
-    def update(self, new_x, new_y, refit=True, lr=5e-3, maxiter=300, n_restarts=4, step=0):
+    def update(self, new_x, new_y, refit=True, lr=5e-3, maxiter=300, n_restarts=4):
         """
         Updates the classifier and GP training sets.
         Retrains classifier/GP based on thresholds and steps.
@@ -250,33 +235,35 @@ class GPwithClassifier:
         if not self.clf_flag:
             gp_not_updated = self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
         else:
-            # Check for duplicates in classifier data
-            is_duplicate = jnp.any(jnp.all(jnp.isclose(self.train_x_clf, new_x, atol=1e-6, rtol=1e-4), axis=1))
-            if is_duplicate:
-                log.info(f"Point already exists in the classifier training set, not updating.")
-                return True 
-            
-            # # can we not add point to GP if it is below threshold and correctly classified, only add to classifier data in that case?
-            # if self.use_clf:
-            #     correct_classification = (self.predict_mean(new_x) >= self.train_y_clf.max() - self.clf_threshold)
-            #     predicted_classification = (self._clf_predict_func(new_x) >= self.probability_threshold)
-            #     correctly_classified = correct_classification==predicted_classification
+            # Check for duplicates in data 
+            new_pts_to_add = []
+            new_vals_to_add = []
+            for i in range(new_x.shape[0]):
+                if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x[i], atol=1e-6,rtol=1e-4), axis=1)):
+                    log.info(f"Point {new_x[i]} already exists in the training set, not updating")
+                    duplicate = True
+                else:
+                    new_pts_to_add.append(new_x[i])
+                    new_vals_to_add.append(new_y[i])
 
-            # Update classifier data
-            self.train_x_clf = jnp.concatenate([self.train_x_clf, new_x], axis=0)
-            self.train_y_clf = jnp.concatenate([self.train_y_clf, new_y], axis=0)
+            new_pts_to_add = jnp.atleast_2d(jnp.array(new_pts_to_add))
+            new_vals_to_add = jnp.atleast_2d(jnp.array(new_vals_to_add))
+            self.train_x_clf = jnp.concatenate([self.train_x_clf, new_pts_to_add], axis=0)
+            self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
             log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
 
             # Update GP data if within threshold
             gp_not_updated = False
-            if new_y.flatten()[0] > (self.train_y_clf.max() - self.gp_threshold):
-                # Update GP - properties will automatically reflect the updated GP
-                self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
-            else:
-                log.info("Point not within GP threshold, not updating GP.")
-                if refit:
-                    self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
-                gp_not_updated = True
+            for i in range(new_pts_to_add.shape[0]):
+                val = new_vals_to_add[i]
+                x = new_pts_to_add[i]
+                if val > (self.train_y_clf.max() - self.gp_threshold):
+                    # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
+                    self.gp.update(x, val,refit=False)
+                else:
+                    log.info("Point not within GP threshold, not updating GP.")
+            if refit:
+                self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
 
             # Check if classifier data size has reached the threshold
             if not self.use_clf:
@@ -285,7 +272,7 @@ class GPwithClassifier:
                     self.use_clf = True
 
             # Retrain classifier if conditions are met
-            if self.use_clf and (step % self.clf_update_step == 0):
+            if self.use_clf: #
                 self._train_classifier()
 
         # Return whether GP was updated, classifier is always updated
@@ -297,27 +284,24 @@ class GPwithClassifier:
         """
         return self.gp.kernel(x1,x2,lengthscales,outputscale,noise,include_noise=include_noise)
 
-    def get_random_point(self):
+    def get_random_point(self,rng=None):
+
+        rng = rng if rng is not None else get_numpy_rng()
 
         if self.use_clf:
             pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold
     
-            # if not jnp.any(pts_idx):
-            #     log.info("No points above threshold")
-            #     return self.train_x_clf[jnp.argmax(self.train_y_clf)]
-
             # Sample a random point from the filtered points
             valid_indices = jnp.where(pts_idx)[0]
     
-            # Use np.random for random selection
-            chosen_index = np.random.choice(valid_indices, size=1)[0]
-    
-            pt = self.train_x_clf[chosen_index]
-            log.info(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
-        else:
-            log.info(f"Getting random point")
+            chosen_index = rng.choice(valid_indices, size=1)[0]
 
-            pt = np.random.uniform(0, 1, size=self.ndim)
+            pt = self.train_x_clf[chosen_index]
+            log.debug(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
+        else:
+            log.debug(f"Getting random point in unit cube")
+
+            pt = rng.uniform(0, 1, size=self.ndim)
 
         return pt
     
@@ -442,17 +426,18 @@ class GPwithClassifier:
         return gp_clf
         
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
-                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4):
+                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4,np_rng=None, rng_key=None):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
         Optionally restarts MCMC if all logp values are the same or if HMC fails. (RESTART LOGIC TO BE IMPLEMENTED)
         """        
 
-        rng_mcmc = get_numpy_rng()
+        rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1., 2.) ** 2
-        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        high_temp = rng_mcmc.uniform(1.5,6.) 
+        # high_temp = rng_mcmc.uniform(1.,2.) ** 2
+        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
@@ -479,11 +464,15 @@ class GPwithClassifier:
     
 
         num_devices = jax.device_count()
-        rng_keys = jax.random.split(jax.random.PRNGKey(seed_int), num_chains) # handle properly the keys [get_new_jax_key() for _ in range(num_chains)] #
+        num_chains = min(num_devices,num_chains)
+
+        rng_key = rng_key if rng_key is not None else get_new_jax_key()
+        rng_keys = jax.random.split(rng_key, num_chains)
+        
         if num_chains == 1: 
-            inits = jnp.array([self.get_random_point()])
+            inits = jnp.array([self.get_random_point(rng=np_rng)])
         else:
-            inits = jnp.vstack([self.get_random_point() for _ in range(num_chains-1)])
+            inits = jnp.vstack([self.get_random_point(rng=np_rng) for _ in range(num_chains-1)])
             inits = jnp.vstack([inits, self.train_x_clf[jnp.argmax(self.train_y_clf)]])
 
         log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
@@ -532,6 +521,63 @@ class GPwithClassifier:
             train_y_gp = self.train_y_clf[mask] * self.y_std + self.y_mean  # Rescale to original scale
             hyperparams_dict = self.gp.hyperparams
             self.gp.reset_train_data(train_x = train_x_gp, train_y = train_y_gp,)
+
+    def copy(self):
+        """
+        Returns a deep copy of the GPwithClassifier, including its GP and classifier state.
+        """
+        # Copy underlying GP
+        gp_copy = self.gp.copy()
+
+        # Create a new GPwithClassifier object with the same init args
+        gp_clf_copy = GPwithClassifier(
+            train_x=np.array(self.train_x_clf),   # convert to numpy to avoid JAX tracer issues
+            train_y=np.array(self.train_y_clf),
+            clf_flag=self.clf_flag,
+            clf_type=self.clf_type,
+            clf_settings=copy.deepcopy(self.clf_settings),
+            clf_use_size=self.clf_use_size,
+            clf_update_step=self.clf_update_step,
+            probability_threshold=self.probability_threshold,
+            minus_inf=self.minus_inf,
+            clf_threshold=self.clf_threshold,
+            gp_threshold=self.gp_threshold,
+            noise=self.gp.noise,
+            kernel="rbf" if self.gp.kernel_name == "rbf_kernel" else "matern",
+            optimizer="adam",  # adjust if you actually use different optimizers
+            outputscale_bounds=self.gp.outputscale_bounds,
+            lengthscale_bounds=self.gp.lengthscale_bounds,
+            lengthscale_priors="DSLP",  # or SAAS depending on your setup
+            lengthscales=np.array(self.gp.lengthscales),
+            outputscale=float(self.gp.outputscale),
+            train_clf_on_init=False,
+        )
+
+        # Replace the gp with the already-trained copy
+        gp_clf_copy.gp = gp_copy
+
+        # Copy classifier state
+        gp_clf_copy.clf_params = copy.deepcopy(self.clf_params)
+        gp_clf_copy.clf_metrics = copy.deepcopy(self.clf_metrics)
+        gp_clf_copy.use_clf = self.use_clf
+        # gp_clf_copy._clf_predict_func = self._clf_predict_func # Pass the jitted function directly
+
+
+        # # Copy classifier state (but not retrain unless explicitly needed)
+        # gp_clf_copy.clf_params = copy.deepcopy(self.clf_params)
+        # gp_clf_copy.clf_metrics = copy.deepcopy(self.clf_metrics)
+        # gp_clf_copy.use_clf = self.use_clf
+
+        # Retrain classifier if needed
+        if self._clf_predict_func is not None:
+            try:
+                gp_clf_copy._clf_predict_func = copy.deepcopy(self._clf_predict_func)
+            except Exception:
+                # If deepcopy fails, retrain instead
+                log.info("Could not deepcopy classifier predict function, retraining...")
+                gp_clf_copy._train_classifier()
+
+        return gp_clf_copy
 
     @property
     def lengthscales(self):

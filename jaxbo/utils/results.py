@@ -26,7 +26,7 @@ except ImportError:
 from .timing import BOBETimingCollector  
 from .logging_utils import get_logger
 
-log = get_logger("[results]")
+log = get_logger("results")
 
 
 def convert_jax_to_json_serializable(obj):
@@ -62,7 +62,8 @@ class ConvergenceInfo:
     converged: bool
     delta: float
     threshold: float
-    
+    dlogz_sampler: float
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -70,7 +71,8 @@ class ConvergenceInfo:
             'logz_dict': self.logz_dict,
             'converged': bool(self.converged),
             'delta': float(self.delta),
-            'threshold': float(self.threshold)
+            'threshold': float(self.threshold),
+            'dlogz_sampler': float(self.dlogz_sampler),
         }
 
 
@@ -299,8 +301,8 @@ class BOBEResults:
             except Exception:
                 # If parsing fails, keep current start time
                 pass
-    
-    def update_iteration(self, iteration: int, **kwargs):
+
+    def update_iteration(self, iteration: int, save_step: int, gp = None, **kwargs):
         """
         Simplified iteration update - only saves intermediate results periodically.
         
@@ -309,8 +311,8 @@ class BOBEResults:
             **kwargs: Additional arguments (ignored in simplified version)
         """
         # Save intermediate results periodically
-        if iteration % 50 == 0:
-            self.save_intermediate()
+        if iteration % save_step == 0:
+            self.save_intermediate(gp=gp)
 
     def update_acquisition(self, iteration: int, acquisition_value: float, acquisition_function: str):
         """
@@ -363,14 +365,15 @@ class BOBEResults:
             converged: Whether convergence was achieved
             threshold: Convergence threshold used
         """
-        delta = 2 * logz_dict['std'] #logz_dict.get('upper', 0) - logz_dict.get('lower', 0)
+        delta = logz_dict['std'] #logz_dict.get('upper', 0) - logz_dict.get('lower', 0)
         
         conv_info = ConvergenceInfo(
             iteration=iteration,
             logz_dict=logz_dict.copy(),
             converged=converged,
             delta=delta,
-            threshold=threshold
+            threshold=threshold,
+            dlogz_sampler=logz_dict.get('dlogz_sampler', np.nan)
         )
         
         self.convergence_history.append(conv_info)
@@ -383,23 +386,21 @@ class BOBEResults:
             'logz_lower': logz_dict.get('lower', np.nan),
             'logz_err': delta,
             'logz_var': logz_dict.get('var', np.nan),
-            'logz_std': logz_dict.get('std', np.nan)
+            'logz_std': logz_dict.get('std', np.nan),
+            'dlogz_sampler': logz_dict.get('dlogz_sampler', np.nan)
         })
     
     def update_kl_divergences(self,
                              iteration: int,
-                             kl_results: Dict[str, float],
                              successive_kl: Optional[Dict[str, float]] = None):
         """
         Update KL divergence tracking for convergence analysis.
         
         Args:
             iteration: Current iteration number
-            kl_results: Dictionary with KL divergence results between bounds
             successive_kl: Optional KL divergence between successive iterations
         """
         self.kl_iterations.append(iteration)
-        self.kl_divergences.append(kl_results.copy())
         
         if successive_kl is not None:
             self.successive_kl.append({
@@ -578,6 +579,7 @@ class BOBEResults:
             # === EVIDENCE INFORMATION ===
             'logz': self.final_logz_dict.get('mean', np.nan),
             'logzerr': self.final_logz_dict.get('upper', 0) - self.final_logz_dict.get('lower', 0),
+            'dlogz_sampler': float(self.final_logz_dict.get('dlogz_sampler', np.nan)),
             'logz_bounds': {
                 'lower': self.final_logz_dict.get('lower', np.nan),
                 'upper': self.final_logz_dict.get('upper', np.nan),
@@ -739,7 +741,8 @@ class BOBEResults:
                 "logz": float(self.final_logz_dict.get('mean', np.nan)),
                 "logz_err": float(self.final_logz_dict.get('upper', 0) - self.final_logz_dict.get('lower', 0)),
                 "logz_lower": float(self.final_logz_dict.get('lower', np.nan)),
-                "logz_upper": float(self.final_logz_dict.get('upper', np.nan))
+                "logz_upper": float(self.final_logz_dict.get('upper', np.nan)),
+                "dlogz_sampler": float(self.final_logz_dict.get('dlogz_sampler', np.nan))
             },
             "diagnostics": {
                 "n_samples": int(len(self.final_samples)),
@@ -759,7 +762,9 @@ class BOBEResults:
                 "logz_value": float(self.convergence_history[-1].logz_dict.get('mean', np.nan)),
                 "logz_error": float(self.convergence_history[-1].delta),
                 "threshold": float(self.convergence_history[-1].threshold),
-                "converged": bool(self.convergence_history[-1].converged)
+                "converged": bool(self.convergence_history[-1].converged),
+                "dlogz_sampler": self.convergence_history[-1].logz_dict.get('dlogz_sampler', np.nan)
+
             } if self.convergence_history else {},
             "parameters": param_stats,
 
@@ -770,7 +775,7 @@ class BOBEResults:
             json.dump(stats, f, indent=2)
         log.info(f"Saved summary statistics to {stats_file}")
     
-    def save_intermediate(self):
+    def save_intermediate(self,gp):
         """Save intermediate results for crash recovery and resuming."""
         intermediate = {
             'convergence_history': [conv.to_dict() for conv in self.convergence_history],
@@ -814,6 +819,9 @@ class BOBEResults:
             json_safe_intermediate = convert_jax_to_json_serializable(intermediate)
             json.dump(json_safe_intermediate, f, indent=2)
         log.info(f"Saved intermediate results to {intermediate_file}")
+
+        if gp is not None:
+            gp.save(outfile=f"{self.output_file}_gp")
     
     def get_getdist_samples(self) -> Optional['MCSamples']:
         """
