@@ -369,7 +369,7 @@ class BOBESummaryPlotter:
         
         # Plot kernel variance
         ax.plot(iterations, kernel_variances, 'purple', linewidth=2, 
-               label=display_name, alpha=0.8)
+               label='Kernel Variance', alpha=0.8)
         
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Kernel Variance')
@@ -620,6 +620,9 @@ class BOBESummaryPlotter:
         ax.legend()
         ax.grid(True, alpha=0.3)
         
+        # Force integer ticks on x-axis
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        
         return ax
     
     def plot_kl_divergences(self, kl_data: Optional[Dict] = None,
@@ -685,6 +688,9 @@ class BOBESummaryPlotter:
         ax.set_yscale('log')
         ax.legend()
         ax.grid(True, alpha=0.3)
+        
+        # Force integer ticks on x-axis
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         
         # Add annotation
         ax.text(0.02, 0.98, 'KL divergences between successive NS iterations\n'

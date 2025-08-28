@@ -1,29 +1,29 @@
-from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
+from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter 
 from jaxbo.utils.logging_utils import get_logger
 from jaxbo.utils.core_utils import renormalise_log_weights
 from jaxbo.run import run_bobe
+import matplotlib.pyplot as plt
+import time
+import sys
 from getdist import MCSamples
 from dynesty import DynamicNestedSampler
 import numpy as np
-import time
-import matplotlib.pyplot as plt
 
 ndim = 2
+param_bounds = np.array([[-4,4],[-4,4]]).T
 param_list = ['x1','x2']
 param_labels = ['x_1','x_2']
-param_bounds = np.array([[0,1],[0,1]]).T
-likelihood_name = 'GaussianRing'
+likelihood_name = 'Himmelblau'
 
-mean_r = 0.2
-scale = 0.02
-
-def loglike(X):
-    r2 = (X[0]-0.5)**2 + (X[1]-0.5)**2
-    r = np.sqrt(r2)
-    return -0.5*((r-mean_r)/scale)**2
+afac= 0.1
 
 def prior_transform(x):
-    return x
+    return 8*x - 4
+
+def loglike(X):
+    r1 = (X[0] + X[1]**2 -7)**2
+    r2 = (X[0]**2 + X[1]-11)**2
+    return -0.5*(afac*r1 + r2)
 
 def main():
     start = time.time()
@@ -41,25 +41,23 @@ def main():
         },
         verbosity='INFO',
         n_cobaya_init=4,
-        n_sobol_init=8,
-        n_log_ei_iters=20,
-        min_iters=30,
-        max_eval_budget=200,
-        max_gp_size=200,
+        n_sobol_init=4,
+        min_iters=10,
+        n_log_ei_iters=15,
+        max_eval_budget=250,
+        max_gp_size=250,
         fit_step=2,
-        update_mc_step=1,
-        ns_step=4,
-        wipv_batch_size=2,
-        num_hmc_warmup=512,
-        num_hmc_samples=512,
+        wipv_batch_size=3,
+        ns_step=2,
+        num_hmc_warmup=256,
+        num_hmc_samples=1024,
         mc_points_size=128,
-        mc_points_method='NS',
         lengthscale_priors='DSLP',
         use_clf=False,
         minus_inf=-1e5,
         logz_threshold=0.001,
         seed=42,
-        do_final_ns=False,
+        do_final_ns=True,
     )
 
     end = time.time()
@@ -81,6 +79,36 @@ def main():
         comprehensive_results = results['comprehensive']
         timing_data = comprehensive_results['timing']
 
+        # Print detailed timing analysis
+        log.info("\n" + "="*60)
+        log.info("DETAILED TIMING ANALYSIS")
+        log.info("="*60)
+
+        log.info(f"Automatic timing: {timing_data['total_runtime']:.2f} seconds ({timing_data['total_runtime']/60:.2f} minutes)")
+        log.info(f"Timing difference: {abs(manual_timing - timing_data['total_runtime']):.2f} seconds")
+
+        log.info("\nPhase Breakdown:")
+        log.info("-" * 40)
+        for phase, time_spent in timing_data['phase_times'].items():
+            if time_spent > 0:
+                percentage = timing_data['percentages'].get(phase, 0)
+                log.info(f"{phase:25s}: {time_spent:8.2f}s ({percentage:5.1f}%)")
+
+        # Analyze timing efficiency
+        log.info("\nTiming Efficiency Analysis:")
+        log.info("-" * 40)
+        total_measured = sum(t for t in timing_data['phase_times'].values() if t > 0)
+        overhead = timing_data['total_runtime'] - total_measured
+        overhead_pct = (overhead / timing_data['total_runtime']) * 100 if timing_data['total_runtime'] > 0 else 0
+
+        log.info(f"Total measured phases: {total_measured:.2f}s ({(total_measured/timing_data['total_runtime']*100):.1f}%)")
+        log.info(f"Overhead/unmeasured: {overhead:.2f}s ({overhead_pct:.1f}%)")
+
+        # Find dominant phase
+        if any(t > 0 for t in timing_data['phase_times'].values()):
+            max_phase = max(timing_data['phase_times'].items(), key=lambda x: x[1])
+            log.info(f"Dominant phase: {max_phase[0]} ({timing_data['percentages'][max_phase[0]]:.1f}%)")
+
         # Print convergence info
         log.info("\n" + "="*60)
         log.info("CONVERGENCE ANALYSIS")
@@ -93,24 +121,6 @@ def main():
             log.info(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
             if 'upper' in logz_dict and 'lower' in logz_dict:
                 log.info(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
-
-        # Run Dynesty for comparison
-        log.info("Running Dynesty for comparison...")
-        dns_sampler = DynamicNestedSampler(loglike, prior_transform, ndim=ndim,
-                                          sample='rwalk')
-
-        dns_sampler.run_nested(print_progress=True, dlogz_init=0.01)
-        res = dns_sampler.results
-        mean = res['logz'][-1]
-        logz_err = res['logzerr'][-1]
-        log.info(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
-
-        dns_samples = res['samples']
-        weights = renormalise_log_weights(res['logwt'])
-
-        reference_samples = MCSamples(samples=dns_samples, names=param_list, labels=param_labels,
-                                    weights=weights,
-                                    ranges=dict(zip(param_list, param_bounds.T)))
 
         # Create comprehensive plots
         log.info("\n" + "="*60)
@@ -143,6 +153,24 @@ def main():
         else:
             sample_array = samples['x']
             weights_array = samples['weights']
+
+        # Run Dynesty for comparison
+        log.info("Running Dynesty for comparison...")
+        dns_sampler = DynamicNestedSampler(loglike, prior_transform, ndim=ndim,
+                                          sample='rwalk')
+
+        dns_sampler.run_nested(print_progress=True, dlogz_init=0.01)
+        res = dns_sampler.results
+        mean = res['logz'][-1]
+        logz_err = res['logzerr'][-1]
+        log.info(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
+
+        dns_samples = res['samples']
+        weights = renormalise_log_weights(res['logwt'])
+
+        reference_samples = MCSamples(samples=dns_samples, names=param_list, labels=param_labels,
+                                    weights=weights,
+                                    ranges=dict(zip(param_list, param_bounds.T)))
 
         plot_final_samples(
             gp,

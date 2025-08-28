@@ -684,7 +684,7 @@ class BOBE:
             else:
                 self.prev_converged = True
                 log.info(f" Convergence not yet achieved in successive iterations")
-
+                # Checkpoint for saving some results
                 return False
         else:
             self.prev_converged = False

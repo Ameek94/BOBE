@@ -522,7 +522,7 @@ class GP:
 
 
         num_devices = jax.device_count()
-        num_chains = min(num_devices,num_chains)
+        # num_parallel_chains = min(num_devices,num_chains)
 
         rng_key = rng_key if rng_key is not None else get_new_jax_key()
         rng_keys = jax.random.split(rng_key, num_chains)

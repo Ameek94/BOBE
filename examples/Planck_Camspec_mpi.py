@@ -52,8 +52,8 @@ def main():
         
         # Iteration and budget settings
         n_log_ei_iters=150,
-        n_cobaya_init=4,
-        n_sobol_init=32,
+        n_cobaya_init=8,
+        n_sobol_init=64,
         min_iters=250,
         max_eval_budget=2500,
         max_gp_size=1500,

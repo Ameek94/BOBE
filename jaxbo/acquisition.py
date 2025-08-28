@@ -218,7 +218,10 @@ class AcquisitionFunction:
 
         rng = rng if rng is not None else get_numpy_rng()
 
-        dummy_gp = gp.copy()
+        if hasattr(gp,'gp'):
+            dummy_gp = gp.gp.copy()
+        else:
+            dummy_gp = gp.copy()
 
         x_batch, acq_vals = [], []
 

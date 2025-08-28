@@ -254,6 +254,9 @@ class BOBEResults:
             self.gp_iterations = gp_data.get('iterations', []).copy()
             self.gp_lengthscales = gp_data.get('lengthscales', []).copy()
             self.gp_kernel_variances = gp_data.get('kernel_variances', []).copy()
+            # Backward compatibility: check for old 'outputscales' key
+            if 'outputscales' in gp_data and not self.gp_kernel_variances:
+                self.gp_kernel_variances = gp_data.get('outputscales', []).copy()
         
         # Restore best loglikelihood data if available
         if 'best_loglike_data' in existing_results:
