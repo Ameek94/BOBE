@@ -55,7 +55,6 @@ class BOBE:
                  save_step=25,
                  noise = 1e-8,
                  fit_step=10,
-                 update_mc_step=1,
                  wipv_batch_size=4,
                  ns_step=10,
                  num_hmc_warmup=512,
@@ -104,8 +103,6 @@ class BOBE:
             If True, save the GP training data to a file so that it can be resumed from later.
         fit_step : int
             Number of iterations between GP refits.
-        update_mc_step : int
-            Number of iterations between MC point updates.
         ns_step : int
             Number of iterations between nested sampling runs.
         num_hmc_warmup : int
@@ -170,7 +167,6 @@ class BOBE:
                 'max_eval_budget': max_eval_budget,
                 'max_gp_size': max_gp_size,
                 'fit_step': fit_step,
-                'update_mc_step': update_mc_step,
                 'wipv_batch_size': wipv_batch_size,
                 'ns_step': ns_step,
                 'num_hmc_warmup': num_hmc_warmup,
@@ -246,7 +242,6 @@ class BOBE:
         self.min_iters = min_iters
         self.max_gp_size = max_gp_size
         self.fit_step = fit_step
-        self.update_mc_step = update_mc_step
         self.ns_step = ns_step
         self.wipv_batch_size = wipv_batch_size
         self.num_hmc_warmup = num_hmc_warmup
@@ -332,7 +327,6 @@ class BOBE:
             ii+=1
             refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and ii >= self.min_iters
-            update_mc = not ns_flag
 
             if (ii - start_iteration > n_log_ei_iters) and self.acquisition.name in ['EI','LogEI']:
                 # change acquisition function to WIPV after a minimum of n_log_ei_iters EI, LogEI
@@ -346,14 +340,14 @@ class BOBE:
             acq_str = self.acquisition.name
 
             print("\n")
-            log.info(f" Iteration {ii}, objective evals {current_evals}/{self.max_eval_budget}, refit={refit}, update_mc={update_mc}, ns={ns_flag}, acq={acq_str}")
+            log.info(f" Iteration {ii}, objective evals {current_evals}/{self.max_eval_budget}, refit={refit}, ns={ns_flag}, acq={acq_str}")
 
 
             self.results_manager.start_timing('Acquisition Optimization')
             if acq_str == 'WIPV':
                 acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
                 n_restarts = 1
-                maxiter = 200
+                maxiter = 100
                 early_stop_patience = 25
                 n_batch = self.wipv_batch_size # since we only need to update true GP before doing the next MCMC
             else:
@@ -409,9 +403,8 @@ class BOBE:
             kernel_variance = float(self.gp.outputscale)
             self.results_manager.update_gp_hyperparams(ii, lengthscales, kernel_variance)
 
-            if (pt_exists_or_below_threshold and self.mc_samples['method'] == 'MCMC'): # can remove update logic now?
-                update_mc = True
-            if update_mc and acq_str == 'WIPV':
+
+            if acq_str == 'WIPV' and not ns_flag:
                 if not refit:
                     self.results_manager.start_timing('GP Training')
                     self.gp.fit(maxiter=50,n_restarts=1)

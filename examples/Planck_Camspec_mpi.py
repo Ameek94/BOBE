@@ -128,7 +128,7 @@ def main():
         plt.rcParams['text.usetex'] = True 
         plt.rcParams['font.family'] = 'serif'
 
-        param_list_LCDM = ['omch2','ombh2','logA','ns','H0','tau']
+        param_list_LCDM = ['omch2','ombh2','H0','logA','ns','tau']
         plot_final_samples(
             gp, 
             {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},

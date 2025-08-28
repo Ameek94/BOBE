@@ -218,15 +218,29 @@ class AcquisitionFunction:
 
         rng = rng if rng is not None else get_numpy_rng()
 
-        if hasattr(gp,'gp'):
-            dummy_gp = gp.gp.copy()
-        else:
-            dummy_gp = gp.copy()
-
         x_batch, acq_vals = [], []
 
-        for i in range(n_batch):
-            x_next, acq_val_next = self.get_next_point(dummy_gp, acq_kwargs=acq_kwargs,
+        if n_batch == 1:
+            x_next, acq_val_next = self.get_next_point(gp, acq_kwargs=acq_kwargs,
+                                        optimizer_name=optimizer_name,
+                                        lr=lr,
+                                        optimizer_kwargs=optimizer_kwargs,
+                                        maxiter=maxiter,
+                                        n_restarts=n_restarts,
+                                        verbose=verbose,
+                                        early_stop_patience=early_stop_patience,
+                                        rng=rng)
+            x_batch.append(x_next)
+            acq_vals.append(acq_val_next)
+
+        else:
+            if hasattr(gp,'gp'):
+                dummy_gp = gp.gp.copy()
+            else:
+                dummy_gp = gp.copy()
+
+            for i in range(n_batch):
+                x_next, acq_val_next = self.get_next_point(dummy_gp, acq_kwargs=acq_kwargs,
                                                         optimizer_name=optimizer_name,
                                                         lr=lr,
                                                         optimizer_kwargs=optimizer_kwargs,
@@ -235,11 +249,11 @@ class AcquisitionFunction:
                                                         verbose=verbose,
                                                         early_stop_patience=early_stop_patience,
                                                         rng=rng)
-            x_batch.append(x_next)
-            acq_vals.append(acq_val_next)
+                x_batch.append(x_next)
+                acq_vals.append(acq_val_next)
 
-            mu = dummy_gp.predict_mean_single(x_next)
-            dummy_gp.update(x_next, mu,refit=False)
+                mu = dummy_gp.predict_mean_single(x_next)
+                dummy_gp.update(x_next, mu,refit=False)
 
         return np.array(x_batch), np.array(acq_vals)
 
@@ -272,8 +286,8 @@ class EI(AcquisitionFunction):
                  optimizer_name: str = "adam",
                  lr: float = 0.001,
                  optimizer_kwargs: dict | None = {},
-                 maxiter: int = 500,
-                 n_restarts: int = 8,
+                 maxiter: int = 250,
+                 n_restarts: int = 20,
                  verbose: bool = True,
                  early_stop_patience: int = 25,
                  rng=None):

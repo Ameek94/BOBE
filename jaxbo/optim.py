@@ -128,7 +128,7 @@ def optimize(
                 patience_counter -= 1
                 if patience_counter == 0:
                     if verbose:
-                        log.info(f"Early stopping for restart {restart_idx + 1} at iteration {iter_idx}")
+                        log.debug(f"Early stopping for restart {restart_idx + 1} at iteration {iter_idx}")
                     break
             
             restart_progress.set_postfix({"best_value": float(best_f_for_restart)})
@@ -139,7 +139,7 @@ def optimize(
             global_best_params_unit = current_params
             
         if verbose:
-            log.info(f"Restart {restart_idx + 1} completed. Best value: {float(best_f_for_restart):.4e}")
+            log.debug(f"Restart {restart_idx + 1} completed. Best value: {float(best_f_for_restart):.4e}")
     
     # Final best in original space
     best_params_original = scale_from_unit(global_best_params_unit, bounds_arr)
