@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.gridspec import GridSpec
+from matplotlib.ticker import MaxNLocator
 from typing import Dict, List, Optional, Union, Tuple, Any
 import warnings
 from pathlib import Path
@@ -22,7 +23,6 @@ import json
 #     warnings.warn("Seaborn not available. Using matplotlib defaults.")
 
 try:
-    import getdist
     from getdist import plots, MCSamples, loadMCSamples
     HAS_GETDIST = True
 except ImportError:
@@ -180,12 +180,14 @@ class BOBESummaryPlotter:
             label = f'${label}$'
         return label
     
-    def plot_evidence_evolution(self, ax: Optional[plt.Axes] = None, 
+    def plot_evidence_evolution(self, logz_data: Optional[Dict] = None,
+                               ax: Optional[plt.Axes] = None, 
                                show_convergence: bool = True) -> plt.Axes:
         """
         Plot the evolution of log evidence (logZ) with error bounds.
         
         Args:
+            logz_data: Dictionary containing logZ evolution data (uses results if None)
             ax: Matplotlib axes to plot on (creates new if None)
             show_convergence: Whether to mark convergence points
             
@@ -195,7 +197,13 @@ class BOBESummaryPlotter:
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(8*self.figsize_scale, 5*self.figsize_scale))
         
-        if not self.results.logz_evolution:
+        # Use provided data or fall back to results
+        if logz_data is not None:
+            logz_evolution = logz_data.get('logz_evolution', [])
+        else:
+            logz_evolution = self.results.logz_evolution
+        
+        if not logz_evolution:
             ax.text(0.5, 0.5, 'No logZ evolution data available', 
                    transform=ax.transAxes, ha='center', va='center')
             return ax
@@ -204,7 +212,7 @@ class BOBESummaryPlotter:
         data = [(entry['iteration'], entry['logz'], entry['logz_var'], entry['logz_std'],
                 entry.get('logz_upper', entry['logz'] + entry.get('logz_err', 0)),
                 entry.get('logz_lower', entry['logz'] - entry.get('logz_err', 0)))
-                for entry in self.results.logz_evolution]
+                for entry in logz_evolution]
         iterations, logz_values, logz_var, logz_std, logz_upper, logz_lower = map(np.array, zip(*data))
 
         # Plot evolution with uncertainty
@@ -217,29 +225,37 @@ class BOBESummaryPlotter:
                        alpha=0.2, color='blue', label='Uncertainty region')
         
         # Mark convergence points
-        if show_convergence and self.results.convergence_history:
-            conv_iterations = [conv.iteration for conv in self.results.convergence_history if conv.converged]
-            for i, conv_iter in enumerate(conv_iterations):
-                idx = np.searchsorted(iterations, conv_iter)
-                if idx < len(logz_values):
-                    ax.axvline(conv_iter, color='red', linestyle='--', alpha=0.7)
-                    ax.scatter(conv_iter, logz_values[idx], color='red', s=50, 
-                             marker='o', zorder=5, label='Convergence' if i == 0 else "")
+        if show_convergence:
+            # Use provided convergence data or fall back to results
+            convergence_history = (logz_data.get('convergence_history', []) if logz_data is not None 
+                                 else self.results.convergence_history)
+            if convergence_history:
+                conv_iterations = [conv.iteration for conv in convergence_history if conv.converged]
+                for i, conv_iter in enumerate(conv_iterations):
+                    idx = np.searchsorted(iterations, conv_iter)
+                    if idx < len(logz_values):
+                        ax.axvline(conv_iter, color='red', linestyle='--', alpha=0.7)
+                        ax.scatter(conv_iter, logz_values[idx], color='red', s=50, 
+                                 marker='o', zorder=5, label='Convergence' if i == 0 else "")
         
         # Final logZ
-        if self.results.final_logz_dict:
-            final_logz = self.results.final_logz_dict.get('mean', np.nan)
+        final_logz_dict = (logz_data.get('final_logz_dict', {}) if logz_data is not None 
+                          else self.results.final_logz_dict)
+        if final_logz_dict:
+            final_logz = final_logz_dict.get('mean', np.nan)
             if not np.isnan(final_logz):
                 ax.axhline(final_logz, color='green', linestyle='-', alpha=0.7, 
                           linewidth=2, label=f'Final log Z = {final_logz:.3f}')
-        
+                # limit plot range to +-25 of final logz
+                # ax.set_ylim(final_logz - 25, final_logz + 25)
         ax.set_xlabel('Iteration')
-        ax.set_ylabel('log Z')
-        # limit plot range to +-10 of final logz
-        ax.set_ylim(final_logz - 25, final_logz + 25)
+        ax.set_ylabel(r'$ \log Z$')
         ax.set_title('Evidence Evolution')
         ax.legend()
         ax.grid(True, alpha=0.3)
+        
+        # Force integer ticks on x-axis
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         
         return ax
     
@@ -274,6 +290,19 @@ class BOBESummaryPlotter:
         iterations = np.array(gp_data['iterations'])
         lengthscales = np.array(gp_data['lengthscales'])  # Shape: [n_iterations, n_params]
 
+        # Check if we have any data and if lengthscales has the right dimensions
+        if len(iterations) == 0 or len(lengthscales) == 0:
+            ax.text(0.5, 0.5, 'No GP lengthscale data available', 
+                   transform=ax.transAxes, ha='center', va='center')
+            return ax
+        
+        # Ensure lengthscales is 2D
+        if lengthscales.ndim == 1:
+            ax.text(0.5, 0.5, 'GP lengthscale data has incorrect shape\n'
+                   'Expected 2D array [n_iterations, n_params]', 
+                   transform=ax.transAxes, ha='center', va='center')
+            return ax
+
         print(f"shape {lengthscales.shape}")
 
         # Plot lengthscales for each parameter
@@ -294,12 +323,15 @@ class BOBESummaryPlotter:
         ax.legend()
         ax.grid(True, alpha=0.3)
         
+        # Force integer ticks on x-axis
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        
         return ax
     
-    def plot_gp_outputscale(self, gp_data: Optional[Dict] = None, 
+    def plot_gp_kernel_variance(self, gp_data: Optional[Dict] = None, 
                            ax: Optional[plt.Axes] = None) -> plt.Axes:
         """
-        Plot evolution of GP outputscale only.
+        Plot evolution of GP kernel variance only.
         
         Args:
             gp_data: Dictionary containing GP hyperparameter evolution data
@@ -312,31 +344,42 @@ class BOBESummaryPlotter:
             fig, ax = plt.subplots(1, 1, figsize=(10*self.figsize_scale, 6*self.figsize_scale))
         
         if gp_data is None:
-            ax.text(0.5, 0.5, 'No GP outputscale data provided\n'
+            ax.text(0.5, 0.5, 'No GP kernel variance data provided\n'
                    'Pass gp_data dictionary with evolution info', 
                    transform=ax.transAxes, ha='center', va='center')
             return ax
         
-        # Extract outputscale evolution
-        if 'iterations' not in gp_data or 'outputscales' not in gp_data:
-            ax.text(0.5, 0.5, 'Invalid GP data format\n'
-                   'Need "iterations" and "outputscales" keys', 
-                   transform=ax.transAxes, ha='center', va='center')
-            return ax
+        # Extract kernel variance evolution
+        if 'iterations' not in gp_data or 'kernel_variances' not in gp_data:
+            # Check for backward compatibility with old 'outputscales' key
+            if 'outputscales' in gp_data:
+                kernel_variances_key = 'outputscales'
+                display_name = 'Kernel Variance (from outputscales)'
+            else:
+                ax.text(0.5, 0.5, 'Invalid GP data format\n'
+                       'Need "iterations" and "kernel_variances" keys', 
+                       transform=ax.transAxes, ha='center', va='center')
+                return ax
+        else:
+            kernel_variances_key = 'kernel_variances'
+            display_name = 'Kernel Variance'
         
         iterations = np.array(gp_data['iterations'])
-        outputscales = np.array(gp_data['outputscales'])
+        kernel_variances = np.array(gp_data[kernel_variances_key])
         
-        # Plot outputscale
-        ax.plot(iterations, outputscales, 'purple', linewidth=2, 
-               label='Output scale', alpha=0.8)
+        # Plot kernel variance
+        ax.plot(iterations, kernel_variances, 'purple', linewidth=2, 
+               label=display_name, alpha=0.8)
         
         ax.set_xlabel('Iteration')
-        ax.set_ylabel('Output Scale')
-        ax.set_title('GP Output Scale Evolution')
+        ax.set_ylabel('Kernel Variance')
+        ax.set_title('GP Kernel Variance Evolution')
         ax.set_yscale('log')
         ax.legend()
         ax.grid(True, alpha=0.3)
+        
+        # Force integer ticks on x-axis
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         
         return ax
     
@@ -408,6 +451,9 @@ class BOBESummaryPlotter:
         ax.set_title('Best Log-likelihood Evolution')
         ax.legend()
         ax.grid(True, alpha=0.3)
+        
+        # Force integer ticks on x-axis
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         
         return ax
     
@@ -526,11 +572,13 @@ class BOBESummaryPlotter:
         
         return ax
     
-    def plot_convergence_diagnostics(self, ax: Optional[plt.Axes] = None) -> plt.Axes:
+    def plot_convergence_diagnostics(self, convergence_data: Optional[Dict] = None,
+                                     ax: Optional[plt.Axes] = None) -> plt.Axes:
         """
         Plot convergence diagnostics including thresholds and delta evolution.
         
         Args:
+            convergence_data: Dictionary containing convergence history data (uses results if None)
             ax: Matplotlib axes to plot on (creates new if None)
             
         Returns:
@@ -539,14 +587,20 @@ class BOBESummaryPlotter:
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(8*self.figsize_scale, 5*self.figsize_scale))
         
-        if not self.results.convergence_history:
+        # Use provided data or fall back to results
+        if convergence_data is not None:
+            convergence_history = convergence_data.get('convergence_history', [])
+        else:
+            convergence_history = self.results.convergence_history
+        
+        if not convergence_history:
             ax.text(0.5, 0.5, 'No convergence history available', 
                    transform=ax.transAxes, ha='center', va='center')
             return ax
         
         # Extract and plot convergence data
         conv_data = [(conv.iteration, conv.delta, conv.threshold, conv.converged) 
-                     for conv in self.results.convergence_history]
+                     for conv in convergence_history]
         iterations, deltas, thresholds, converged_flags = zip(*conv_data)
 
         ax.plot(iterations, deltas, 'b-', linewidth=2, label=r'$\Delta \log Z$', alpha=0.8)
@@ -568,11 +622,13 @@ class BOBESummaryPlotter:
         
         return ax
     
-    def plot_kl_divergences(self, ax: Optional[plt.Axes] = None) -> plt.Axes:
+    def plot_kl_divergences(self, kl_data: Optional[Dict] = None,
+                           ax: Optional[plt.Axes] = None) -> plt.Axes:
         """
         Plot successive KL divergences between NS iterations (reverse, forward, symmetric).
         
         Args:
+            kl_data: Dictionary containing KL divergence data (uses results if None)
             ax: Matplotlib axes to plot on (creates new if None)
             
         Returns:
@@ -597,11 +653,15 @@ class BOBESummaryPlotter:
         
         plot_count = 0
         
-        if hasattr(self.results, 'successive_kl') and self.results.successive_kl:
+        # Use provided data or fall back to results
+        successive_kl = (kl_data.get('successive_kl', []) if kl_data is not None 
+                        else getattr(self.results, 'successive_kl', []))
+        
+        if successive_kl:
             for value_key, label, color in successive_kl_sources:
                 iterations, values = [], []
                 
-                for entry in self.results.successive_kl:
+                for entry in successive_kl:
                     iterations.append(entry.get('iteration', 0))
                     values.append(handle_invalid_kl_value(entry.get(value_key, np.nan)))
                 
@@ -681,6 +741,9 @@ class BOBESummaryPlotter:
         return fig
     
     def create_summary_dashboard(self, 
+                                logz_data: Optional[Dict] = None,
+                                convergence_data: Optional[Dict] = None,
+                                kl_data: Optional[Dict] = None,
                                 gp_data: Optional[Dict] = None,
                                 best_loglike_data: Optional[Dict] = None,
                                 acquisition_data: Optional[Dict] = None,
@@ -690,11 +753,13 @@ class BOBESummaryPlotter:
         Create a comprehensive summary dashboard with all diagnostic plots.
         
         Args:
+            logz_data: Log evidence evolution data
+            convergence_data: Convergence diagnostics data
+            kl_data: KL divergence data
             gp_data: GP hyperparameter evolution data
             best_loglike_data: Best log-likelihood evolution data
             acquisition_data: Acquisition function evolution data
             timing_data: Timing breakdown data
-            param_evolution_data: Parameter evolution data (deprecated - not used)
             save_path: Path to save the figure (optional)
             
         Returns:
@@ -704,19 +769,19 @@ class BOBESummaryPlotter:
         fig = plt.figure(figsize=(18*self.figsize_scale, 18*self.figsize_scale))
         gs = GridSpec(3, 3, figure=fig, hspace=0.3, wspace=0.3)
         
-        # Top row: Evidence, GP lengthscales, GP outputscale
+        # Top row: Evidence, GP lengthscales, GP kernel variance
         ax1 = fig.add_subplot(gs[0, 0])
-        self.plot_evidence_evolution(ax=ax1)
+        self.plot_evidence_evolution(logz_data=logz_data, ax=ax1)
         
         ax2 = fig.add_subplot(gs[0, 1])
         self.plot_gp_lengthscales(gp_data=gp_data, ax=ax2)
         
         ax3 = fig.add_subplot(gs[0, 2])
-        self.plot_gp_outputscale(gp_data=gp_data, ax=ax3)
+        self.plot_gp_kernel_variance(gp_data=gp_data, ax=ax3)
 
         # Middle row: Convergence, Best log-likelihood, Acquisition
         ax4 = fig.add_subplot(gs[1, 0])
-        self.plot_convergence_diagnostics(ax=ax4)
+        self.plot_convergence_diagnostics(convergence_data=convergence_data, ax=ax4)
 
         ax5 = fig.add_subplot(gs[1, 1])
         self.plot_best_loglike_evolution(best_loglike_data=best_loglike_data, ax=ax5)
@@ -726,7 +791,7 @@ class BOBESummaryPlotter:
         
         # Bottom row: KL divergences, Timing breakdown, Summary stats
         ax7 = fig.add_subplot(gs[2, 0])
-        self.plot_kl_divergences(ax=ax7)
+        self.plot_kl_divergences(kl_data=kl_data, ax=ax7)
         
         ax8 = fig.add_subplot(gs[2, 1])
         self.plot_timing_breakdown(timing_data=timing_data, ax=ax8)
@@ -789,10 +854,18 @@ class BOBESummaryPlotter:
         # Evidence estimate
         if self.results.final_logz_dict:
             logz_data = self.results.final_logz_dict
-            logz, logz_err = logz_data.get('mean', np.nan), (logz_data.get('std', np.nan))
+            logz = logz_data.get('mean', np.nan)
+            # Use std first, then fall back to upper-lower bounds calculation  
+            logz_err = logz_data.get('std', np.nan)
+            if np.isnan(logz_err) and 'upper' in logz_data and 'lower' in logz_data:
+                logz_err = (logz_data['upper'] - logz_data['lower']) / 2.0
+            
             if not np.isnan(logz):
-                stats_lines.append(f"log Z = {logz:.3f} ± {logz_err:.3f}")
-        
+                if not np.isnan(logz_err):
+                    stats_lines.append(f"log Z = {logz:.4f} ± {logz_err:.4f}")
+                else:
+                    stats_lines.append(f"log Z = {logz:.4f}")
+
         # Runtime and convergence
         if self.results.end_time:
             runtime = self.results.end_time - self.results.start_time
@@ -843,8 +916,8 @@ class BOBESummaryPlotter:
         if 'gp_data' in data_kwargs:
             plots_to_save.append(('gp_lengthscales', 
                                 lambda ax: self.plot_gp_lengthscales(data_kwargs['gp_data'], ax=ax)))
-            plots_to_save.append(('gp_outputscale', 
-                                lambda ax: self.plot_gp_outputscale(data_kwargs['gp_data'], ax=ax)))
+            plots_to_save.append(('gp_kernel_variance', 
+                                lambda ax: self.plot_gp_kernel_variance(data_kwargs['gp_data'], ax=ax)))
         
         if 'best_loglike_data' in data_kwargs:
             plots_to_save.append(('best_loglike_evolution', 
@@ -857,7 +930,14 @@ class BOBESummaryPlotter:
         # Save individual plots
         for plot_name, plot_func in plots_to_save:
             fig, ax = plt.subplots(1, 1, figsize=(8*self.figsize_scale, 6*self.figsize_scale))
-            plot_func(ax=ax)
+            if plot_name == 'evidence_evolution':
+                plot_func(logz_data=data_kwargs.get('logz_data'), ax=ax)
+            elif plot_name == 'convergence_diagnostics':
+                plot_func(convergence_data=data_kwargs.get('convergence_data'), ax=ax)
+            elif plot_name == 'kl_divergences':
+                plot_func(kl_data=data_kwargs.get('kl_data'), ax=ax)
+            else:
+                plot_func(ax=ax)
             plt.tight_layout()
             save_path = output_dir / f"{base_name}_{plot_name}.pdf"
             plt.savefig(save_path, bbox_inches='tight')
@@ -920,7 +1000,7 @@ def get_data_format_examples() -> Dict[str, Dict]:
         'gp_data': {
             'iterations': [10, 20, 30, 40, 50],
             'lengthscales': [[1.0, 0.5], [0.8, 0.6], [0.7, 0.7], [0.6, 0.8], [0.5, 0.9]],
-            'outputscales': [2.0, 1.8, 1.6, 1.4, 1.2]
+            'kernel_variances': [2.0, 1.8, 1.6, 1.4, 1.2]
         },
         'best_loglike_data': {
             'iterations': [1, 5, 10, 15, 20],

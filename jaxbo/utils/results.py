@@ -153,7 +153,7 @@ class BOBEResults:
         # GP hyperparameter tracking
         self.gp_iterations = []
         self.gp_lengthscales = []
-        self.gp_outputscales = []
+        self.gp_kernel_variances = []
         
         # Best loglikelihood tracking 
         self.best_loglike_iterations = []
@@ -253,7 +253,7 @@ class BOBEResults:
             gp_data = existing_results['gp_hyperparams']
             self.gp_iterations = gp_data.get('iterations', []).copy()
             self.gp_lengthscales = gp_data.get('lengthscales', []).copy()
-            self.gp_outputscales = gp_data.get('outputscales', []).copy()
+            self.gp_kernel_variances = gp_data.get('kernel_variances', []).copy()
         
         # Restore best loglikelihood data if available
         if 'best_loglike_data' in existing_results:
@@ -277,6 +277,12 @@ class BOBEResults:
         # Restore timing information (accumulate previous times)
         if 'timing' in existing_results and 'phase_times' in existing_results['timing']:
             for phase, prev_time in existing_results['timing']['phase_times'].items():
+                if phase in self.phase_times:
+                    self.phase_times[phase] = prev_time
+        
+        # Restore timing from phase_times if available (for backward compatibility)
+        if 'phase_times' in existing_results:
+            for phase, prev_time in existing_results['phase_times'].items():
                 if phase in self.phase_times:
                     self.phase_times[phase] = prev_time
         
@@ -327,18 +333,18 @@ class BOBEResults:
         self.acquisition_values.append(float(acquisition_value))
         self.acquisition_functions.append(acquisition_function)
 
-    def update_gp_hyperparams(self, iteration: int, lengthscales: list, outputscale: float):
+    def update_gp_hyperparams(self, iteration: int, lengthscales: list, kernel_variance: float):
         """
         Track GP hyperparameters evolution.
         
         Args:
             iteration: Current iteration number
             lengthscales: List of lengthscale values (can be JAX arrays)
-            outputscale: Outputscale value
+            kernel_variance: Kernel variance value
         """
         self.gp_iterations.append(iteration)
         self.gp_lengthscales.append(lengthscales)
-        self.gp_outputscales.append(float(outputscale))
+        self.gp_kernel_variances.append(float(kernel_variance))
     
     def update_best_loglike(self, iteration: int, best_loglike: float):
         """
@@ -481,12 +487,12 @@ class BOBEResults:
         Get GP hyperparameter evolution data for plotting.
         
         Returns:
-            Dictionary with 'iterations', 'lengthscales', and 'outputscales' keys
+            Dictionary with 'iterations', 'lengthscales', and 'kernel_variances' keys
         """
         return {
             'iterations': self.gp_iterations,
             'lengthscales': convert_jax_to_json_serializable(self.gp_lengthscales),
-            'outputscales': convert_jax_to_json_serializable(self.gp_outputscales)
+            'kernel_variances': convert_jax_to_json_serializable(self.gp_kernel_variances)
         }
     
     def get_acquisition_data(self) -> Dict[str, list]:
@@ -539,7 +545,16 @@ class BOBEResults:
         self.final_samples = np.array(samples)
         self.final_weights = np.array(weights)
         self.final_loglikes = np.array(loglikes)
-        self.final_logz_dict = logz_dict or {}
+        
+        # Use provided logz_dict, or fall back to the last convergence check
+        if logz_dict is not None:
+            self.final_logz_dict = logz_dict
+        elif self.convergence_history:
+            # Use the logz_dict from the last convergence check
+            self.final_logz_dict = self.convergence_history[-1].logz_dict.copy()
+        else:
+            self.final_logz_dict = {}
+        
         self.converged = converged
         self.termination_reason = termination_reason
         self.gp_info = gp_info or {}
@@ -616,7 +631,7 @@ class BOBEResults:
             'gp_hyperparams': {
                 'iterations': self.gp_iterations,
                 'lengthscales': self.gp_lengthscales,
-                'outputscales': self.gp_outputscales
+                'kernel_variances': self.gp_kernel_variances
             },
 
             # === BEST LOGLIKELIHOOD TRACKING ===
@@ -788,7 +803,7 @@ class BOBEResults:
             'gp_hyperparams': {
                 'iterations': self.gp_iterations,
                 'lengthscales': convert_jax_to_json_serializable(self.gp_lengthscales),
-                'outputscales': convert_jax_to_json_serializable(self.gp_outputscales)
+                'kernel_variances': convert_jax_to_json_serializable(self.gp_kernel_variances)
             },
             'best_loglike_data': {
                 'iterations': self.best_loglike_iterations,
@@ -904,16 +919,53 @@ class BOBEResults:
                         logz_dict=conv_dict['logz_dict'],
                         converged=conv_dict['converged'],
                         delta=conv_dict['delta'],
-                        threshold=conv_dict['threshold']
+                        threshold=conv_dict['threshold'],
+                        dlogz_sampler=conv_dict.get('dlogz_sampler', np.nan)
                     )
                     results.convergence_history.append(conv_info)
             
             if 'logz_history' in results_dict:
                 results.logz_evolution = results_dict['logz_history']
             
+            # Restore GP hyperparameter tracking data
+            if 'gp_hyperparams' in results_dict:
+                gp_data = results_dict['gp_hyperparams']
+                results.gp_iterations = gp_data.get('iterations', [])
+                results.gp_lengthscales = gp_data.get('lengthscales', [])
+                results.gp_kernel_variances = gp_data.get('kernel_variances', [])
+                # Backward compatibility: check for old 'outputscales' key
+                if 'outputscales' in gp_data and not results.gp_kernel_variances:
+                    results.gp_kernel_variances = gp_data.get('outputscales', [])
+            
+            # Restore acquisition function tracking data
+            if 'acquisition_data' in results_dict:
+                acq_data = results_dict['acquisition_data']
+                results.acquisition_iterations = acq_data.get('iterations', [])
+                results.acquisition_values = acq_data.get('values', [])
+                results.acquisition_functions = acq_data.get('functions', [])
+            
+            # Restore best loglikelihood tracking data
+            if 'best_loglike_data' in results_dict:
+                loglike_data = results_dict['best_loglike_data']
+                results.best_loglike_iterations = loglike_data.get('iterations', [])
+                results.best_loglike_values = loglike_data.get('best_loglike', [])
+            
+            # Restore KL divergence tracking data
+            if 'kl_data' in results_dict:
+                kl_data = results_dict['kl_data']
+                results.kl_iterations = kl_data.get('iterations', [])
+                results.kl_divergences = kl_data.get('kl_divergences', [])
+                results.successive_kl = kl_data.get('successive_kl', [])
+            
             # Restore GP and classifier info
             if 'gp_info' in results_dict:
                 results.gp_info = results_dict['gp_info']
+            
+            # Restore timing information
+            if 'timing' in results_dict and 'phase_times' in results_dict['timing']:
+                for phase, prev_time in results_dict['timing']['phase_times'].items():
+                    if phase in results.phase_times:
+                        results.phase_times[phase] = prev_time
             
             # Restore timing
             start_str = results_dict['run_info']['start_time']

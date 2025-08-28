@@ -99,7 +99,7 @@ class BOBE:
         resume : bool
             If True, resume from a previous run. The resume_file argument must be provided.
         resume_file : str
-            The file to resume from. Must be a .npz file containing the training data.
+            The file to resume from. Must be a GP file (without _gp extension).
         save : bool
             If True, save the GP training data to a file so that it can be resumed from later.
         fit_step : int
@@ -406,8 +406,8 @@ class BOBE:
 
             # Extract GP hyperparameters for tracking
             lengthscales = list(self.gp.lengthscales)
-            outputscale = float(self.gp.outputscale)
-            self.results_manager.update_gp_hyperparams(ii, lengthscales, outputscale)
+            kernel_variance = float(self.gp.outputscale)
+            self.results_manager.update_gp_hyperparams(ii, lengthscales, kernel_variance)
 
             if (pt_exists_or_below_threshold and self.mc_samples['method'] == 'MCMC'): # can remove update logic now?
                 update_mc = True
@@ -582,12 +582,6 @@ class BOBE:
                 log.info(f"{phase}: {time_spent:.2f}s ({percentage:.1f}%)")
         log.info(f"{'='*50}")
 
-        # Legacy save for backward compatibility
-        if self.save:
-            np.savez(f'{self.output_file}_samples.npz',
-                     samples=samples,param_bounds=self.loglikelihood.param_bounds,
-                     weights=weights,loglikes=loglikes)
-
         if self.return_getdist_samples:
             # Use the results manager to create GetDist samples
             output_samples = self.results_manager.get_getdist_samples()
@@ -690,6 +684,7 @@ class BOBE:
             else:
                 self.prev_converged = True
                 log.info(f" Convergence not yet achieved in successive iterations")
+
                 return False
         else:
             self.prev_converged = False

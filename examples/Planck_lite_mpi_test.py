@@ -163,41 +163,41 @@ def main():
             acquisition_data=acquisition_data,
             best_loglike_data=best_loglike_data,
             timing_data=timing_data,
-            save_path=f"{likelihood.name}_dashboard.pdf"
+            save_path=f"{likelihood.name}_summary.pdf"
         )
         # plt.show()
 
-        # Create individual timing plot
-        log.info("Creating detailed timing plot...")
-        fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
-        plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
-        ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
-        plt.tight_layout()
-        plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
-        plt.show()
+        # # Create individual timing plot
+        # log.info("Creating detailed timing plot...")
+        # fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
+        # plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
+        # ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
+        # plt.tight_layout()
+        # plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
+        # plt.show()
 
-        # Create evidence evolution plot if available
-        if comprehensive_results.get('logz_history'):
-            log.info("Creating evidence evolution plot...")
-            fig_evidence, ax_evidence = plt.subplots(1, 1, figsize=(10, 6))
-            plotter.plot_evidence_evolution(ax=ax_evidence)
-            ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
-            plt.tight_layout()
-            plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
-            # plt.show()
+        # # Create evidence evolution plot if available
+        # if comprehensive_results.get('logz_history'):
+        #     log.info("Creating evidence evolution plot...")
+        #     fig_evidence, ax_evidence = plt.subplots(1, 1, figsize=(10, 6))
+        #     plotter.plot_evidence_evolution(ax=ax_evidence)
+        #     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
+        #     plt.tight_layout()
+        #     plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
+        #     # plt.show()
 
-        # Create acquisition function evolution plot
-        log.info("Creating acquisition function evolution plot...")
-        acquisition_data = results['results_manager'].get_acquisition_data()
-        if acquisition_data and acquisition_data.get('iterations'):
-            fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
-            plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
-            ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
-            plt.tight_layout()
-            plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
-            # plt.show()
-        else:
-            log.info("No acquisition function data available for plotting.")
+        # # Create acquisition function evolution plot
+        # log.info("Creating acquisition function evolution plot...")
+        # acquisition_data = results['results_manager'].get_acquisition_data()
+        # if acquisition_data and acquisition_data.get('iterations'):
+        #     fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
+        #     plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
+        #     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
+        #     plt.tight_layout()
+        #     plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
+        #     # plt.show()
+        # else:
+        #     log.info("No acquisition function data available for plotting.")
 
 
         # Save comprehensive results
@@ -210,10 +210,10 @@ def main():
         log.info(f"✓ Timing data: {likelihood_name}_timing.json")
         log.info(f"✓ Legacy samples: {likelihood_name}_samples.npz")
         log.info(f"✓ Summary dashboard: {likelihood_name}_dashboard.pdf")
-        log.info(f"✓ Detailed timing: {likelihood_name}_timing_detailed.pdf")
-        log.info(f"✓ Evidence evolution: {likelihood_name}_evidence.pdf")
-        log.info(f"✓ Acquisition evolution: {likelihood_name}_acquisition_evolution.pdf")
-        log.info(f"✓ Parameter samples: {likelihood_name}_samples.pdf")
+        # log.info(f"✓ Detailed timing: {likelihood_name}_timing_detailed.pdf")
+        # log.info(f"✓ Evidence evolution: {likelihood_name}_evidence.pdf")
+        # log.info(f"✓ Acquisition evolution: {likelihood_name}_acquisition_evolution.pdf")
+        # log.info(f"✓ Parameter samples: {likelihood_name}_samples.pdf")
 
         log.info("\n" + "="*60)
         log.info("ANALYSIS COMPLETE")
