@@ -1,14 +1,26 @@
 import os
 import sys
-num_devices = int(sys.argv[1]) if len(sys.argv) > 1 else 8
-os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
-    num_devices
-)
-from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 import time
 import matplotlib.pyplot as plt
+import seaborn as sns
+
+# --- Command line arguments ---
+# Arg 1: Number of devices for XLA
+num_devices = int(sys.argv[1]) if len(sys.argv) > 1 else 8
+os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={num_devices}"
+
+# Arg 2: Classifier type ('svm' or 'gp')
+clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
+
+# Arg 3: Run mode ('mpi' or 'serial')
+name = str(sys.argv[3]) if len(sys.argv) > 3 else 'serial'
+# Arg 4: Number of log EI iterations
+n_log_ei_iters = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+
+# --- Imports ---
 from jaxbo.run import run_bobe
 from jaxbo.utils.logging_utils import get_logger
+from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 
 def main():
 
@@ -22,7 +34,7 @@ def main():
 
     name = str(sys.argv[3]) if len(sys.argv) > 3 else 'serial'
 
-    likelihood_name = f'Planck_DESI_Omk_{name}_{clf_type}'
+    likelihood_name = f'Planck_DESI_Omk_{name}_{clf_type}_logei_{n_log_ei_iters}'
 
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -33,15 +45,14 @@ def main():
             'name': likelihood_name,
         },
         verbosity='INFO',
-        n_log_ei_iters=250,
+        n_log_ei_iters=n_log_ei_iters,
         n_cobaya_init=8,
         n_sobol_init=32,
-        min_evals=400,
+        min_evals=900,
         max_eval_budget=2500,
         max_gp_size=1800,
-        fit_step=5, 
-        zeta_ei = 0.1,
-        update_mc_step=1, 
+        fit_step=5,
+        zeta_ei=0.1,
         wipv_batch_size=5,
         ns_step=5,
         num_hmc_warmup=512,
@@ -56,7 +67,7 @@ def main():
         clf_type=clf_type,  # Using SVM for classification
         minus_inf=-1e5,
         logz_threshold=0.015,
-        seed=1000,  # For reproducibility
+        seed=10000,  # For reproducibility
         do_final_ns=True,
     )
 
@@ -80,6 +91,52 @@ def main():
         logz_dict = results.get('logz', {})
         comprehensive_results = results['comprehensive']
         timing_data = comprehensive_results['timing']
+
+        # Create parameter samples plot
+        log.info("Creating parameter samples plot...")
+        if hasattr(samples, 'samples'):  # GetDist samples
+            sample_array = samples.samples
+            weights_array = samples.weights
+        else:  # Dictionary format
+            sample_array = samples['x']
+            weights_array = samples['weights']
+
+        plt.style.use('default')
+
+        # Enable LaTeX rendering for mathematical expressions
+        plt.rcParams['text.usetex'] = True 
+        plt.rcParams['font.family'] = 'serif'
+
+        param_list_LCDM = ['omk','omch2','ombh2','H0','logA','ns','tau']
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            plot_params=param_list_LCDM,
+            output_file=f'{likelihood.name}_cosmo',
+            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_MCMC_Omk',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
+            scatter_points=False
+        )
+
+
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            output_file=f'{likelihood.name}_full',
+            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_MCMC_Omk',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
+            scatter_points=False
+        )
+
+        sns.set_theme('notebook','ticks',palette='husl')
 
         # Print detailed timing analysis
         log.info("\n" + "="*60)
@@ -138,85 +195,59 @@ def main():
 
         # Create summary dashboard with timing data
         log.info("Creating summary dashboard...")
-        fig_dashboard = plotter.create_summary_dashboard(
-            gp_data=gp_data,
-            acquisition_data=acquisition_data,
-            best_loglike_data=best_loglike_data,
-            timing_data=timing_data,
+        try:
+            fig_dashboard = plotter.create_summary_dashboard(
+                gp_data=gp_data,
+                acquisition_data=acquisition_data,
+                best_loglike_data=best_loglike_data,
+                timing_data=timing_data,
+            title=r'LCDM+$\Omega_k$',
             save_path=f"{likelihood.name}_dashboard.pdf"
-        )
+            )
+        except Exception as e:
+            fig_dashboard = plotter.create_summary_dashboard(
+                gp_data=gp_data,
+                acquisition_data=acquisition_data,
+                best_loglike_data=best_loglike_data,
+                timing_data=timing_data,
+            title='LCDM+curvature',
+            save_path=f"{likelihood.name}_dashboard.pdf"
+            )
         # plt.show()
 
-        # Create individual timing plot
-        log.info("Creating detailed timing plot...")
-        fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
-        plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
-        ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
-        plt.tight_layout()
-        plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
-        # plt.show()
+        # # Create individual timing plot
+        # log.info("Creating detailed timing plot...")
+        # fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
+        # plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
+        # ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
+        # plt.tight_layout()
+        # plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
+        # # plt.show()
 
-        # Create evidence evolution plot if available
-        if comprehensive_results.get('logz_history'):
-            log.info("Creating evidence evolution plot...")
-            fig_evidence, ax_evidence = plt.subplots(1, 1, figsize=(10, 6))
-            plotter.plot_evidence_evolution(ax=ax_evidence)
-            ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
-            plt.tight_layout()
-            plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
-            # plt.show()
+        # # Create evidence evolution plot if available
+        # if comprehensive_results.get('logz_history'):
+        #     log.info("Creating evidence evolution plot...")
+        #     fig_evidence, ax_evidence = plt.subplots(1, 1, figsize=(10, 6))
+        #     plotter.plot_evidence_evolution(ax=ax_evidence)
+        #     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
+        #     plt.tight_layout()
+        #     plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
+        #     # plt.show()
 
-        # Create acquisition function evolution plot
-        log.info("Creating acquisition function evolution plot...")
-        acquisition_data = results['results_manager'].get_acquisition_data()
-        if acquisition_data and acquisition_data.get('iterations'):
-            fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
-            plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
-            ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
-            plt.tight_layout()
-            plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
-            # plt.show()
-        else:
-            log.info("No acquisition function data available for plotting.")
-
-        # Create parameter samples plot
-        log.info("Creating parameter samples plot...")
-        if hasattr(samples, 'samples'):  # GetDist samples
-            sample_array = samples.samples
-            weights_array = samples.weights
-        else:  # Dictionary format
-            sample_array = samples['x']
-            weights_array = samples['weights']
+        # # Create acquisition function evolution plot
+        # log.info("Creating acquisition function evolution plot...")
+        # acquisition_data = results['results_manager'].get_acquisition_data()
+        # if acquisition_data and acquisition_data.get('iterations'):
+        #     fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
+        #     plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
+        #     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
+        #     plt.tight_layout()
+        #     plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
+        #     # plt.show()
+        # else:
+        #     log.info("No acquisition function data available for plotting.")
 
 
-        param_list_LCDM = ['omk','omch2','ombh2','H0','logA','ns','tau']
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            plot_params=param_list_LCDM,
-            output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_omk', #PPlus_curved_LCDM',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
-            scatter_points=False
-        )
-
-
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            output_file=f'{likelihood.name}_full',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_omk', #PPlus_curved_LCDM',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
-            scatter_points=False
-        )
 
 if __name__ == "__main__":
     # Run the analysis

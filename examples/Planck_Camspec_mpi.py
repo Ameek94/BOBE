@@ -55,8 +55,8 @@ def main():
         # Iteration and budget settings
         n_log_ei_iters=n_log_ei_iters,
         n_cobaya_init=8,
-        n_sobol_init=64,
-        min_evals=250,
+        n_sobol_init=32,
+        min_evals=750,
         max_eval_budget=2500,
         max_gp_size=1500,
         
@@ -87,7 +87,7 @@ def main():
         clf_use_size=30,
         clf_update_step=clf_update_step,
         clf_threshold=300,
-        gp_threshold=500,
+        gp_threshold=600,
         
         # Convergence and other settings
         minus_inf=-1e5,
