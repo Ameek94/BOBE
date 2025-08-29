@@ -28,7 +28,7 @@ def main():
         verbosity='INFO',
         n_cobaya_init=4, 
         n_sobol_init=8, 
-        min_iters=20, 
+        min_evals=20, 
         max_eval_budget=200,
         max_gp_size=200,
         fit_step=2, 

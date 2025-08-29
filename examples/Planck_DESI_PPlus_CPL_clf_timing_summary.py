@@ -23,7 +23,7 @@ else:
 
 start = time.time()
 sampler = BOBE(n_cobaya_init=32, n_sobol_init=32,
-        min_iters=1000, max_eval_budget=5000, max_gp_size=2100,
+        min_evals=1000, max_eval_budget=5000, max_gp_size=2100,
         loglikelihood=likelihood,
         resume=False,
         resume_file=f'{likelihood.name}',

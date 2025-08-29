@@ -14,6 +14,8 @@ clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 
 # Arg 3: Run mode ('mpi' or 'serial')
 name = str(sys.argv[3]) if len(sys.argv) > 3 else 'serial'
+# Arg 4: Number of log EI iterations
+n_log_ei_iters = int(sys.argv[4]) if len(sys.argv) > 4 else 0
 
 # --- Imports ---
 from jaxbo.run import run_bobe
@@ -33,8 +35,8 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Camspec_{clf_type}_{name}'
-    
+    likelihood_name = f'Camspec_{clf_type}_{name}_logei_{n_log_ei_iters}'
+
     # --- Run BOBE with combined settings ---
     results = run_bobe(
         # Likelihood settings
@@ -51,16 +53,15 @@ def main():
         seed=200,
         
         # Iteration and budget settings
-        n_log_ei_iters=150,
+        n_log_ei_iters=n_log_ei_iters,
         n_cobaya_init=8,
         n_sobol_init=64,
-        min_iters=250,
+        min_evals=250,
         max_eval_budget=2500,
         max_gp_size=1500,
         
         # Step settings
         fit_step=5,
-        update_mc_step=1,
         wipv_batch_size=5,
         ns_step=5,
         

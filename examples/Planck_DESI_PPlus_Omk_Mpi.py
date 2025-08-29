@@ -23,7 +23,7 @@ def main():
 
     clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 
-    likelihood_name = f'Planck_DESI_PP_Omk_{name}_{clf_type}'
+    likelihood_name = f'Planck_DESI_PP_Omk_{name}_{clf_type}_logei_0'
     
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -34,15 +34,14 @@ def main():
             'name': likelihood_name,
         },
         verbosity='INFO',
-        n_log_ei_iters=300,
+        n_log_ei_iters=0,
         n_cobaya_init=8,
         n_sobol_init=32,
-        min_iters=400,
+        min_evals=400,
         max_eval_budget=2500,
         max_gp_size=1800,
         fit_step=10, 
         zeta_ei=0.1,
-        update_mc_step=1, 
         wipv_batch_size=5,
         ns_step=5,
         num_hmc_warmup=512,
