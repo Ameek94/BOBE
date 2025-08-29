@@ -55,6 +55,7 @@ class BOBE:
                  save_step=25,
                  noise = 1e-8,
                  fit_step=10,
+                 kernel='rbf',
                  wipv_batch_size=4,
                  ns_step=10,
                  num_hmc_warmup=512,
@@ -167,6 +168,7 @@ class BOBE:
                 'max_eval_budget': max_eval_budget,
                 'max_gp_size': max_gp_size,
                 'fit_step': fit_step,
+                'kernel': kernel,
                 'wipv_batch_size': wipv_batch_size,
                 'ns_step': ns_step,
                 'num_hmc_warmup': num_hmc_warmup,
@@ -225,7 +227,7 @@ class BOBE:
                     'SAAS': SAAS_GP
                 }[lengthscale_priors.upper()](
                 train_x=train_x, train_y=train_y,
-                noise=noise, kernel='rbf',)
+                noise=noise, kernel=kernel)
             self.results_manager.start_timing('GP Training')
             self.gp.fit(maxiter=200,n_restarts=4)
             self.results_manager.end_timing('GP Training')
@@ -669,15 +671,28 @@ class BOBE:
                 successive_kl=successive_kl
             )
 
-        log.info(f" Convergence check: delta = {delta:.4f}, step = {step}, threshold = {threshold}")
+        log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {threshold}")
         if converged:
             if self.prev_converged:
-                log.info(" Convergence achieved after 2 successive iterations")
+                log.info("Convergence achieved after 2 successive iterations")
                 return True
             else:
                 self.prev_converged = True
-                log.info(f" Convergence not yet achieved in successive iterations")
+                log.info(f"Convergence not yet achieved in successive iterations")
                 # Checkpoint for saving some results
+                log.info("Saving checkpoint results for single convergence")
+                
+                # Create checkpoint filename with suffix
+                checkpoint_filename = f"{self.output_file}_checkpoint"
+                
+                # Save GP checkpoint
+                self.gp.save(outfile=f"{checkpoint_filename}_gp")
+                log.info(f"Saved GP checkpoint to {checkpoint_filename}_gp.pkl")
+
+                # Save intermediate results checkpoint
+                self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}.json")
+                log.info(f"Saved intermediate results checkpoint to {checkpoint_filename}.json")
+
                 return False
         else:
             self.prev_converged = False

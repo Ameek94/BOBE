@@ -793,7 +793,7 @@ class BOBEResults:
             json.dump(stats, f, indent=2)
         log.info(f"Saved summary statistics to {stats_file}")
     
-    def save_intermediate(self,gp):
+    def save_intermediate(self, gp, filename: Optional[str] = None):
         """Save intermediate results for crash recovery and resuming."""
         intermediate = {
             'convergence_history': [conv.to_dict() for conv in self.convergence_history],
@@ -831,14 +831,15 @@ class BOBEResults:
             }
         }
         
-        intermediate_file = f"{self.output_file}_intermediate.json"
+        # Use provided filename or default naming
+        intermediate_file = filename or f"{self.output_file}_intermediate.json"
         with open(intermediate_file, 'w') as f:
             # Convert the entire intermediate dictionary to ensure all JAX arrays are handled
             json_safe_intermediate = convert_jax_to_json_serializable(intermediate)
             json.dump(json_safe_intermediate, f, indent=2)
         log.info(f"Saved intermediate results to {intermediate_file}")
 
-        if gp is not None:
+        if gp is not None and filename is None:  # Only save GP if using default naming
             gp.save(outfile=f"{self.output_file}_gp")
     
     def get_getdist_samples(self) -> Optional['MCSamples']:
