@@ -754,7 +754,8 @@ class BOBESummaryPlotter:
                                 best_loglike_data: Optional[Dict] = None,
                                 acquisition_data: Optional[Dict] = None,
                                 timing_data: Optional[Dict] = None,
-                                save_path: Optional[str] = None) -> plt.Figure:
+                                save_path: Optional[str] = None,
+                                title: Optional[str] = None) -> plt.Figure:
         """
         Create a comprehensive summary dashboard with all diagnostic plots.
         
@@ -806,7 +807,8 @@ class BOBESummaryPlotter:
         self.plot_summary_stats(ax=ax9)
         
         # Add overall title
-        fig.suptitle(f'BOBE Summary: {self.output_file}', 
+        title_str = title if title is not None else self.output_file
+        fig.suptitle(f'BOBE Summary: {title_str}', 
                     fontsize=18*self.figsize_scale, y=0.95)
         
         if save_path:

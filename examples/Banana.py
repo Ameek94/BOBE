@@ -47,7 +47,7 @@ def main():
         verbosity='INFO',
         n_cobaya_init=4,
         n_sobol_init=8,
-        min_iters=2,
+        min_evals=2,
         n_log_ei_iters=10,
         max_eval_budget=100,
         max_gp_size=200,
@@ -247,6 +247,8 @@ def main():
         log.info("ANALYSIS COMPLETE")
         log.info("="*60)
         log.info("Check the generated plots and saved files for detailed analysis.")
+
+
 
 if __name__ == "__main__":
     main()

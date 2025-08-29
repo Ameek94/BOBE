@@ -46,7 +46,7 @@ class BOBE:
                 loglikelihood=None,
                  n_cobaya_init=4,
                  n_sobol_init=32,
-                 min_iters=200,
+                 min_evals=200,
                  max_eval_budget=1500,
                  max_gp_size=1200,
                  resume=False,
@@ -88,8 +88,8 @@ class BOBE:
             Is only used when the likelihood is an instance of cobaya_loglike, otherwise ignored.
         n_sobol_init : int
             Number of initial Sobol points for sobol when starting a run. 
-        min_iters : int
-            Minimum number of iterations before checking convergence.
+        min_evals : int
+            Minimum number of true objective evaluations before checking convergence.
         max_eval_budget : int
             Maximum number of true objective function evaluations.
         max_gp_size : int
@@ -163,7 +163,7 @@ class BOBE:
             settings={
                 'n_cobaya_init': n_cobaya_init,
                 'n_sobol_init': n_sobol_init,
-                'min_iters': min_iters,
+                'min_evals': min_evals,
                 'max_eval_budget': max_eval_budget,
                 'max_gp_size': max_gp_size,
                 'fit_step': fit_step,
@@ -238,8 +238,8 @@ class BOBE:
         log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
 
         # Store remaining settings
+        self.min_evals = min_evals
         self.max_eval_budget = max_eval_budget
-        self.min_iters = min_iters
         self.max_gp_size = max_gp_size
         self.fit_step = fit_step
         self.ns_step = ns_step
@@ -326,7 +326,7 @@ class BOBE:
             
             ii+=1
             refit = (ii % self.fit_step == 0)
-            ns_flag = (ii % self.ns_step == 0) and ii >= self.min_iters
+            ns_flag = (ii % self.ns_step == 0) and current_evals >= self.min_evals
 
             if (ii - start_iteration > n_log_ei_iters) and self.acquisition.name in ['EI','LogEI']:
                 # change acquisition function to WIPV after a minimum of n_log_ei_iters EI, LogEI

@@ -13,7 +13,7 @@ from .utils.seed_utils import get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
 from .gp import GP
 config.update("jax_enable_x64", True)
-log = get_logger("[acq]")
+log = get_logger("acq")
 
 #------------------Helper functions-------------------------
 # These are jax versions of the BoTorch functions.

@@ -43,7 +43,7 @@ def main():
         n_cobaya_init=4,
         n_sobol_init=8,
         n_log_ei_iters=20,
-        min_iters=30,
+        min_evals=30,
         max_eval_budget=200,
         max_gp_size=200,
         fit_step=2,
