@@ -35,7 +35,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Camspec_{clf_type}_{name}_logei_{n_log_ei_iters}'
+    likelihood_name = f'Camspec_{clf_type}_{name}_logei_{n_log_ei_iters}_Matern'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -76,6 +76,7 @@ def main():
         # GP settings
         lengthscale_priors='DSLP',
         noise=1e-6,
+        kernel='Matern52',
 
         # resume
         resume=False,
@@ -201,7 +202,8 @@ def main():
             acquisition_data=acquisition_data,
             best_loglike_data=best_loglike_data,
             timing_data=timing_data,
-            save_path=f"{likelihood.name}_dashboard.pdf"
+            save_path=f"{likelihood.name}_dashboard.pdf",
+            title=f"LCDM Matern kernel",
         )
 
 if __name__ == "__main__":
