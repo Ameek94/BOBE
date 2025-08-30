@@ -21,7 +21,6 @@ from cobaya.model import get_model
 from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, kl_divergence_gaussian, kl_divergence_samples
 from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from .nested_sampler import nested_sampling_Dy
-from .optim import optimize
 from .utils.logging_utils import get_logger
 from .utils.results import BOBEResults
 from .acquisition import *
@@ -76,6 +75,7 @@ class BOBE:
                  pool: MPI_Pool = None,
                  do_final_ns=True,
                  return_getdist_samples=False,
+                 optimizer: str = 'optax',
                  seed: Optional[int] = None):
         """
         Initialize the BOBE sampler class.
@@ -154,7 +154,7 @@ class BOBE:
         self.converged = False
         self.prev_converged = False
         self.termination_reason = "Max evaluation budget reached"
-
+        self.optimizer = optimizer
         # Initialize results manager BEFORE any timing operations
         self.results_manager = BOBEResults(
             output_file=self.output_file,
@@ -187,6 +187,7 @@ class BOBE:
                 'minus_inf': minus_inf,
                 'do_final_ns': do_final_ns,
                 'return_getdist_samples': return_getdist_samples,
+                'optimizer': optimizer,
                 'seed': seed
             },
             likelihood_name=self.loglikelihood.name,
@@ -219,7 +220,8 @@ class BOBE:
                 train_x=train_x, train_y=train_y,noise=noise,
                 minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
                 clf_type=clf_type, clf_use_size=clf_use_size, clf_update_step=clf_update_step,
-                clf_threshold=clf_threshold, gp_threshold=gp_threshold,)
+                clf_threshold=clf_threshold, gp_threshold=gp_threshold,
+                optimizer=self.optimizer)
             else:
                 self.gp = {
                     'UNIFORM': GP,
@@ -227,7 +229,8 @@ class BOBE:
                     'SAAS': SAAS_GP
                 }[lengthscale_priors.upper()](
                 train_x=train_x, train_y=train_y,
-                noise=noise, kernel=kernel)
+                noise=noise, kernel=kernel,
+                optimizer=self.optimizer)
             self.results_manager.start_timing('GP Training')
             self.gp.fit(maxiter=200,n_restarts=4)
             self.results_manager.end_timing('GP Training')
@@ -364,7 +367,7 @@ class BOBE:
                                                                   acq_kwargs=acq_kwargs,
                                                                   n_restarts=n_restarts, 
                                                                   maxiter=maxiter, 
-                                                                  early_stop_patience=early_stop_patience)
+                                                                  early_stop_patience=early_stop_patience,)
             self.results_manager.end_timing('Acquisition Optimization')
             new_pts_u = jnp.atleast_2d(new_pts_u)  # Ensure new_pt_u is at least 2D
             

@@ -7,7 +7,7 @@ from scipy.stats import qmc
 from jax.scipy.stats import norm
 from jax import config
 import tensorflow_probability.substrates.jax as tfp
-from .optim import optimize
+from .optim import optimize_optax, optimize_scipy
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
@@ -171,17 +171,19 @@ class AcquisitionFunction:
 
     name: str = "BaseAcquisitionFunction"
 
-    def __init__(self, optimizer_kwargs: Optional[Dict[str, Any]] = {}):
+    def __init__(self, optimizer="optax", optimizer_kwargs: Optional[Dict[str, Any]] = {'name': 'adam', 'lr': 1e-3}):
+        self.optimizer = optimizer
         self.optimizer_kwargs = optimizer_kwargs
+        if self.optimizer == "scipy":
+            self.acq_optimize = optimize_scipy
+        else:
+            self.acq_optimize = optimize_optax
 
     def fun(self, x):
         raise NotImplementedError
 
     def get_next_point(self, gp: GP,
                        acq_kwargs: Dict[str, Any] = {},
-                       optimizer_name: str = "adam",
-                       lr: float = 0.001,
-                       optimizer_kwargs: dict | None = {},
                        maxiter: int = 500,
                        n_restarts: int = 8,
                        verbose: bool = True,
@@ -203,9 +205,6 @@ class AcquisitionFunction:
     def get_next_batch(self, gp: GP,
                        n_batch: int = 1,
                        acq_kwargs: Dict[str, Any] = {},
-                       optimizer_name: str = "adam",
-                       lr: float = 0.001,
-                       optimizer_kwargs: dict | None = {},
                        maxiter: int = 500,
                        n_restarts: int = 8,
                        verbose: bool = True,
@@ -222,9 +221,6 @@ class AcquisitionFunction:
 
         if n_batch == 1:
             x_next, acq_val_next = self.get_next_point(gp, acq_kwargs=acq_kwargs,
-                                        optimizer_name=optimizer_name,
-                                        lr=lr,
-                                        optimizer_kwargs=optimizer_kwargs,
                                         maxiter=maxiter,
                                         n_restarts=n_restarts,
                                         verbose=verbose,
@@ -241,9 +237,6 @@ class AcquisitionFunction:
 
             for i in range(n_batch):
                 x_next, acq_val_next = self.get_next_point(dummy_gp, acq_kwargs=acq_kwargs,
-                                                        optimizer_name=optimizer_name,
-                                                        lr=lr,
-                                                        optimizer_kwargs=optimizer_kwargs,
                                                         maxiter=maxiter,
                                                         n_restarts=n_restarts,
                                                         verbose=verbose,
@@ -264,8 +257,9 @@ class EI(AcquisitionFunction):
 
     name: str = "EI"
 
-    def __init__(self, zeta: float = 0.2, optimizer_kwargs: Optional[Dict[str, Any]] = {}):
-        super().__init__(optimizer_kwargs=optimizer_kwargs)
+    def __init__(self, zeta: float = 0.1, 
+                 optimizer: str = "optax", optimizer_kwargs: Optional[Dict[str, Any]] = {'name': 'adam', 'lr': 1e-3}):
+        super().__init__(optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
         self.zeta = zeta
 
     def fun(self, x, gp, best_y, zeta):
@@ -283,9 +277,6 @@ class EI(AcquisitionFunction):
     
     def get_next_point(self, gp, 
                        acq_kwargs,
-                 optimizer_name: str = "adam",
-                 lr: float = 0.001,
-                 optimizer_kwargs: dict | None = {},
                  maxiter: int = 250,
                  n_restarts: int = 20,
                  verbose: bool = True,
@@ -305,26 +296,23 @@ class EI(AcquisitionFunction):
             x0_acq = best_x
         jitter = rng.normal(0.,0.001,size=x0_acq.shape)
         x0_acq = jnp.clip(x0_acq + jitter, 0., 1.)
-        return optimize(fun=self.fun,
-                        fun_args=fun_args,
-                        fun_kwargs=fun_kwargs,
-                        ndim=gp.ndim,
-                        x0=x0_acq,
-                        lr=lr,
-                        optimizer_name=optimizer_name,
-                        optimizer_kwargs=optimizer_kwargs,
-                        maxiter=maxiter,
-                        n_restarts=n_restarts,
-                        verbose=verbose,
-                        early_stop_patience=early_stop_patience)
+        return self.acq_optimize(fun=self.fun,
+                            fun_args=fun_args,
+                            fun_kwargs=fun_kwargs,
+                            ndim=gp.ndim,
+                            x0=x0_acq,
+                            optimizer_kwargs=self.optimizer_kwargs,
+                            maxiter=maxiter,
+                            n_restarts=n_restarts,
+                            verbose=verbose)
 
 class LogEI(EI):
     """Log Expected Improvement acquisition function. Better numerical stability compared to EI."""
 
     name: str = "LogEI"
 
-    def __init__(self, zeta: float = 0.2, optimizer_kwargs: Optional[Dict[str, Any]] = {}):
-        super().__init__(zeta=zeta, optimizer_kwargs=optimizer_kwargs)
+    def __init__(self, zeta: float = 0.2, optimizer = "optax", optimizer_kwargs: Optional[Dict[str, Any]] = {'name': 'adam', 'lr': 1e-3}):
+        super().__init__(zeta=zeta, optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
 
     def fun(self, x, gp, best_y, zeta):
         """
@@ -347,9 +335,9 @@ class WIPV(AcquisitionFunction):
     name: str = "WIPV"
 
     def __init__(self,
-                 optimizer_kwargs: Optional[Dict[str, Any]] = {}):
+                 optimizer: str = "optax", optimizer_kwargs: Optional[Dict[str, Any]] = {'name': 'adam', 'lr': 1e-3}):
 
-        super().__init__(optimizer_kwargs=optimizer_kwargs)
+        super().__init__(optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
 
     def fun(self, x, gp,  mc_points=None, k_train_mc = None):
         var = gp.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc)
@@ -358,9 +346,6 @@ class WIPV(AcquisitionFunction):
 
     def get_next_point(self, gp,
                  acq_kwargs,
-                 optimizer_name: str = "adam",
-                 lr: float = 0.001,
-                 optimizer_kwargs: dict | None = {},
                  maxiter: int = 200,
                  n_restarts: int = 4,
                  verbose: bool = True,
@@ -381,31 +366,15 @@ class WIPV(AcquisitionFunction):
         best_x = mc_points[jnp.argmin(acq_vals)]
         x0_acq = best_x
 
-        # return best_x, float(acq_val_min)
-
-        # x0_acq1 = mc_samples['best']
-        # vars = lax.map(gp.predict_var,mc_points,batch_size=25)
-        # x0_acq2 = mc_points[jnp.argmax(vars)]
-        # x0_acq3 = gp.train_x[jnp.argmax(gp.train_y)]
-        # x0_acq = jnp.vstack([x0_acq1, x0_acq2, x0_acq3])
-        # if n_restarts > 3:
-        #     x0_acq = jnp.vstack([x0_acq, [gp.get_random_point() for _ in range(n_restarts - 3)]])
-        # else:
-        #     x0_acq = x0_acq[:n_restarts]
-        # k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.outputscale, gp.noise, include_noise=False)
-
-        return optimize(fun=self.fun,
-                        fun_args=(gp,),
-                        fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
-                        ndim=gp.ndim,
-                        x0=x0_acq,
-                        lr=lr,
-                        optimizer_name=optimizer_name,
-                        optimizer_kwargs=optimizer_kwargs,
-                        maxiter=maxiter,
-                        n_restarts=n_restarts,
-                        verbose=verbose,
-                        early_stop_patience=early_stop_patience)
+        return self.acq_optimize(fun=self.fun,
+                                  fun_args=(gp,),
+                                  fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
+                                  ndim=gp.ndim,
+                                  x0=x0_acq,
+                                  optimizer_kwargs=self.optimizer_kwargs,
+                                  maxiter=maxiter,
+                                  n_restarts=n_restarts,
+                                  verbose=verbose)
 
 def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",init_params=None,np_rng=None,rng_key=None):
     if method=='NUTS':

@@ -36,10 +36,11 @@ class GPwithClassifier:
                  clf_use_size=400, clf_update_step=5,
                  probability_threshold=0.5, minus_inf=-1e5,
                  clf_threshold=250., gp_threshold=500.,
-                 noise=1e-8, kernel="rbf", optimizer="adam", 
+                 noise=1e-8, kernel="rbf", 
+                 optimizer="optax", optimizer_kwargs={'lr': 5e-3, 'name': 'adam'},
                  outputscale_bounds=[-4, 4], lengthscale_bounds=[np.log10(0.05), 2],
                  lengthscale_priors='DSLP', lengthscales=None, outputscale=1.0,
-                 tausq=None, tausq_bounds=[-4, 4],train_clf_on_init=True,  # Prevent retraining on copy
+                 tausq=None, tausq_bounds=[-4, 4], train_clf_on_init=True,  # Prevent retraining on copy
 
                  ):
         """
@@ -101,15 +102,15 @@ class GPwithClassifier:
         self.ndim = train_x_gp.shape[1] 
 
         if lengthscale_priors.upper() == 'DSLP':
-            self.gp = DSLP_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
+            self.gp = DSLP_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,optimizer_kwargs,
                               outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
         elif lengthscale_priors.upper() == 'SAAS':
-            self.gp = SAAS_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
+            self.gp = SAAS_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,optimizer_kwargs,
                               outputscale_bounds, lengthscale_bounds, tausq_bounds,
                               lengthscales=lengthscales, outputscale=outputscale, tausq=tausq)
         else:
             log.warning(f"Not using DSLP or SAAS priors (got '{lengthscale_priors}'), using default GP")
-            self.gp = GP(train_x_gp, train_y_gp, noise, kernel, optimizer,
+            self.gp = GP(train_x_gp, train_y_gp, noise, kernel, optimizer, optimizer_kwargs,
                           outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
 
         # Initialize Classifier
@@ -163,9 +164,9 @@ class GPwithClassifier:
         log.debug(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
         log.debug(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
 
-    def fit(self, lr=5e-3, maxiter=300, n_restarts=4):
+    def fit(self, maxiter=300, n_restarts=4):
         """Fits the GP hyperparameters."""
-        self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts)
+        self.gp.fit(maxiter=maxiter, n_restarts=n_restarts)
 
     def predict_mean_single(self,x):
         gp_mean = self.gp.predict_mean_single(x)
@@ -224,7 +225,7 @@ class GPwithClassifier:
         """
         return self.gp.fantasy_var(new_x, mc_points,k_train_mc)
 
-    def update(self, new_x, new_y, refit=True, lr=5e-3, maxiter=300, n_restarts=4):
+    def update(self, new_x, new_y, refit=True, maxiter=300, n_restarts=4):
         """
         Updates the classifier and GP training sets.
         Retrains classifier/GP based on thresholds and steps.
@@ -233,7 +234,7 @@ class GPwithClassifier:
         new_y = jnp.atleast_2d(new_y)
 
         if not self.clf_flag:
-            gp_not_updated = self.gp.update(new_x, new_y, refit=refit, lr=lr, maxiter=maxiter, n_restarts=n_restarts)
+            gp_not_updated = self.gp.update(new_x, new_y, refit=refit, maxiter=maxiter, n_restarts=n_restarts)
         else:
             # Check for duplicates in data 
             new_pts_to_add = []
@@ -263,7 +264,7 @@ class GPwithClassifier:
                 else:
                     log.info("Point not within GP threshold, not updating GP.")
             if refit:
-                self.gp.fit(lr=lr, maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
+                self.gp.fit(maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
 
             # Check if classifier data size has reached the threshold
             if not self.use_clf:

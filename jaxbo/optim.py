@@ -95,6 +95,33 @@ def optimize_optax(
     """
     Standalone method to minimize a function using JAX and optax.
     Runs multiple restarts sequentially with early stopping per restart.
+
+    Arguments
+    ---------
+    fun: Callable
+        The objective function to minimize.
+    fun_args: Optional[Tuple]
+        Positional arguments to pass to the objective function.
+    fun_kwargs: Optional[dict]
+        Keyword arguments to pass to the objective function.
+    ndim: int
+        Number of parameters.
+    bounds: Optional[Union[List, Tuple, jnp.ndarray]]
+        Parameter bounds in shape (2, ndim).
+    x0: Optional[jnp.ndarray]
+        Initial guess for the parameters, rescaled to unit space.
+    optimizer_kwargs: Optional[dict]
+        Additional keyword arguments to pass to the optimizer.
+    maxiter: int
+        Maximum number of iterations.
+    n_restarts: int
+        Number of restarts for the optimization.
+    verbose: bool
+        Whether to print progress messages.
+    Returns
+    -------
+    Tuple[jnp.ndarray, float]
+        The best parameters found and the corresponding function value.
     """
     bounds_arr = _setup_bounds(bounds, ndim)
     
@@ -104,10 +131,10 @@ def optimize_optax(
     # scaled_func = lambda x: func(scale_from_unit(x, bounds_arr), *fun_args, **fun_kwargs)
 
     # Get optimizer
-    lr = optimizer_kwargs.get("lr", 1e-3)
-    optimizer_name = optimizer_kwargs.get("name", "adam")
+    early_stop_patience = optimizer_kwargs.pop("early_stop_patience", 25)
+    lr = optimizer_kwargs.pop("lr", 1e-3)
+    optimizer_name = optimizer_kwargs.pop("name", "adam")
     optimizer = _get_optimizer(optimizer_name, lr, optimizer_kwargs)
-    early_stop_patience = optimizer_kwargs.get("early_stop_patience", 25)
 
     # JIT the step function for performance
     @jax.jit
@@ -119,8 +146,8 @@ def optimize_optax(
         return u_params, opt_state, val
     
     init_params_unit = _setup_initial_points(
-        x0, n_restarts, ndim,)
-    
+        x0, n_restarts, ndim)
+
     # Global best across all restarts
     global_best_f = np.inf
     global_best_params_unit = None
@@ -196,46 +223,42 @@ def optimize_scipy(
 ) -> Tuple[jnp.ndarray, float]:
     """
     Standalone method to minimize a function using scipy.optimize.minimize.
-    
-    Parameters:
-    -----------
+
+    Arguments
+    ---------
     fun : Callable
         The objective function to minimize
     fun_args : tuple, optional
         Additional arguments to pass to the function
     fun_kwargs : dict, optional
         Additional keyword arguments to pass to the function
-    ndim : int, default=1
-        Number of dimensions
-    bounds : array-like, optional
-        Bounds for optimization. If None, uses [0, 1] for all dimensions
-    x0 : array-like, optional
-        Initial guess(es) in unit cube. If None, random points are generated
-    method : str, default="L-BFGS-B"
-        Scipy optimization method
-    maxiter : int, default=200
-        Maximum number of iterations
-    n_restarts : int, default=4
-        Number of random restarts
-    verbose : bool, default=False
-        Whether to print verbose output
-    ftol : float, default=1e-6
-        Function tolerance for convergence
-    gtol : float, default=1e-6
-        Gradient tolerance for convergence
-        
-    Returns:
-    --------
-    best_params : jnp.ndarray
-        Best parameters found
-    best_value : float
-        Best function value found
+    ndim: int
+        Number of parameters.
+    bounds: Optional[Union[List, Tuple, jnp.ndarray]]
+        Parameter bounds in shape (2, ndim).
+    x0: Optional[jnp.ndarray]
+        Initial guess for the parameters, rescaled to unit space.
+    optimizer_kwargs: Optional[dict]
+        Additional keyword arguments to pass to the optimizer.
+    maxiter: int
+        Maximum number of iterations.
+    n_restarts: int
+        Number of restarts for the optimization.
+    verbose: bool
+        Whether to print progress messages.
+    Returns
+    -------
+    Tuple[jnp.ndarray, float]
+        The best parameters found and the corresponding function value.
     """
+
     bounds_arr = _setup_bounds(bounds, ndim)
     
     # Create scipy bounds format: list of (min, max) tuples
-    scipy_bounds = [(bounds_arr[0, i], bounds_arr[1, i]) for i in range(ndim)]
-    
+    scipy_bounds = [(float(bounds_arr[0, i]), float(bounds_arr[1, i])) for i in range(ndim)]
+
+    print(f"Scipy bounds: {scipy_bounds}")
+
     # JIT-compiled function that computes both value and gradient
     @jax.jit
     def value_and_grad_func(x):
@@ -243,11 +266,9 @@ def optimize_scipy(
     
     # Generate initial points
     x0_list = _setup_initial_points(
-        x0, n_restarts, ndim, bounds_arr, in_unit_space=False
-    )
+        x0, n_restarts, ndim,)
 
     x0_list = scale_from_unit(x0_list, bounds_arr)  # Convert to numpy for scipy
-
 
     # Global best across all restarts
     global_best_f = np.inf

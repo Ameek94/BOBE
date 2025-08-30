@@ -176,12 +176,10 @@ def nested_sampling_Dy(gp: GP
     lower = compute_integrals(logl=logl_lower,logvol=logvol)
 
     var = np.clip(var,a_min=1e-6,a_max=1e2)
-    E_Z = compute_integrals(logl=logl + 0.5*var ,logvol=logvol)[-1] 
-    varintegrand = 2*logl + np.log(var) + np.log1p(1+var) # var + np.log(np.expm1(var)) #+ 
+    varintegrand = 2*logl + np.log(var) #+ np.log1p(var)
     log_var_delta = compute_integrals(logl=varintegrand,logvol=logvol,squared=True)[-1]
-    log_var_logz = log_var_delta - 2*mean #2*E_Z 
-    log_var_logz = np.clip(log_var_logz, a_min=-100, a_max=100)  # Avoid numerical issues with very small variances
-    log.info(f"Log variance of logZ: {log_var_logz:.4f}, log_var_delta: {log_var_delta:.4f}, E_Z: {E_Z:.4f}")
+    log_var_logz = log_var_delta - 2*mean 
+    log_var_logz = np.clip(log_var_logz, a_min=-100, a_max=100)  # Avoid numerical issues with very small or large variances
     var_logz = np.exp(log_var_logz)
     logz_dict['upper'] = upper[-1]
     logz_dict['lower'] = lower[-1]

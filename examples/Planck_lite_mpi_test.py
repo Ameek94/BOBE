@@ -45,7 +45,7 @@ def main():
         clf_update_step=1,
         clf_type='svm',
         minus_inf=-1e5,
-        logz_threshold=0.01,
+        logz_threshold=0.005,
         seed=10,
         do_final_ns=False,
     )
