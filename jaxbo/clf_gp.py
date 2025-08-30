@@ -38,8 +38,8 @@ class GPwithClassifier:
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
                  optimizer="optax", optimizer_kwargs={'lr': 5e-3, 'name': 'adam'},
-                 outputscale_bounds=[-4, 4], lengthscale_bounds=[np.log10(0.05), 2],
-                 lengthscale_priors='DSLP', lengthscales=None, outputscale=1.0,
+                 kernel_variance_bounds = [-4, 8], lengthscale_bounds=[np.log10(0.01), 2],
+                 lengthscale_priors='DSLP', lengthscales=None, kernel_variance=1.0,
                  tausq=None, tausq_bounds=[-4, 4], train_clf_on_init=True,  # Prevent retraining on copy
 
                  ):
@@ -70,8 +70,8 @@ class GPwithClassifier:
             If None, `gp_threshold` might be used or a default calculated.
         gp_threshold : float, optional
             Threshold for adding points to the GP training set. Default is 5000.
-        noise, kernel, optimizer, outputscale_bounds, lengthscale_bounds,
-        lengthscale_priors, lengthscales, outputscale:
+        noise, kernel, optimizer, kernel_variance_bounds, lengthscale_bounds,
+        lengthscale_priors, lengthscales, kernel_variance:
             GP parameters (see DSLP_GP/SAAS_GP).
         """
         # Store Data and Classifier Settings
@@ -103,15 +103,15 @@ class GPwithClassifier:
 
         if lengthscale_priors.upper() == 'DSLP':
             self.gp = DSLP_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,optimizer_kwargs,
-                              outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
+                              kernel_variance_bounds, lengthscale_bounds, lengthscales=lengthscales, kernel_variance=kernel_variance)
         elif lengthscale_priors.upper() == 'SAAS':
             self.gp = SAAS_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,optimizer_kwargs,
-                              outputscale_bounds, lengthscale_bounds, tausq_bounds,
-                              lengthscales=lengthscales, outputscale=outputscale, tausq=tausq)
+                              kernel_variance_bounds, lengthscale_bounds, tausq_bounds,
+                              lengthscales=lengthscales, kernel_variance=kernel_variance, tausq=tausq)
         else:
             log.warning(f"Not using DSLP or SAAS priors (got '{lengthscale_priors}'), using default GP")
             self.gp = GP(train_x_gp, train_y_gp, noise, kernel, optimizer, optimizer_kwargs,
-                          outputscale_bounds, lengthscale_bounds, lengthscales=lengthscales, outputscale=outputscale)
+                          kernel_variance_bounds, lengthscale_bounds, lengthscales=lengthscales, kernel_variance=kernel_variance)
 
         # Initialize Classifier
         self.use_clf = (self.clf_data_size >= self.clf_use_size) and self.clf_flag
@@ -225,7 +225,7 @@ class GPwithClassifier:
         """
         return self.gp.fantasy_var(new_x, mc_points,k_train_mc)
 
-    def update(self, new_x, new_y, refit=True, maxiter=300, n_restarts=4):
+    def update(self, new_x, new_y, refit=True, maxiter=500, n_restarts=6):
         """
         Updates the classifier and GP training sets.
         Retrains classifier/GP based on thresholds and steps.
@@ -279,11 +279,11 @@ class GPwithClassifier:
         # Return whether GP was updated, classifier is always updated
         return gp_not_updated
 
-    def kernel(self,x1,x2,lengthscales,outputscale,noise,include_noise=True):
+    def kernel(self,x1,x2,lengthscales,kernel_variance,noise,include_noise=True):
         """
         Returns the kernel function used by the GP.
         """
-        return self.gp.kernel(x1,x2,lengthscales,outputscale,noise,include_noise=include_noise)
+        return self.gp.kernel(x1,x2,lengthscales,kernel_variance,noise,include_noise=include_noise)
 
     def get_random_point(self,rng=None):
 
@@ -325,7 +325,7 @@ class GPwithClassifier:
             'clf_threshold': self.clf_threshold,
             'gp_threshold': self.gp_threshold,
             'lengthscales': self.gp.lengthscales,
-            'outputscale': self.gp.outputscale,
+            'kernel_variance': self.gp.kernel_variance,
             'hyperparam_priors': self.gp.hyperparam_priors,
             'clf_type': self.clf_type,
             'clf_use_size': self.clf_use_size,
@@ -392,7 +392,7 @@ class GPwithClassifier:
         # Determine GP type and create lengthscale_priors
         lengthscale_priors = str(data['hyperparam_priors'].item()) if 'hyperparam_priors' in data.files else 'DSLP'
         lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
-        outputscale = float(data['outputscale']) if 'outputscale' in data.files else None
+        kernel_variance = float(data['kernel_variance']) if 'kernel_variance' in data.files else None
         tausq = float(data['tausq']) if 'tausq' in data.files else None
         tausq_bounds = data['tausq_bounds'].tolist() if 'tausq_bounds' in data.files else [-4, 4]
         
@@ -411,7 +411,7 @@ class GPwithClassifier:
             noise=noise,
             lengthscale_priors=lengthscale_priors,
             lengthscales=lengthscales,
-            outputscale=outputscale,
+            kernel_variance=kernel_variance,
             tausq=tausq,
             tausq_bounds=tausq_bounds,
             **kwargs
@@ -546,11 +546,11 @@ class GPwithClassifier:
             noise=self.gp.noise,
             kernel="rbf" if self.gp.kernel_name == "rbf_kernel" else "matern",
             optimizer="adam",  # adjust if you actually use different optimizers
-            outputscale_bounds=self.gp.outputscale_bounds,
+            kernel_variance_bounds=self.gp.kernel_variance_bounds,
             lengthscale_bounds=self.gp.lengthscale_bounds,
             lengthscale_priors="DSLP",  # or SAAS depending on your setup
             lengthscales=np.array(self.gp.lengthscales),
-            outputscale=float(self.gp.outputscale),
+            kernel_variance=float(self.gp.kernel_variance),
             train_clf_on_init=False,
         )
 
@@ -586,9 +586,9 @@ class GPwithClassifier:
         return self.gp.lengthscales
     
     @property
-    def outputscale(self):
-        """Access the underlying GP's outputscale."""
-        return self.gp.outputscale
+    def kernel_variance(self):
+        """Access the underlying GP's kernel_variance."""
+        return self.gp.kernel_variance
     
     @property
     def tausq(self):

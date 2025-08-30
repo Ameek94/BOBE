@@ -886,14 +886,14 @@ class BOBESummaryPlotter:
         ])
         
         # Display formatted text
-        ax.text(0.05, 0.95, '\n'.join(stats_lines), transform=ax.transAxes, 
+        ax.text(0.25, 0.95, '\n'.join(stats_lines), transform=ax.transAxes, 
                fontsize=12*self.figsize_scale, verticalalignment='top',
                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.3))
         
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis('off')
-        ax.set_title('Run summary')
+        ax.set_title('Run summary',loc='center')
         
         return ax
     

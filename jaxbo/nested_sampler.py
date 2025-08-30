@@ -184,7 +184,7 @@ def nested_sampling_Dy(gp: GP
     logz_dict['upper'] = upper[-1]
     logz_dict['lower'] = lower[-1]
     logz_dict['var'] = var_logz
-    logz_dict['std'] = np.sqrt(var_logz)
+    logz_dict['std'] = np.sqrt(var_logz) # 2 sigma
     samples_dict = {}
     best_pt = samples_x[np.argmax(logl)]
     samples_dict['best'] = best_pt

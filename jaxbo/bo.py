@@ -310,7 +310,7 @@ class BOBE:
 
         log.info(f"Starting iteration {ii}")
 
-        self.acquisition = LogEI() # start with LogEI
+        self.acquisition = LogEI(optimizer=self.optimizer) # start with LogEI
 
         current_evals = self.gp.npoints  # Number of evaluations so far
 
@@ -335,7 +335,7 @@ class BOBE:
 
             if (ii - start_iteration > n_log_ei_iters) and self.acquisition.name in ['EI','LogEI']:
                 # change acquisition function to WIPV after a minimum of n_log_ei_iters EI, LogEI
-                self.acquisition = WIPV()
+                self.acquisition = WIPV(optimizer=self.optimizer)
                 self.results_manager.start_timing('MCMC Sampling')
                 self.mc_samples = get_mc_samples(self.gp,warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, 
                                          thinning=4,method=self.mc_points_method)
@@ -405,7 +405,7 @@ class BOBE:
 
             # Extract GP hyperparameters for tracking
             lengthscales = list(self.gp.lengthscales)
-            kernel_variance = float(self.gp.outputscale)
+            kernel_variance = float(self.gp.kernel_variance)
             self.results_manager.update_gp_hyperparams(ii, lengthscales, kernel_variance)
 
 
@@ -455,7 +455,7 @@ class BOBE:
                     'best': ns_samples['best']
                 }
                 if ns_success:
-                    self.converged = self.check_convergence(ii, self.gp, logz_dict, ns_samples, threshold=self.logz_threshold)
+                    self.converged = self.check_convergence(ii, logz_dict, equal_samples, equal_logl)
                     if self.converged:
                         self.termination_reason = "LogZ converged"
                         results_dict['logz'] = logz_dict
@@ -612,7 +612,7 @@ class BOBE:
 
         return results_dict
 
-    def check_convergence(self, step, gp, logz_dict, ns_samples, threshold=1.0, kl_method='gaussian'):
+    def check_convergence(self, step, logz_dict, equal_samples, equal_logl, kl_method='gaussian'):
         """
         Check if the nested sampling has converged and compute KL divergence metrics.
         
@@ -626,40 +626,34 @@ class BOBE:
             bool: Whether convergence is achieved based on logz only
         """
         # Standard logz convergence check
-        delta = logz_dict['std'] #logz_dict['upper'] - logz_dict['lower'] # # 
-        converged = delta < threshold
+        delta = logz_dict['std']
+        converged = delta < self.logz_threshold
         
         # Compute KL divergences if we have nested sampling samples
         successive_kl = None
         
-        if ns_samples is not None:
+        if equal_samples is not None:
+            equal_samples = scale_from_unit(equal_samples, self.loglikelihood.param_bounds)
             try:
-                log_weights = np.log(ns_samples['weights'] + 1e-300)  # Avoid log(0)
-                logl = ns_samples['logl']
-
                 # Compute successive KL if we have previous samples
                 if self.prev_samples is not None:
 
                     # compare different iterations with the equal weighted samples at the previous iteration.
-                    # this needs to be replace with a different calculationmethod due to the fake mode issue
                     prev_logl = self.prev_samples['logl']
                     prev_samples_x = self.prev_samples['x']
-                    new_logl = jax.lax.map(gp.predict_mean_single,prev_samples_x,batch_size=200)
-                    log_weights = np.zeros_like(new_logl)
+                    new_logl = jax.lax.map(self.gp.predict_mean_single,prev_samples_x,batch_size=200)
 
                     if kl_method == 'gaussian':
                         mu1 = np.mean(prev_samples_x, axis=0)
                         cov1 = np.cov(prev_samples_x, rowvar=False)
-                        equal_samples, equal_logl = resample_equal(ns_samples['x'], logl, weights=ns_samples['weights'])
                         mu2 = np.mean(equal_samples, axis=0)
                         cov2 = np.cov(equal_samples, rowvar=False)
                         successive_kl = kl_divergence_gaussian(mu1, cov1, mu2, cov2)
                     # elif kl_method == 'samples':
-                        successive_kl_samples = kl_divergence_samples(prev_logl, new_logl, log_weights)
+                        successive_kl_samples = kl_divergence_samples(prev_logl, new_logl)
 
                 # Store current samples for next iteration
-                equal_prev_samples, equal_prev_logl = resample_equal(ns_samples['x'], logl, ns_samples['weights'])
-                self.prev_samples = {'x': equal_prev_samples, 'logl': equal_prev_logl}
+                self.prev_samples = {'x': equal_samples, 'logl': equal_logl}
 
                 if successive_kl:
                     log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
@@ -674,7 +668,7 @@ class BOBE:
             iteration=step,
             logz_dict=logz_dict,
             converged=converged,
-            threshold=threshold
+            threshold=self.logz_threshold
         )
         
         # Store KL divergences if computed
@@ -684,7 +678,7 @@ class BOBE:
                 successive_kl=successive_kl
             )
 
-        log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {threshold}")
+        log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
         if converged:
             if self.prev_converged:
                 log.info("Convergence achieved after 2 successive iterations")

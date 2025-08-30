@@ -30,7 +30,8 @@ def main():
     param_list = ['x1', 'x2']
     param_labels = ['x_1', 'x_2']
     param_bounds = np.array([[-1, 1], [-1, 2]]).T
-    likelihood_name = 'banana_mpi_test'
+    ls_priors = 'DSLP'
+    likelihood_name = f'banana_{ls_priors}_lgn'
 
     start = time.time()
     print("Starting BOBE run...")
@@ -57,11 +58,12 @@ def main():
         num_hmc_warmup=256,
         num_hmc_samples=1024,
         mc_points_size=128,
-        lengthscale_priors='DSLP',
+        lengthscale_priors=ls_priors,
         use_clf=False,
         minus_inf=-1e5,
         logz_threshold=1e-3,
         seed=42,
+        optimizer='scipy',
         do_final_ns=False,
     )
 
@@ -113,6 +115,11 @@ def main():
                                     weights=weights, 
                                     ranges= dict(zip(param_list,param_bounds.T)))
 
+        plt.style.use('default')
+
+        # Enable LaTeX rendering for mathematical expressions
+        plt.rcParams['text.usetex'] = True 
+        plt.rcParams['font.family'] = 'serif'        
 
         plot_final_samples(
             gp,

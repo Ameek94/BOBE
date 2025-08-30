@@ -355,7 +355,7 @@ class WIPV(AcquisitionFunction):
         mc_samples = acq_kwargs.get('mc_samples')
         mc_points_size = acq_kwargs.get('mc_points_size', 128)
         mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
-        k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.outputscale, gp.noise, include_noise=False)
+        k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.kernel_variance, gp.noise, include_noise=False)
 
         # @jax.jit
         def mapped_fn(x):

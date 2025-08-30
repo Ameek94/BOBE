@@ -12,7 +12,8 @@ from jaxbo.run import run_bobe
 def main():
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/LCDM_6D.yaml'
-    likelihood_name = 'Planck_lite_mpi_test'
+    ls_priors = 'uniform'
+    likelihood_name = f'Planck_lite_{ls_priors}_ls_priors'
 
     start = time.time()
     print("Starting BOBE run...")
@@ -38,7 +39,7 @@ def main():
         num_hmc_warmup=512,
         num_hmc_samples=512, 
         mc_points_size=128,
-        lengthscale_priors='DSLP', 
+        lengthscale_priors=ls_priors, 
         use_clf=True,
         clf_use_size=10,
         clf_threshold=350,

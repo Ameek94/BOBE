@@ -12,10 +12,8 @@ os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={num_devices}
 # Arg 2: Classifier type ('svm' or 'gp')
 clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 
-# Arg 3: Run mode ('mpi' or 'serial')
-name = str(sys.argv[3]) if len(sys.argv) > 3 else 'serial'
-# Arg 4: Number of log EI iterations
-n_log_ei_iters = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+# Arg 3: Number of log EI iterations
+n_log_ei_iters = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 
 # --- Imports ---
 from jaxbo.run import run_bobe
@@ -35,7 +33,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Camspec_{clf_type}_{name}_logei_{n_log_ei_iters}_Matern'
+    likelihood_name = f'Camspec_{clf_type}_uniform_prior'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -74,9 +72,9 @@ def main():
         mc_points_size=512,
         
         # GP settings
-        lengthscale_priors='DSLP',
+        lengthscale_priors='uniform',
         noise=1e-6,
-        kernel='Matern52',
+        kernel='rbf',
 
         # resume
         resume=False,

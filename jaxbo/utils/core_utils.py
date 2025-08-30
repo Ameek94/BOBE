@@ -44,18 +44,15 @@ def resample_equal(samples, aux, weights=None, logwts=None):
 
 #----Convergence KL----
     
-def kl_divergence_samples(prev_loglike, curr_loglike, log_weights):
+def kl_divergence_samples(prev_loglike, curr_loglike):
     """Compute KL divergence between successive iterations."""
     
-    # Convert to normalised probability distributions
-    weights = np.exp(log_weights - np.max(log_weights))
-    weights = weights / np.sum(weights)
         
     prev_norm = prev_loglike - np.max(prev_loglike)
     curr_norm = curr_loglike - np.max(curr_loglike)
-    
-    p_prev = np.exp(prev_norm) * weights
-    p_curr = np.exp(curr_norm) * weights
+
+    p_prev = np.exp(prev_norm)
+    p_curr = np.exp(curr_norm)
         
     p_prev = p_prev / np.sum(p_prev)
     p_curr = p_curr / np.sum(p_curr)
@@ -84,7 +81,7 @@ def _kl_gaussian_single(mu1, Cov1, mu2, Cov2):
     _, logdet_Cov2 = np.linalg.slogdet(Cov2)
     log_det_term = logdet_Cov2 - logdet_Cov1
 
-    # Trace term (more stable to solve than to invert)
+    # Trace term 
     trace_term = np.trace(np.linalg.solve(Cov2, Cov1))
 
     # Quadratic term

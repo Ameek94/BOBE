@@ -36,29 +36,29 @@ def dist_sq(x, y):
     return jnp.sum(jnp.square(x[:,None,:] - y[None,:,:]),axis=-1) 
 
 @partial(jax.jit, static_argnames='include_noise')
-def kernel_diag(x, outputscale, noise, include_noise=True):
+def kernel_diag(x, kernel_variance, noise, include_noise=True):
     """
     Computes only the diagonal of the kernel matrix K(x,x).
     """
-    diag = outputscale * jnp.ones(x.shape[0]) # The diagonal is just the outputscale
+    diag = kernel_variance * jnp.ones(x.shape[0]) # The diagonal is just the kernel_variance
     if include_noise:
         diag += noise
     return diag
 
 @partial(jax.jit,static_argnames='include_noise')
-def rbf_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True): 
+def rbf_kernel(xa,xb,lengthscales,kernel_variance,noise,include_noise=True): 
     """
     The RBF kernel
     """
     sq_dist = dist_sq(xa/lengthscales,xb/lengthscales) 
     sq_dist = jnp.exp(-0.5*sq_dist)
-    k = outputscale*sq_dist
+    k = kernel_variance*sq_dist
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
     return k
 
 @partial(jax.jit,static_argnames='include_noise')
-def matern_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True):
+def matern_kernel(xa,xb,lengthscales,kernel_variance,noise,include_noise=True):
     """
     The Matern-5/2 kernel
     """
@@ -66,7 +66,7 @@ def matern_kernel(xa,xb,lengthscales,outputscale,noise,include_noise=True):
     d = jnp.sqrt(jnp.where(dsq<1e-30,1e-30,dsq))
     exp = jnp.exp(-sqrt5*d)
     poly = 1. + d*(sqrt5 + d*5./3.)
-    k = outputscale*poly*exp
+    k = kernel_variance*poly*exp
     if include_noise:
         k+= noise*jnp.eye(k.shape[0])
     return k
@@ -120,8 +120,8 @@ class GP:
 
     def __init__(self,train_x,train_y,noise=1e-6,kernel="rbf"
                  ,optimizer="optax",optimizer_kwargs={'lr': 5e-3, 'name': 'adam'}
-                 ,outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2]
-                 ,lengthscales=None,outputscale=None):
+                 ,kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2]
+                 ,lengthscales=None,kernel_variance=None):
         """
         Arguments
         ---------
@@ -163,14 +163,14 @@ class GP:
 
         self.train_y = (train_y - self.y_mean) / self.y_std
         self.lengthscales = jnp.ones(self.ndim) if lengthscales is None else jnp.array(lengthscales)
-        self.outputscale = 1. if outputscale is None else outputscale
+        self.kernel_variance = 1. if kernel_variance is None else kernel_variance
         self.lengthscale_bounds = lengthscale_bounds
-        self.outputscale_bounds = outputscale_bounds
-        self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.outputscale_bounds]
+        self.kernel_variance_bounds = kernel_variance_bounds
+        self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.kernel_variance_bounds]
         self.hyperparam_bounds = jnp.array(self.hyperparam_bounds).T # shape (2, D+1)
         log.debug(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
 
-        self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True))
+        self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True))
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
         self.fitted = True
 
@@ -179,15 +179,15 @@ class GP:
         Single point prediction of mean
         """
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False) # shape (N,1)
+        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False) # shape (N,1)
         mean = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean 
         return mean 
     
     def predict_var_single(self,x):
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False) # shape (N,1)
+        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False) # shape (N,1)
         vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
-        k22 = kernel_diag(x,self.outputscale,self.noise,include_noise=True) # shape (1,) for x (1,ndim)
+        k22 = kernel_diag(x,self.kernel_variance,self.noise,include_noise=True) # shape (1,) for x (1,ndim)
         var = k22 - jnp.sum(vv*vv,axis=0) 
         var = jnp.clip(var, safe_noise_floor, None)
         return self.y_std**2 * var.squeeze()
@@ -205,7 +205,7 @@ class GP:
         Predicts the mean of the GP at x and unstandardizes it
         """
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
+        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False)
         mean = get_mean_from_cho(k12,self.alphas) 
         return mean*self.y_std + self.y_mean 
 
@@ -214,8 +214,8 @@ class GP:
         Predicts the variance of the GP at x and unstandardizes it
         """
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
-        k22 = self.kernel(x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=True)
+        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False)
+        k22 = self.kernel(x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=True)
         var = jnp.clip(get_var_from_cho(self.cholesky,k12,k22), safe_noise_floor, None)
         return var*self.y_std**2
 
@@ -224,8 +224,8 @@ class GP:
         Predicts the mean and variance of the GP at x but does not unstandardize it. To use with EI and the like.
         """
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.outputscale,noise=self.noise,include_noise=False)
-        k22 = kernel_diag(x,self.outputscale,self.noise,include_noise=True)
+        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False)
+        k22 = kernel_diag(x,self.kernel_variance,self.noise,include_noise=True)
         mean = jnp.einsum('ij,ji', k12.T, self.alphas)
         vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
         var = k22 - jnp.sum(vv*vv,axis=0) 
@@ -270,7 +270,7 @@ class GP:
         if refit:
             self.fit(maxiter=maxiter,n_restarts=n_restarts)
         else:
-            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True)
+            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
             self.cholesky = jnp.linalg.cholesky(K)
             self.alphas = cho_solve((self.cholesky, True), self.train_y)
         return duplicate
@@ -296,21 +296,21 @@ class GP:
 
         new_x = jnp.atleast_2d(new_x)
         # new_train_x = jnp.concatenate([self.train_x,new_x])
-        k = self.kernel(self.train_x, new_x,self.lengthscales,self.outputscale,
+        k = self.kernel(self.train_x, new_x,self.lengthscales,self.kernel_variance,
                         noise=self.noise,include_noise=False).flatten()           # shape (n,)
-        k_self = kernel_diag(new_x,self.outputscale,self.noise,include_noise=True)[0]  # scalar
+        k_self = kernel_diag(new_x,self.kernel_variance,self.noise,include_noise=True)[0]  # scalar
         k11_cho = fast_update_cholesky(self.cholesky,k,k_self)
 
         # Compute only the extra row for new_x
         k_new_mc = self.kernel(
             new_x, mc_points,
-            self.lengthscales, self.outputscale,
+            self.lengthscales, self.kernel_variance,
         noise=self.noise, include_noise=False)  # shape (1, n_mc)
         k12 = jnp.vstack([k_train_mc,k_new_mc])
 
         # k12 = self.kernel(new_train_x,mc_points,self.lengthscales,
-        #                   self.outputscale,noise=self.noise,include_noise=False)
-        k22 = kernel_diag(mc_points,self.outputscale,self.noise,include_noise=True) # (N_mc,)
+        #                   self.kernel_variance,noise=self.noise,include_noise=False)
+        k22 = kernel_diag(mc_points,self.kernel_variance,self.noise,include_noise=True) # (N_mc,)
         vv = solve_triangular(k11_cho, k12, lower=True) # shape (N_train,N_mc)
         var = k22 - jnp.sum(vv*vv,axis=0) 
         return var * self.y_std**2 # return to physical scale for better interpretability
@@ -326,8 +326,8 @@ class GP:
     def neg_mll(self,log10_params):
         hyperparams = 10**log10_params
         lengthscales = hyperparams[0:-1]
-        outputscale = hyperparams[-1]
-        k = self.kernel(self.train_x,self.train_x,lengthscales,outputscale,noise=self.noise,include_noise=True)
+        kernel_variance = hyperparams[-1]
+        k = self.kernel(self.train_x,self.train_x,lengthscales,kernel_variance,noise=self.noise,include_noise=True)
         val = gp_mll(k,self.train_y,self.train_y.shape[0])
         return -val
 
@@ -342,8 +342,13 @@ class GP:
         n_restarts: int
             The number of restarts for the optimizer. Default is 4.
         """
-        init_params = jnp.log10(jnp.concatenate([self.lengthscales, jnp.array([self.outputscale])]))
-        log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, outputscale = {self.outputscale}")
+        init_params = jnp.log10(jnp.concatenate([self.lengthscales, jnp.array([self.kernel_variance])]))
+        init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
+        if n_restarts>1:
+            addn_init_params = init_params_u + np.random.normal(size=(n_restarts-1, init_params.shape[0]))
+            init_params_u = np.vstack([init_params_u, addn_init_params])
+        x0 = jnp.clip(init_params_u, 0.0, 1.0)
+        log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
 
         optimizer_kwargs = self.optimizer_kwargs.copy()
 
@@ -351,7 +356,7 @@ class GP:
             fun=self.neg_mll,
             ndim=self.ndim + 1,
             bounds=self.hyperparam_bounds,
-            x0=scale_to_unit(init_params, self.hyperparam_bounds),
+            x0=x0,
             maxiter=maxiter,
             n_restarts=n_restarts,
             optimizer_kwargs=optimizer_kwargs
@@ -359,10 +364,10 @@ class GP:
 
         hyperparams = 10 ** best_params
         self.lengthscales = hyperparams[:-1]
-        self.outputscale = hyperparams[-1]
-        log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, outputscale = {self.outputscale}, final MLL = {-best_f}")
+        self.kernel_variance = hyperparams[-1]
+        log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, final MLL = {-best_f}")
 
-        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.outputscale, noise=self.noise, include_noise=True)
+        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
         self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
         self.fitted = True
@@ -373,7 +378,7 @@ class GP:
         """
         train_y = self.train_y * self.y_std + self.y_mean  # unstandardize the training targets
         np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=train_y,noise=self.noise,
-         lengthscales=self.lengthscales,outputscale=self.outputscale,hyperparam_priors=self.hyperparam_priors)
+         lengthscales=self.lengthscales,kernel_variance=self.kernel_variance,hyperparam_priors=self.hyperparam_priors)
 
     @classmethod
     def load(cls, filename, **kwargs):
@@ -405,12 +410,12 @@ class GP:
         train_y = jnp.array(data['train_y'])  # This is unstandardized
         noise = float(data['noise'])
         lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
-        outputscale = float(data['outputscale']) if 'outputscale' in data.files else None
+        kernel_variance = float(data['kernel_variance']) if 'kernel_variance' in data.files else None
         optimizer = str(data['optimizer']) if 'optimizer' in data.files else "optax"
         optimizer_kwargs = dict(data['optimizer_kwargs']) if 'optimizer_kwargs' in data.files else {"name": "adam", "lr": 1e-3}
         # Create GP instance - it will automatically standardize train_y and compute cholesky/alphas
         gp = cls(train_x=train_x, train_y=train_y, noise=noise, 
-                lengthscales=lengthscales, outputscale=outputscale, optimizer=optimizer, optimizer_kwargs=optimizer_kwargs, **kwargs)
+                lengthscales=lengthscales, kernel_variance=kernel_variance, optimizer=optimizer, optimizer_kwargs=optimizer_kwargs, **kwargs)
 
         log.info(f"Loaded GP from {filename} with {train_x.shape[0]} training points")
         return gp
@@ -510,10 +515,10 @@ class GP:
             noise=float(self.noise),
             kernel=self.kernel_name,
             optimizer="adam",  # or pass through if you extend GP further
-            outputscale_bounds=self.outputscale_bounds,
+            kernel_variance_bounds=self.kernel_variance_bounds,
             lengthscale_bounds=self.lengthscale_bounds,
             lengthscales=jnp.array(self.lengthscales, copy=True),
-            outputscale=float(self.outputscale)
+            kernel_variance=float(self.kernel_variance)
         )
 
         gp_copy.alphas = jnp.array(self.alphas, copy=True)
@@ -529,7 +534,7 @@ class GP:
         """
         return {
             "lengthscales": self.lengthscales,
-            "outputscale": self.outputscale
+            "kernel_variance": self.kernel_variance
         }
     
     @property
@@ -548,7 +553,7 @@ class DSLP_GP(GP):
     hyperparam_priors: str = 'dslp'
 
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
-                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,outputscale=None):
+                 kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,kernel_variance=None):
         """
         Class for the Gaussian Process, single output based on maximum likelihood hyperparameters.
         Uses the dimension scaled lengthscale priors from the paper "Vanilla Bayesian Optimization Performs Great in High Dimensions" (2024),
@@ -566,31 +571,32 @@ class DSLP_GP(GP):
             Default is 'rbf'. This is the kernel type for the GP. Can be 'rbf' or 'matern'.
         optimizer: Optimizer type for the GP
             Default is 'adam'. This is the optimizer type for the GP.
-        outputscale_bounds: Bounds for the output scale of the GP (in log10 space) 
-            Default is [-4,4]. These are the bounds for the output scale of the GP.
+        kernel_variance_bounds: Bounds for the kernel variance of the GP (in log10 space) 
+            Default is [-4,4]. These are the bounds for the kernel variance of the GP.
         lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
             Default is [np.log10(0.05),2]. These are the boundsfor the length scale of the GP.
         """
         super().__init__(train_x,train_y,noise,kernel,optimizer,optimizer_kwargs,
-                         outputscale_bounds,lengthscale_bounds,lengthscales=lengthscales,outputscale=outputscale)
+                         kernel_variance_bounds,lengthscale_bounds,lengthscales=lengthscales,kernel_variance=kernel_variance)
 
     def neg_mll(self,log10_params):
         hyperparams = 10**log10_params
         lengthscales = hyperparams[0:-1]
-        outputscale = hyperparams[-1]
-        logprior = dist.Gamma(2.0,0.15).log_prob(outputscale)
+        kernel_variance = hyperparams[-1]
+        logprior = dist.LogNormal(0.,0.5).log_prob(kernel_variance) #
+        # logprior = dist.Gamma(2.0,0.15).log_prob(kernel_variance)
         logprior+= dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(self.ndim) ,scale=sqrt3).expand([self.ndim]).log_prob(lengthscales).sum()
         return super().neg_mll(log10_params) - logprior   
 
-class SAAS_GP(DSLP_GP):
+class SAAS_GP(GP):
 
     hyperparam_priors: str = 'saas'
 
     def __init__(self,
                  train_x, train_y, noise=1e-8, kernel="rbf", 
                  optimizer="adam",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
-                 outputscale_bounds = [-4,4],lengthscale_bounds = [np.log10(0.05),2],
-                 tausq_bounds = [-4,4],lengthscales=None,outputscale=None,tausq=None):
+                 kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2],
+                 tausq_bounds = [-4,4],lengthscales=None,kernel_variance=None,tausq=None):
         """
         Class for the Gaussian Process with SAAS priors, using maximum likelihood hyperparameters. 
         The implementation is based on the paper "High-Dimensional Bayesian Optimization with Sparse Axis-Aligned Subspaces", 2021
@@ -607,30 +613,73 @@ class SAAS_GP(DSLP_GP):
             Default is 'rbf'. This is the kernel type for the GP. Can be 'rbf' or 'matern'.
         optimizer: Optimizer type for the GP
             Default is 'adam'. This is the optimizer type for the GP.
-        outputscale_bounds: Bounds for the output scale of the GP (in log10 space) 
-            Default is [-4,4]. These are the bounds for the output scale of the GP.
+        kernel_variance_bounds: Bounds for the kernel variance of the GP (in log10 space) 
+            Default is [-4,4]. These are the bounds for the kernel variance of the GP.
         lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
             Default is [np.log10(0.05),2]. These are the bounds for the length scale of the GP.
         tausq_bounds: Bounds for the tausq parameter of the GP (in log10 space)
             Default is [-4,4]. These are the bounds for the tausq parameter of the GP.
         """
-        super().__init__(train_x, train_y, noise, kernel, optimizer,optimizer_kwargs,outputscale_bounds,lengthscale_bounds,lengthscales=lengthscales,outputscale=outputscale)
+        super().__init__(train_x, train_y, noise, kernel, optimizer,optimizer_kwargs,kernel_variance_bounds,lengthscale_bounds,lengthscales=lengthscales,kernel_variance=kernel_variance)
         self.tausq = tausq if tausq is not None else 1.0
-        self.hyperparam_bounds = [tausq_bounds] + self.hyperparam_bounds
-    
-    def save(self, outfile='gp'):
-        """
-        Saves the SAAS_GP to a file
-        
+        self.tausq_bounds = jnp.array(tausq_bounds)
+        self.hyperparam_bounds = jnp.vstack([self.hyperparam_bounds.T, self.tausq_bounds]).T # shape (2, D+2)
+        print(f'HP bounds shape: {self.hyperparam_bounds.shape}')
+
+    def neg_mll(self, log10_params):
+        hyperparams = 10**log10_params
+        lengthscales = hyperparams[:self.ndim]
+        kernel_variance = hyperparams[self.ndim]
+        tausq = hyperparams[-1]
+        logprior = dist.LogNormal(0.,1.).log_prob(kernel_variance)
+        # logprior = dist.Gamma(2.0,0.15).log_prob(kernel_variance)
+        logprior+= dist.HalfCauchy(0.1).log_prob(tausq)
+        inv_lengthscales_sq = 1/ (tausq * lengthscales**2)
+        logprior+= jnp.sum(dist.HalfCauchy(1.).log_prob(inv_lengthscales_sq))
+        return super().neg_mll(log10_params[:-1]) - logprior
+
+    def fit(self, maxiter=200,n_restarts=4):
+        """ 
+        Fits the GP using maximum likelihood hyperparameters with the chosen optimizer.
+
         Arguments
         ---------
-        outfile: str
-            The name of the file to save the GP to. Default is 'gp'.
+        maxiter: int
+            The maximum number of iterations for the optimizer. Default is 200.
+        n_restarts: int
+            The number of restarts for the optimizer. Default is 4.
         """
-        train_y = self.train_y * self.y_std + self.y_mean  # unstandardize the training targets
-        np.savez(f'{outfile}.npz', train_x=self.train_x, train_y=train_y, 
-                 noise=self.noise, lengthscales=self.lengthscales, outputscale=self.outputscale,
-                 tausq=self.tausq, hyperparam_priors=self.hyperparam_priors)
+        init_params = jnp.log10(jnp.concatenate([self.lengthscales  , jnp.array([self.kernel_variance, self.tausq])]))
+        init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
+        if n_restarts>1:
+            addn_init_params = init_params_u + np.random.normal(size=(n_restarts-1, init_params.shape[0]))
+            init_params_u = np.vstack([init_params_u, addn_init_params])
+        x0 = jnp.clip(init_params_u, 0.0, 1.0)
+        log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}")
+
+        optimizer_kwargs = self.optimizer_kwargs.copy()
+
+        best_params, best_f = self.mll_optimize(
+            fun=self.neg_mll,
+            ndim=self.ndim + 2,
+            bounds=self.hyperparam_bounds,
+            x0=x0,
+            maxiter=maxiter,
+            n_restarts=n_restarts,
+            optimizer_kwargs=optimizer_kwargs
+        )
+
+        hyperparams = 10 ** best_params
+        self.lengthscales = hyperparams[:self.ndim]
+        self.kernel_variance = hyperparams[self.ndim]
+        self.tausq = hyperparams[-1]
+        log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}, final MLL = {-best_f}")
+        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+        self.cholesky = jnp.linalg.cholesky(K)
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
+        self.fitted = True
+
+
 
     @classmethod
     def load(cls, filename, **kwargs):
@@ -662,12 +711,12 @@ class SAAS_GP(DSLP_GP):
         train_y = jnp.array(data['train_y'])  # This is unstandardized
         noise = float(data['noise'])
         lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
-        outputscale = float(data['outputscale']) if 'outputscale' in data.files else None
+        kernel_variance = float(data['kernel_variance']) if 'kernel_variance' in data.files else None
         tausq = float(data['tausq']) if 'tausq' in data.files else None
         
         # Create SAAS_GP instance - it will automatically standardize train_y and compute cholesky/alphas
         gp = cls(train_x=train_x, train_y=train_y, noise=noise, 
-                lengthscales=lengthscales, outputscale=outputscale, tausq=tausq, **kwargs)
+                lengthscales=lengthscales, kernel_variance=kernel_variance, tausq=tausq, **kwargs)
         
         log.info(f"Loaded SAAS_GP from {filename} with {train_x.shape[0]} training points")
         return gp
