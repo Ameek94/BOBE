@@ -18,7 +18,7 @@ from .clf_gp import GPwithClassifier, load_clf_gp
 from .likelihood import BaseLikelihood, ExternalLikelihood, CobayaLikelihood
 from cobaya.yaml import yaml_load
 from cobaya.model import get_model
-from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, compute_successive_kl
+from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, kl_divergence_gaussian, kl_divergence_samples
 from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from .nested_sampler import nested_sampling_Dy
 from .optim import optimize
@@ -609,7 +609,7 @@ class BOBE:
 
         return results_dict
 
-    def check_convergence(self, step, gp, logz_dict, ns_samples, threshold=1.0):
+    def check_convergence(self, step, gp, logz_dict, ns_samples, threshold=1.0, kl_method='gaussian'):
         """
         Check if the nested sampling has converged and compute KL divergence metrics.
         
@@ -643,7 +643,16 @@ class BOBE:
                     prev_samples_x = self.prev_samples['x']
                     new_logl = jax.lax.map(gp.predict_mean_single,prev_samples_x,batch_size=200)
                     log_weights = np.zeros_like(new_logl)
-                    successive_kl = compute_successive_kl(prev_logl, new_logl, log_weights)
+
+                    if kl_method == 'gaussian':
+                        mu1 = np.mean(prev_samples_x, axis=0)
+                        cov1 = np.cov(prev_samples_x, rowvar=False)
+                        equal_samples, equal_logl = resample_equal(ns_samples['x'], logl, weights=ns_samples['weights'])
+                        mu2 = np.mean(equal_samples, axis=0)
+                        cov2 = np.cov(equal_samples, rowvar=False)
+                        successive_kl = kl_divergence_gaussian(mu1, cov1, mu2, cov2)
+                    # elif kl_method == 'samples':
+                        successive_kl_samples = kl_divergence_samples(prev_logl, new_logl, log_weights)
 
                 # Store current samples for next iteration
                 equal_prev_samples, equal_prev_logl = resample_equal(ns_samples['x'], logl, ns_samples['weights'])
@@ -651,6 +660,7 @@ class BOBE:
 
                 if successive_kl:
                     log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
+                    log.info(f" Successive KL from samples: {successive_kl_samples.get('symmetric', 0):.4f}")
 
             except Exception as e:
                 log.warning(f"Could not compute KL divergences: {e}")

@@ -44,7 +44,7 @@ def resample_equal(samples, aux, weights=None, logwts=None):
 
 #----Convergence KL----
     
-def compute_successive_kl(prev_loglike, curr_loglike, log_weights):
+def kl_divergence_samples(prev_loglike, curr_loglike, log_weights):
     """Compute KL divergence between successive iterations."""
     
     # Convert to normalised probability distributions
@@ -70,6 +70,49 @@ def compute_successive_kl(prev_loglike, curr_loglike, log_weights):
             'reverse': kl_reverse,
             'symmetric': kl_sym
     }
+
+
+def _kl_gaussian_single(mu1, Cov1, mu2, Cov2):
+    """
+    Computes the KL divergence KL(N1 || N2) between two multivariate Gaussians
+    N1 = N(mu1, Cov1) and N2 = N(mu2, Cov2).
+    """
+    d = mu1.shape[0]
+
+    # Log determinant term
+    _, logdet_Cov1 = np.linalg.slogdet(Cov1)
+    _, logdet_Cov2 = np.linalg.slogdet(Cov2)
+    log_det_term = logdet_Cov2 - logdet_Cov1
+
+    # Trace term (more stable to solve than to invert)
+    trace_term = np.trace(np.linalg.solve(Cov2, Cov1))
+
+    # Quadratic term
+    diff = mu2 - mu1
+    quad_term = np.dot(diff, np.linalg.solve(Cov2, diff))
+
+    # Combine terms
+    kl_div = 0.5 * (log_det_term - d + trace_term + quad_term)
+    
+    return kl_div
+
+
+def kl_divergence_gaussian(mu1, Cov1, mu2, Cov2):
+    """
+    Computes the forward, reverse, and symmetric KL divergence between two 
+    multivariate Gaussian distributions N1=N(mu1, Cov1) and N2=N(mu2, Cov2).
+    """
+    kl_forward = _kl_gaussian_single(mu1, Cov1, mu2, Cov2)  # KL(N1 || N2)
+    kl_reverse = _kl_gaussian_single(mu2, Cov2, mu1, Cov1)  # KL(N2 || N1)
+    kl_symmetric = 0.5 * (kl_forward + kl_reverse)
+
+    return {
+        'forward': kl_forward,
+        'reverse': kl_reverse,
+        'symmetric': kl_symmetric
+    }
+
+
 
 #----Misc----
 

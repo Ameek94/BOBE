@@ -52,7 +52,7 @@ def main():
         max_eval_budget=100,
         max_gp_size=200,
         fit_step=1,
-        update_mc_step=4,
+        wipv_batch_size=2,
         ns_step=3,
         num_hmc_warmup=256,
         num_hmc_samples=1024,
