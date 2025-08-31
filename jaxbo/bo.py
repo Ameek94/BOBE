@@ -506,8 +506,9 @@ class BOBE:
             self.results_manager.end_timing('Nested Sampling')
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
             if ns_success:
+                equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
                 log.info(f"Using nested sampling results")
-                self.check_convergence(ii+1, self.gp, logz_dict, ns_samples, threshold=self.logz_threshold)
+                self.check_convergence(ii+1, logz_dict, equal_samples, equal_logl)
                 if self.converged:
                     self.termination_reason = "LogZ converged"
                     results_dict['logz'] = logz_dict
@@ -521,7 +522,7 @@ class BOBE:
             log.info("No nested sampling results found or nested sampling unsuccessful, MC samples from HMC/MCMC will be used instead.")
             self.results_manager.start_timing('MCMC Sampling')
             mc_samples = get_mc_samples(
-                    self.gp, warmup_steps=512, num_samples=1000*self.ndim,
+                    self.gp, warmup_steps=512, num_samples=2000*self.ndim,
                     thinning=4, method="NUTS")
             self.results_manager.end_timing('MCMC Sampling')
             samples = mc_samples['x']
