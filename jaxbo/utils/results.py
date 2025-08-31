@@ -130,9 +130,10 @@ class BOBEResults:
     
     def _initialize_fresh(self):
         """Initialize all tracking variables for a fresh run."""
-        # Initialize tracking variables
+        # Initialize timing variables
         self.start_time = time.time()
         self.end_time = None
+        self.previous_runtime = 0.0  # Track previously elapsed time from resumed runs
         
         # Storage for convergence data
         self.convergence_history: List[ConvergenceInfo] = []
@@ -231,7 +232,8 @@ class BOBEResults:
                     logz_dict=conv_dict['logz_dict'],
                     converged=conv_dict['converged'],
                     delta=conv_dict['delta'],
-                    threshold=conv_dict['threshold']
+                    threshold=conv_dict['threshold'],
+                    dlogz_sampler=conv_dict['dlogz_sampler']
                 )
                 self.convergence_history.append(conv_info)
         
@@ -282,6 +284,10 @@ class BOBEResults:
             for phase, prev_time in existing_results['timing']['phase_times'].items():
                 if phase in self.phase_times:
                     self.phase_times[phase] = prev_time
+            # Calculate previous total runtime for proper resume accounting
+            if 'total_runtime' in existing_results['timing']:
+                self.previous_runtime = existing_results['timing']['total_runtime']
+                log.info(f"Restored previous runtime: {self.previous_runtime:.2f} seconds")
         
         # Restore timing from phase_times if available (for backward compatibility)
         if 'phase_times' in existing_results:
@@ -301,15 +307,6 @@ class BOBEResults:
             self.final_logz_dict = existing_results.get('logz_bounds', {})
             self.converged = existing_results.get('converged', False)
             self.termination_reason = existing_results.get('termination_reason', "Resumed run")
-        
-        # Update start time to preserve total runtime calculation
-        if 'run_info' in existing_results and 'start_time' in existing_results['run_info']:
-            start_str = existing_results['run_info']['start_time']
-            try:
-                self.start_time = datetime.fromisoformat(start_str).timestamp()
-            except Exception:
-                # If parsing fails, keep current start time
-                pass
 
     def update_iteration(self, iteration: int, save_step: int, gp = None, **kwargs):
         """
@@ -461,7 +458,8 @@ class BOBEResults:
     
     def get_timing_summary(self) -> Dict[str, Any]:
         """Get a summary of timing information."""
-        total_runtime = (self.end_time or time.time()) - self.start_time
+        current_session_runtime = (self.end_time or time.time()) - self.start_time
+        total_runtime = self.previous_runtime + current_session_runtime
         
         # Calculate percentages
         percentages = {}
@@ -472,7 +470,9 @@ class BOBEResults:
         return {
             'phase_times': self.phase_times.copy(),
             'percentages': percentages,
-            'total_runtime': total_runtime
+            'total_runtime': total_runtime,
+            'current_session_runtime': current_session_runtime,
+            'previous_runtime': self.previous_runtime
         }
     
     def save_timing_data(self):
@@ -584,8 +584,9 @@ class BOBEResults:
         else:
             n_effective = 0
         
-        # Runtime
-        runtime = self.end_time - self.start_time if self.end_time else 0
+        # Runtime - use timing summary for accurate total runtime calculation
+        timing_summary = self.get_timing_summary()
+        runtime = timing_summary['total_runtime']
         
         results = {
             # === SAMPLES AND WEIGHTS ===

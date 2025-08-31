@@ -7,6 +7,7 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 import time
 import matplotlib.pyplot as plt
+import seaborn as sns
 from jaxbo.run import run_bobe
 from jaxbo.utils.logging_utils import get_logger
 
@@ -20,9 +21,7 @@ def main():
 
     clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm' 
 
-    name = str(sys.argv[3]) if len(sys.argv) > 3 else 'serial'
-
-    likelihood_name = f'Planck_DESI_PPlus_CPL_{name}_{clf_type}'
+    likelihood_name = f'Planck_DESI_PPlus_CPL_{clf_type}'
 
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -33,20 +32,19 @@ def main():
             'name': likelihood_name,
         },
         verbosity='INFO',
-        n_log_ei_iters=300,
+        n_log_ei_iters=150,
         n_cobaya_init=16,
         n_sobol_init=64,
-        min_evals=1000,
+        min_evals=900,
         max_eval_budget=5000,
-        max_gp_size=2100,
-        fit_step=5, 
+        max_gp_size=1400,
+        fit_step=10, 
         zeta_ei = 0.1,
-        update_mc_step=1, 
-        wipv_batch_size=5,
+        wipv_batch_size=10,
         ns_step=5,
         num_hmc_warmup=512,
-        num_hmc_samples=8000, 
-        mc_points_size=600,
+        num_hmc_samples=12000, 
+        mc_points_size=512,
         lengthscale_priors='DSLP', 
         use_clf=True,
         clf_use_size=50,
@@ -80,6 +78,50 @@ def main():
         logz_dict = results.get('logz', {})
         comprehensive_results = results['comprehensive']
         timing_data = comprehensive_results['timing']
+
+        # Create parameter samples plot
+        log.info("Creating parameter samples plot...")
+        if hasattr(samples, 'samples'):  # GetDist samples
+            sample_array = samples.samples
+            weights_array = samples.weights
+        else:  # Dictionary format
+            sample_array = samples['x']
+            weights_array = samples['weights']
+
+        plt.style.use('default')
+        # Enable LaTeX rendering for mathematical expressions
+        plt.rcParams['text.usetex'] = True 
+        plt.rcParams['font.family'] = 'serif'
+
+        param_list_CPL = ['w','wa','omch2','ombh2','H0','logA','ns','tau']
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            plot_params=param_list_CPL,
+            output_file=f'{likelihood.name}_cosmo',
+            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
+            reference_ignore_rows=0.0,
+            reference_label='PolyChord',
+            scatter_points=False
+        )
+
+
+        plot_final_samples(
+            gp, 
+            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
+            param_list=likelihood.param_list,
+            param_bounds=likelihood.param_bounds,
+            param_labels=likelihood.param_labels,
+            output_file=f'{likelihood.name}_full',
+            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
+            reference_ignore_rows=0.0,
+            reference_label='PolyChord',
+            scatter_points=False
+        )
+
 
         # Print detailed timing analysis
         log.info("\n" + "="*60)
@@ -148,75 +190,37 @@ def main():
         # plt.show()
 
         # Create individual timing plot
-        log.info("Creating detailed timing plot...")
-        fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
-        plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
-        ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
-        plt.tight_layout()
-        plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
+        # log.info("Creating detailed timing plot...")
+        # fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
+        # plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
+        # ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
+        # plt.tight_layout()
+        # plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
         # plt.show()
 
-        # Create evidence evolution plot if available
-        if comprehensive_results.get('logz_history'):
-            log.info("Creating evidence evolution plot...")
-            fig_evidence, ax_evidence = plt.subplots(1, 1, figsize=(10, 6))
-            plotter.plot_evidence_evolution(ax=ax_evidence)
-            ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
-            plt.tight_layout()
-            plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
-            # plt.show()
+        # # Create evidence evolution plot if available
+        # if comprehensive_results.get('logz_history'):
+        #     log.info("Creating evidence evolution plot...")
+        #     fig_evidence, ax_evidence = plt.subplots(1, 1, figsize=(10, 6))
+        #     plotter.plot_evidence_evolution(ax=ax_evidence)
+        #     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
+        #     plt.tight_layout()
+        #     plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
+        #     # plt.show()
 
-        # Create acquisition function evolution plot
-        log.info("Creating acquisition function evolution plot...")
-        acquisition_data = results['results_manager'].get_acquisition_data()
-        if acquisition_data and acquisition_data.get('iterations'):
-            fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
-            plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
-            ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
-            plt.tight_layout()
-            plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
-            # plt.show()
-        else:
-            log.info("No acquisition function data available for plotting.")
+        # # Create acquisition function evolution plot
+        # log.info("Creating acquisition function evolution plot...")
+        # acquisition_data = results['results_manager'].get_acquisition_data()
+        # if acquisition_data and acquisition_data.get('iterations'):
+        #     fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
+        #     plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
+        #     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
+        #     plt.tight_layout()
+        #     plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
+        #     # plt.show()
+        # else:
+        #     log.info("No acquisition function data available for plotting.")
 
-        # Create parameter samples plot
-        log.info("Creating parameter samples plot...")
-        if hasattr(samples, 'samples'):  # GetDist samples
-            sample_array = samples.samples
-            weights_array = samples.weights
-        else:  # Dictionary format
-            sample_array = samples['x']
-            weights_array = samples['weights']
-
-
-        param_list_CPL = ['w','wa','omch2','ombh2','H0','logA','ns','tau']
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            plot_params=param_list_CPL,
-            output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
-            scatter_points=False
-        )
-
-
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            output_file=f'{likelihood.name}_full',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
-            scatter_points=False
-        )
 
 if __name__ == "__main__":
     # Run the analysis

@@ -33,7 +33,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Camspec_{clf_type}_uniform_prior'
+    likelihood_name = f'Camspec_{clf_type}_saas_prior_logei_{n_log_ei_iters}'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -72,12 +72,12 @@ def main():
         mc_points_size=512,
         
         # GP settings
-        lengthscale_priors='uniform',
+        lengthscale_priors='SAAS',
         noise=1e-6,
         kernel='rbf',
 
         # resume
-        resume=False,
+        resume=True,
         resume_file=f'{likelihood_name}',
         
         # Classifier settings
@@ -123,7 +123,6 @@ def main():
             weights_array = samples['weights']
 
         plt.style.use('default')
-
         # Enable LaTeX rendering for mathematical expressions
         plt.rcParams['text.usetex'] = True 
         plt.rcParams['font.family'] = 'serif'

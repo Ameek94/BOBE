@@ -175,7 +175,7 @@ def nested_sampling_Dy(gp: GP
     upper = compute_integrals(logl=logl_upper,logvol=logvol)
     lower = compute_integrals(logl=logl_lower,logvol=logvol)
 
-    var = np.clip(var,a_min=1e-6,a_max=1e2)
+    var = np.clip(var,a_min=1e-8,a_max=1e6)
     varintegrand = 2*logl + np.log(var) #+ np.log1p(var)
     log_var_delta = compute_integrals(logl=varintegrand,logvol=logvol,squared=True)[-1]
     log_var_logz = log_var_delta - 2*mean 

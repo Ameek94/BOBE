@@ -886,7 +886,7 @@ class BOBESummaryPlotter:
         ])
         
         # Display formatted text
-        ax.text(0.25, 0.95, '\n'.join(stats_lines), transform=ax.transAxes, 
+        ax.text(0.1, 0.95, '\n'.join(stats_lines), transform=ax.transAxes, 
                fontsize=12*self.figsize_scale, verticalalignment='top',
                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.3))
         

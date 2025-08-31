@@ -345,7 +345,7 @@ class GP:
         init_params = jnp.log10(jnp.concatenate([self.lengthscales, jnp.array([self.kernel_variance])]))
         init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
         if n_restarts>1:
-            addn_init_params = init_params_u + np.random.normal(size=(n_restarts-1, init_params.shape[0]))
+            addn_init_params = init_params_u + 0.25*np.random.normal(size=(n_restarts-1, init_params.shape[0]))
             init_params_u = np.vstack([init_params_u, addn_init_params])
         x0 = jnp.clip(init_params_u, 0.0, 1.0)
         log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
