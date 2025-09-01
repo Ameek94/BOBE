@@ -4,8 +4,9 @@ import os
 from typing import Callable, Dict, List, Any, Union, Optional, Tuple
 import importlib
 import pickle
-import importlib
 import inspect
+from .logging_utils import get_logger
+log = get_logger(__name__)
 
 def create_worker_config(obj, include_class_path=True):
     """

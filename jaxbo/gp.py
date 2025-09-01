@@ -10,8 +10,6 @@ from .utils.core_utils import scale_to_unit, scale_from_unit
 jax.config.update("jax_enable_x64", True)
 import numpyro
 from numpyro.infer import MCMC, NUTS
-import numpyro.distributions as dist
-from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
@@ -19,14 +17,32 @@ from .utils.logging_utils import get_logger
 log = get_logger("gp")
 from .optim import optimize_optax, optimize_scipy
 from .utils.seed_utils import get_new_jax_key, get_numpy_rng
+import numpyro.distributions as dist
+
 
 safe_noise_floor = 1e-12
 
-# todo
-# 
 sqrt2 = sqrt(2.)
 sqrt3 = sqrt(3.)
 sqrt5 = sqrt(5.)
+
+def make_distribution(spec: dict) -> dist.Distribution:
+    """
+    Turn a dictionary specification into a NumPyro distribution.
+    
+    Example spec:
+    {"name": "Normal", "loc": 0.0, "scale": 1.0}
+    {"name": "Gamma", "concentration": 2.0, "rate": 1.0}
+    {"name": "LogNormal", "loc": 0.0, "scale": 1.0}
+    """
+    # Ensure distribution exists
+    dist_class = getattr(dist, spec["name"], None)
+    if dist_class is None:
+        raise ValueError(f"Distribution {spec['name']} not found in numpyro.distributions.")
+    
+    # Remove "name" and pass the rest as kwargs
+    kwargs = {k: v for k, v in spec.items() if k != "name"}
+    return dist_class(**kwargs)
 
 def dist_sq(x, y):
     """
@@ -72,18 +88,6 @@ def matern_kernel(xa,xb,lengthscales,kernel_variance,noise,include_noise=True):
     return k
 
 @jax.jit
-def get_var_from_cho(k11_cho,k12,k22):
-    vv = solve_triangular(k11_cho,k12,lower=True)
-    var = jnp.diag(k22) - jnp.sum(vv*vv,axis=0) # replace k22 computation with single element diagonal
-    return var
-    
-@jax.jit
-def get_mean_from_cho(k12,alphas):
-    mu = jnp.matmul(jnp.transpose(k12),alphas)
-    mean = mu.squeeze(-1)
-    return mean
-
-@jax.jit
 def gp_mll(k,train_y,num_points):
     """
     Computes the negative marginal log likelihood of the GP
@@ -113,29 +117,42 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
     return new_L
 
 class GP:
-    """
-    Base class for the GP with no hyperparameter priors.
-    """
-    hyperparam_priors: str = 'uniform'
-
-    def __init__(self,train_x,train_y,noise=1e-6,kernel="rbf"
-                 ,optimizer="optax",optimizer_kwargs={'lr': 5e-3, 'name': 'adam'}
-                 ,kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2]
-                 ,lengthscales=None,kernel_variance=None):
+    
+    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
+                 kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,kernel_variance=None,
+                 kernel_variance_prior=None, lengthscale_prior=None):
         """
+        Initializes the Gaussian Process model.
+
         Arguments
         ---------
-        train_x: jnp.ndarray
-            Training inputs, size (N x D)
-        train_y: jnp.ndarray
-            Objective function values at training points size (N x 1)
-        noise: float
-            Noise parameter to add to the diagonal of the kernel, default 1e-8
-        kernel: str
-            Kernel to use, either "rbf" or "matern"
+        train_x : jnp.ndarray
+            Training inputs, shape (N, D).
+        train_y : jnp.ndarray
+            Objective function values at training points, shape (N, 1).
+        noise : float, optional
+            Noise parameter added to the diagonal of the kernel. Defaults to 1e-8.
+        kernel : str, optional
+            Kernel to use, either "rbf" or "matern". Defaults to "rbf".
+        optimizer : str, optional
+            Optimizer to use for hyperparameter tuning. Defaults to "optax".
+        optimizer_kwargs : dict, optional
+            Keyword arguments for the optimizer. Defaults to {'lr': 1e-3, 'name': 'adam'}.
+        kernel_variance_bounds : list, optional
+            Bounds for the kernel variance (in log10 space). Defaults to [-4, 8].
+        lengthscale_bounds : list, optional
+            Bounds for the lengthscales (in log10 space). Defaults to [log10(0.05), 2].
+        lengthscales : jnp.ndarray, optional
+            Initial lengthscale values. If None, defaults to ones. Defaults to None.
+        kernel_variance : float, optional
+            Initial kernel variance. If None, defaults to 1.0. Defaults to None.
+        kernel_variance_prior : dict, optional
+            Specification for the kernel variance prior. 
+            If None, defaults to `{'name': 'LogNormal', 'loc': 0.0, 'scale': 0.5}`. Defaults to None.
+        lengthscale_prior : str or dict, optional
+            Specification for the lengthscale prior. 
+            If 'DSLP' or None, uses the DSLP prior. Otherwise, uses the provided distribution spec. Defaults to None.
         """
-        self.train_x = train_x
-        self.train_y = train_y
         # check x and y sizes
         if train_x.shape[0] != train_y.shape[0]:
             raise ValueError("train_x and train_y must have the same number of points")
@@ -149,30 +166,102 @@ class GP:
         self.ndim = train_x.shape[1]
         self.y_mean = jnp.mean(train_y)
         self.y_std = jnp.std(train_y)
+        self.train_x = train_x
+        self.train_y = (train_y - self.y_mean) / self.y_std
+
         self.kernel_name = kernel if kernel=="rbf" else "matern"
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
+        self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
+        self.kernel_variance = kernel_variance if kernel_variance is not None else 1.0
         self.noise = noise
+        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+        self.L = jnp.linalg.cholesky(K)
+        self.alphas = cho_solve((self.L, True), self.train_y)
+
         self.optimizer_method = optimizer
-        self.optimizer_kwargs = optimizer_kwargs
-        if optimizer == 'scipy':
+        if optimizer == "scipy":
             self.mll_optimize = optimize_scipy
         else:
             self.mll_optimize = optimize_optax
+        self.optimizer_kwargs = optimizer_kwargs
+        
+        self.kernel_variance_prior_spec = kernel_variance_prior
+        if self.kernel_variance_prior_spec is None:
+            self.kernel_variance_prior_spec = {'name': 'LogNormal', 'loc': 0.0, 'scale': 0.5}
+        self.kernel_variance_prior_dist = make_distribution(self.kernel_variance_prior_spec)
+           
+        self.lengthscale_prior_spec = lengthscale_prior
+        if self.lengthscale_prior_spec is None:
+            self.lengthscale_prior_spec = 'DSLP'
 
-        log.debug(f"GP y_mean: {self.y_mean:.4f}, y_std: {self.y_std:.4f}, noise: {self.noise:.2e}")
+        if self.lengthscale_prior_spec == 'DSLP':
+            self.lengthscale_prior_dist = dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(self.ndim), scale=sqrt3)
+        else:
+            self.lengthscale_prior_dist = make_distribution(self.lengthscale_prior_spec)
 
-        self.train_y = (train_y - self.y_mean) / self.y_std
-        self.lengthscales = jnp.ones(self.ndim) if lengthscales is None else jnp.array(lengthscales)
-        self.kernel_variance = 1. if kernel_variance is None else kernel_variance
         self.lengthscale_bounds = lengthscale_bounds
         self.kernel_variance_bounds = kernel_variance_bounds
         self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.kernel_variance_bounds]
         self.hyperparam_bounds = jnp.array(self.hyperparam_bounds).T # shape (2, D+1)
         log.debug(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
 
-        self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True))
+    def neg_mll(self,log10_params):
+        """
+        Computes the negative log marginal likelihood for the GP with given hyperparameters.
+        """
+        hyperparams = 10**log10_params
+        lengthscales = hyperparams[0:-1]
+        kernel_variance = hyperparams[-1]
+        K = self.kernel(self.train_x, self.train_x, lengthscales, kernel_variance, noise=self.noise, include_noise=True)
+        cholesky = jax.scipy.linalg.cho_factor(K, lower=True)
+        log_det_K = 2 * jnp.sum(jnp.log(jnp.diag(cholesky[0])))
+        mll = -0.5 * self.train_y.T @ jax.scipy.linalg.cho_solve(cholesky, self.train_y) - 0.5 * log_det_K - 0.5 * self.npoints * jnp.log(2 * jnp.pi)
+        
+        logprior = 0.0
+        logprior += self.kernel_variance_prior_dist.log_prob(kernel_variance)
+        logprior += self.lengthscale_prior_dist.log_prob(lengthscales).sum()
+
+        return -mll + logprior
+
+    def fit(self, maxiter=200,n_restarts=4):
+        """ 
+        Fits the GP using maximum likelihood hyperparameters with the chosen optimizer.
+
+        Arguments
+        ---------
+        maxiter: int
+            The maximum number of iterations for the optimizer. Default is 200.
+        n_restarts: int
+            The number of restarts for the optimizer. Default is 4.
+        """
+        init_params = jnp.log10(jnp.concatenate([self.lengthscales, jnp.array([self.kernel_variance])]))
+        init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
+        if n_restarts>1:
+            addn_init_params = init_params_u + 0.25*np.random.normal(size=(n_restarts-1, init_params.shape[0]))
+            init_params_u = np.vstack([init_params_u, addn_init_params])
+        x0 = jnp.clip(init_params_u, 0.0, 1.0)
+        log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
+
+        optimizer_kwargs = self.optimizer_kwargs.copy()
+
+        best_params, best_f = self.mll_optimize(
+            fun=self.neg_mll,
+            ndim=self.ndim + 1,
+            bounds=self.hyperparam_bounds,
+            x0=x0,
+            maxiter=maxiter,
+            n_restarts=n_restarts,
+            optimizer_kwargs=optimizer_kwargs
+        )
+
+        hyperparams = 10 ** best_params
+        self.lengthscales = hyperparams[:-1]
+        self.kernel_variance = hyperparams[-1]
+        log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, final MLL = {-best_f}")
+
+        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+        self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
-        self.fitted = True
 
     def predict_mean_single(self,x):
         """
@@ -200,25 +289,6 @@ class GP:
         x = jnp.atleast_2d(x)
         return jax.vmap(self.predict_var_single, in_axes=0)(x)
 
-    def predict_mean(self,x):
-        """
-        Predicts the mean of the GP at x and unstandardizes it
-        """
-        x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False)
-        mean = get_mean_from_cho(k12,self.alphas) 
-        return mean*self.y_std + self.y_mean 
-
-    def predict_var(self,x):
-        """
-        Predicts the variance of the GP at x and unstandardizes it
-        """
-        x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False)
-        k22 = self.kernel(x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=True)
-        var = jnp.clip(get_var_from_cho(self.cholesky,k12,k22), safe_noise_floor, None)
-        return var*self.y_std**2
-
     def predict_single(self,x):
         """
         Predicts the mean and variance of the GP at x but does not unstandardize it. To use with EI and the like.
@@ -236,7 +306,7 @@ class GP:
         x = jnp.atleast_2d(x)
         return jax.vmap(self.predict_single, in_axes=0,out_axes=(0,0))(x)
 
-    def update(self,new_x,new_y,refit=True,maxiter=300,n_restarts=4):
+    def update(self,new_x,new_y,refit=True,maxiter=200,n_restarts=4):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 
@@ -282,12 +352,109 @@ class GP:
         new_x = jnp.atleast_2d(new_x)
         new_y = jnp.atleast_2d(new_y)
         self.train_x = jnp.concatenate([self.train_x,new_x])
-        self.train_y = self.train_y*self.y_std + self.y_mean 
-        self.train_y = jnp.concatenate([self.train_y,new_y])
-        self.y_mean = jnp.mean(self.train_y.flatten(),axis=0)
-        self.y_std = jnp.std(self.train_y.flatten(),axis=0)
-        self.train_y = (self.train_y - self.y_mean) / self.y_std
+        new_y_scaled = (new_y - self.y_mean) / self.y_std
+        self.train_y = jnp.concatenate([self.train_y, new_y_scaled])
+        return False
 
+    def __getstate__(self):
+        """
+        Custom getstate method to pickle the GP object.
+        """
+        state = self.__dict__.copy()
+        # Remove unpicklable attributes
+        state.pop("cholesky", None)
+        state.pop("alphas", None)
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom setstate method to unpickle the GP object.
+        """
+        self.__dict__.update(state)
+        # Recompute cholesky and alphas
+        self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True))
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
+
+    @classmethod
+    def load(cls, filename, **kwargs):
+        """
+        Loads a GP from a file
+        
+        Arguments
+        ---------
+        filename: str
+            The name of the file to load the GP from (with or without .npz extension)
+        **kwargs: 
+            Additional keyword arguments to pass to the GP constructor
+            
+        Returns
+        -------
+        gp: GP
+            The loaded GP object
+        """
+        if not filename.endswith('.npz'):
+            filename += '.npz'
+            
+        try:
+            data = np.load(filename)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find file {filename}")
+        
+        init_kwargs = {
+            'train_x': jnp.array(data['train_x']),
+            'train_y': jnp.array(data['train_y']),
+            'noise': float(data['noise']),
+            'kernel': str(data['kernel']),
+            'optimizer': str(data['optimizer']),
+            'kernel_variance_bounds': jnp.array(data['kernel_variance_bounds']),
+            'lengthscale_bounds': jnp.array(data['lengthscale_bounds']),
+            'lengthscales': jnp.array(data['lengthscales']),
+            'kernel_variance': float(data['kernel_variance']),
+        }
+        if 'kernel_variance_prior' in data.files and data['kernel_variance_prior'] is not None:
+            init_kwargs['kernel_variance_prior'] = data['kernel_variance_prior'].item()
+        if 'lengthscale_prior' in data.files and data['lengthscale_prior'] is not None:
+            init_kwargs['lengthscale_prior'] = data['lengthscale_prior'].item()
+
+        init_kwargs.update(kwargs)
+        gp = cls(**init_kwargs)
+        
+        if 'cholesky' in data.files:
+            gp.cholesky = jnp.array(data['cholesky'])
+            gp.alphas = cho_solve((gp.cholesky, True), gp.train_y)
+
+        log.info(f"Loaded GP from {filename} with {gp.train_x.shape[0]} training points")
+        return gp
+
+    def save(self,outfile='gp'):
+        """
+        Saves the GP to a file
+
+        Arguments
+        ---------
+        outfile: str
+            The name of the file to save the GP to. Default is 'gp'.
+        """
+        save_dict = {
+            'train_x': self.train_x,
+            'train_y': self.train_y * self.y_std + self.y_mean, # unstandardize
+            'noise': self.noise,
+            'kernel': self.kernel_name,
+            'optimizer': self.optimizer_method,
+            'kernel_variance_bounds': self.kernel_variance_bounds,
+            'lengthscale_bounds': self.lengthscale_bounds,
+            'lengthscales': self.lengthscales,
+            'kernel_variance': self.kernel_variance,
+            'y_mean': self.y_mean,
+            'y_std': self.y_std,
+            'kernel_variance_prior': self.kernel_variance_prior_spec,
+            'lengthscale_prior': self.lengthscale_prior_spec,
+        }
+        save_dict['cholesky'] = self.cholesky
+        save_dict['alphas'] = self.alphas
+
+        np.savez(f'{outfile}.npz', **save_dict)
+        log.info(f"Saved GP to {outfile}.npz")
 
     def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
@@ -323,250 +490,18 @@ class GP:
         y = self.train_y*self.y_std + self.y_mean 
         return x,y
 
-    def neg_mll(self,log10_params):
-        hyperparams = 10**log10_params
-        lengthscales = hyperparams[0:-1]
-        kernel_variance = hyperparams[-1]
-        k = self.kernel(self.train_x,self.train_x,lengthscales,kernel_variance,noise=self.noise,include_noise=True)
-        val = gp_mll(k,self.train_y,self.train_y.shape[0])
-        return -val
-
-    def fit(self, maxiter=200,n_restarts=4):
-        """ 
-        Fits the GP using maximum likelihood hyperparameters with the chosen optimizer.
-
-        Arguments
-        ---------
-        maxiter: int
-            The maximum number of iterations for the optimizer. Default is 200.
-        n_restarts: int
-            The number of restarts for the optimizer. Default is 4.
-        """
-        init_params = jnp.log10(jnp.concatenate([self.lengthscales, jnp.array([self.kernel_variance])]))
-        init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
-        if n_restarts>1:
-            addn_init_params = init_params_u + 0.25*np.random.normal(size=(n_restarts-1, init_params.shape[0]))
-            init_params_u = np.vstack([init_params_u, addn_init_params])
-        x0 = jnp.clip(init_params_u, 0.0, 1.0)
-        log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
-
-        optimizer_kwargs = self.optimizer_kwargs.copy()
-
-        best_params, best_f = self.mll_optimize(
-            fun=self.neg_mll,
-            ndim=self.ndim + 1,
-            bounds=self.hyperparam_bounds,
-            x0=x0,
-            maxiter=maxiter,
-            n_restarts=n_restarts,
-            optimizer_kwargs=optimizer_kwargs
-        )
-
-        hyperparams = 10 ** best_params
-        self.lengthscales = hyperparams[:-1]
-        self.kernel_variance = hyperparams[-1]
-        log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, final MLL = {-best_f}")
-
-        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-        self.cholesky = jnp.linalg.cholesky(K)
-        self.alphas = cho_solve((self.cholesky, True), self.train_y)
-        self.fitted = True
-
-    def _single_fit(self,x0):
-        """
-        Fits the GP model to a single set of hyperparameters.
-        """
-        # log.info(f"Fitting GP with initial params: {x0}")
-        result = self.mll_optimize(
-            fun=self.neg_mll,
-            ndim=self.ndim + 1,
-            bounds=self.hyperparam_bounds,
-            x0=x0,
-            maxiter=200,
-            n_restarts=1,
-            optimizer_kwargs=self.optimizer_kwargs
-        )
-        return result
-
-    def get_current_state(self):
-        """
-        Get the current state of the GP model.
-        """
-        state_dict = {
-            "train_x": self.train_x,
-            "train_y": self.train_y,
-            "lengthscales": self.lengthscales,
-            "kernel_variance": self.kernel_variance,
-            "cholesky": self.cholesky,
-            "alphas": self.alphas
-        }
-        return state_dict
-
-    def update_state(self,state_dict):
-        """
-        Update the current state of the GP model.
-        """
-        self.train_x = state_dict.get("train_x", self.train_x)
-        self.train_y = state_dict.get("train_y", self.train_y)
-        self.lengthscales = state_dict.get("lengthscales", self.lengthscales)
-        self.kernel_variance = state_dict.get("kernel_variance", self.kernel_variance)
-        self.cholesky = state_dict.get("cholesky", self.cholesky)
-        self.alphas = state_dict.get("alphas", self.alphas)        
-
-    def save(self,outfile='gp'):
-        """
-        Saves the GP to a file
-        """
-        train_y = self.train_y * self.y_std + self.y_mean  # unstandardize the training targets
-        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=train_y,noise=self.noise,
-         lengthscales=self.lengthscales,kernel_variance=self.kernel_variance,hyperparam_priors=self.hyperparam_priors)
-
-    @classmethod
-    def load(cls, filename, **kwargs):
-        """
-        Loads a GP from a file
-        
-        Arguments
-        ---------
-        filename: str
-            The name of the file to load the GP from (with or without .npz extension)
-        **kwargs: 
-            Additional keyword arguments to pass to the GP constructor
-            
-        Returns
-        -------
-        gp: GP
-            The loaded GP object
-        """
-        if not filename.endswith('.npz'):
-            filename += '.npz'
-            
-        try:
-            data = np.load(filename)
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Could not find file {filename}")
-        
-        # Extract data from the file
-        train_x = jnp.array(data['train_x'])
-        train_y = jnp.array(data['train_y'])  # This is unstandardized
-        noise = float(data['noise'])
-        lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
-        kernel_variance = float(data['kernel_variance']) if 'kernel_variance' in data.files else None
-        optimizer = str(data['optimizer']) if 'optimizer' in data.files else "optax"
-        optimizer_kwargs = dict(data['optimizer_kwargs']) if 'optimizer_kwargs' in data.files else {"name": "adam", "lr": 1e-3}
-        # Create GP instance - it will automatically standardize train_y and compute cholesky/alphas
-        gp = cls(train_x=train_x, train_y=train_y, noise=noise, 
-                lengthscales=lengthscales, kernel_variance=kernel_variance, optimizer=optimizer, optimizer_kwargs=optimizer_kwargs, **kwargs)
-
-        log.info(f"Loaded GP from {filename} with {train_x.shape[0]} training points")
-        return gp
-
-    def get_random_point(self,rng=None):
-
-
-        rng = rng if rng is not None else get_numpy_rng()
-
-        pt = rng.uniform(0, 1, size=self.train_x.shape[1])
-
-        return pt
-
-    def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
-                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=2, np_rng=None, rng_key=None):
-
-        """
-        Obtain samples from the posterior represented by the GP mean as the logprob.
-        Optionally restarts MCMC if all logp values are the same or if HMC fails.
-        """        
-
-        rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
-        prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1., 2.) ** 2
-        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        log.info(f"Running MCMC chains with temperature {temp:.4f}")
-
-        def model():
-            x = numpyro.sample('x', dist.Uniform(
-                low=jnp.zeros(self.train_x.shape[1]),
-                high=jnp.ones(self.train_x.shape[1])
-            ))
-
-            mean = self.predict_mean_batched(x)
-            numpyro.factor('y', mean/temp)
-            numpyro.deterministic('logp', mean)
-
-        @jax.jit
-        def run_single_chain(rng_key):
-                kernel = NUTS(model, dense_mass=False, max_tree_depth=5,)
-                mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
-                        num_chains=1, progress_bar=False, thinning=thinning)
-                mcmc.run(rng_key)
-                samples_x = mcmc.get_samples()['x']
-                logps = mcmc.get_samples()['logp']
-                return samples_x,logps
-
-
-        num_devices = jax.device_count()
-        # num_parallel_chains = min(num_devices,num_chains)
-
-        rng_key = rng_key if rng_key is not None else get_new_jax_key()
-        rng_keys = jax.random.split(rng_key, num_chains)
-
-        log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
-
-        if (num_devices >= num_chains) and num_chains > 1:
-            # if devices present run with pmap
-            pmapped = jax.pmap(run_single_chain, in_axes=(0,),out_axes=(0,0))
-            samples_x, logps = pmapped(rng_keys)
-            # reshape to get proper shapes
-            samples_x = jnp.concatenate(samples_x, axis=0)
-            logps = jnp.reshape(logps, (samples_x.shape[0],))
-            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
-        else:
-            # run sequentially
-            samples_x = []
-            logps = []
-            for i in range(num_chains):
-                samples_x_i, logps_i = run_single_chain(rng_keys[i])
-                samples_x.append(samples_x_i)
-                logps.append(logps_i)
-
-            samples_x = jnp.concatenate(samples_x)
-            logps = jnp.concatenate(logps)
-
-        samples_dict = {
-            'x': samples_x,
-            'logp': logps,
-            'best': samples_x[jnp.argmax(logps)],
-            'method': "MCMC"
-        }
-
-        return samples_dict
-    
     def copy(self):
         """
-        Returns a deep copy of the GP with the same training data, hyperparameters,
-        and fitted state. The copy is independent: modifications to the new GP do 
-        not affect the original.
+        Returns a copy of the GP
         """
-        train_y= self.train_y * self.y_std + self.y_mean
+        new_gp = GP(self.train_x, self.train_y, self.noise, self.kernel_name, self.optimizer_method,
+                    self.optimizer_kwargs, self.kernel_variance_bounds, self.lengthscale_bounds,
+                    self.lengthscales, self.kernel_variance,
+                    self.kernel_variance_prior_spec, self.lengthscale_prior_spec)
+        new_gp.cholesky = self.cholesky
+        new_gp.alphas = self.alphas
 
-        gp_copy = GP(
-            train_x=self.train_x,
-            train_y=train_y,
-            noise=float(self.noise),
-            kernel=self.kernel_name,
-            optimizer="adam",  # or pass through if you extend GP further
-            kernel_variance_bounds=self.kernel_variance_bounds,
-            lengthscale_bounds=self.lengthscale_bounds,
-            lengthscales=jnp.array(self.lengthscales, copy=True),
-            kernel_variance=float(self.kernel_variance)
-        )
-
-        gp_copy.alphas = jnp.array(self.alphas, copy=True)
-        gp_copy.cholesky = jnp.array(self.cholesky, copy=True)
-        gp_copy.fitted = self.fitted
-
-        return gp_copy
+        return new_gp
 
     @property
     def hyperparams(self):
@@ -580,246 +515,4 @@ class GP:
     
     @property
     def npoints(self):
-        """
-        Returns the number of training points.
-        """
         return self.train_x.shape[0]
-    
-
-    
-
-
-class DSLP_GP(GP):
-
-    hyperparam_priors: str = 'dslp'
-
-    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
-                 kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,kernel_variance=None):
-        """
-        Class for the Gaussian Process, single output based on maximum likelihood hyperparameters.
-        Uses the dimension scaled lengthscale priors from the paper "Vanilla Bayesian Optimization Performs Great in High Dimensions" (2024),
-        by Hvarfner, Carl and Hellsten, Erik Orm and Nardi, Luigi
-
-        Arguments
-        ---------
-        train_x: JAX array of training points, shape (n_samples, n_features)
-            The initial training points for the GP.
-        train_y: JAX array of training values, shape (n_samples,)
-            The initial training values for the GP.
-        noise: Scalar noise level for the GP
-            Default is 1e-8. This is the noise level for the GP.
-        kernel: Kernel type for the GP
-            Default is 'rbf'. This is the kernel type for the GP. Can be 'rbf' or 'matern'.
-        optimizer: Optimizer type for the GP
-            Default is 'adam'. This is the optimizer type for the GP.
-        kernel_variance_bounds: Bounds for the kernel variance of the GP (in log10 space) 
-            Default is [-4,4]. These are the bounds for the kernel variance of the GP.
-        lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
-            Default is [np.log10(0.05),2]. These are the boundsfor the length scale of the GP.
-        """
-        super().__init__(train_x,train_y,noise,kernel,optimizer,optimizer_kwargs,
-                         kernel_variance_bounds,lengthscale_bounds,lengthscales=lengthscales,kernel_variance=kernel_variance)
-
-    def neg_mll(self,log10_params):
-        hyperparams = 10**log10_params
-        lengthscales = hyperparams[0:-1]
-        kernel_variance = hyperparams[-1]
-        logprior = dist.LogNormal(0.,0.5).log_prob(kernel_variance) #
-        # logprior = dist.Gamma(2.0,0.15).log_prob(kernel_variance)
-        logprior+= dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(self.ndim) ,scale=sqrt3).expand([self.ndim]).log_prob(lengthscales).sum()
-        return super().neg_mll(log10_params) - logprior   
-
-class SAAS_GP(GP):
-
-    hyperparam_priors: str = 'saas'
-
-    def __init__(self,
-                 train_x, train_y, noise=1e-8, kernel="rbf", 
-                 optimizer="adam",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
-                 kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2],
-                 tausq_bounds = [-4,4],lengthscales=None,kernel_variance=None,tausq=None):
-        """
-        Class for the Gaussian Process with SAAS priors, using maximum likelihood hyperparameters. 
-        The implementation is based on the paper "High-Dimensional Bayesian Optimization with Sparse Axis-Aligned Subspaces", 2021
-        by David Eriksson and Martin Jankowiak.
-        Arguments
-        ---------
-        train_x: JAX array of training points, shape (n_samples, n_features)
-            The initial training points for the GP.
-        train_y: JAX array of training values, shape (n_samples,)
-            The initial training values for the GP.
-        noise: Scalar noise level for the GP
-            Default is 1e-8. This is the noise level for the GP.
-        kernel: Kernel type for the GP
-            Default is 'rbf'. This is the kernel type for the GP. Can be 'rbf' or 'matern'.
-        optimizer: Optimizer type for the GP
-            Default is 'adam'. This is the optimizer type for the GP.
-        kernel_variance_bounds: Bounds for the kernel variance of the GP (in log10 space) 
-            Default is [-4,4]. These are the bounds for the kernel variance of the GP.
-        lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
-            Default is [np.log10(0.05),2]. These are the bounds for the length scale of the GP.
-        tausq_bounds: Bounds for the tausq parameter of the GP (in log10 space)
-            Default is [-4,4]. These are the bounds for the tausq parameter of the GP.
-        """
-        super().__init__(train_x, train_y, noise, kernel, optimizer,optimizer_kwargs,kernel_variance_bounds,lengthscale_bounds,lengthscales=lengthscales,kernel_variance=kernel_variance)
-        self.tausq = tausq if tausq is not None else 1.0
-        self.tausq_bounds = jnp.array(tausq_bounds)
-        self.hyperparam_bounds = jnp.vstack([self.hyperparam_bounds.T, self.tausq_bounds]).T # shape (2, D+2)
-        print(f'HP bounds shape: {self.hyperparam_bounds.shape}')
-
-    def neg_mll(self, log10_params):
-        hyperparams = 10**log10_params
-        lengthscales = hyperparams[:self.ndim]
-        kernel_variance = hyperparams[self.ndim]
-        tausq = hyperparams[-1]
-        logprior = dist.LogNormal(0.,1.).log_prob(kernel_variance)
-        # logprior = dist.Gamma(2.0,0.15).log_prob(kernel_variance)
-        logprior+= dist.HalfCauchy(0.1).log_prob(tausq)
-        inv_lengthscales_sq = 1/ (tausq * lengthscales**2)
-        logprior+= jnp.sum(dist.HalfCauchy(1.).log_prob(inv_lengthscales_sq))
-        return super().neg_mll(log10_params[:-1]) - logprior
-
-    def fit(self, maxiter=200,n_restarts=4):
-        """ 
-        Fits the GP using maximum likelihood hyperparameters with the chosen optimizer.
-
-        Arguments
-        ---------
-        maxiter: int
-            The maximum number of iterations for the optimizer. Default is 200.
-        n_restarts: int
-            The number of restarts for the optimizer. Default is 4.
-        """
-        init_params = jnp.log10(jnp.concatenate([self.lengthscales  , jnp.array([self.kernel_variance, self.tausq])]))
-        init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
-        if n_restarts>1:
-            addn_init_params = init_params_u + np.random.normal(size=(n_restarts-1, init_params.shape[0]))
-            init_params_u = np.vstack([init_params_u, addn_init_params])
-        x0 = jnp.clip(init_params_u, 0.0, 1.0)
-        log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}")
-
-        optimizer_kwargs = self.optimizer_kwargs.copy()
-
-        best_params, best_f = self.mll_optimize(
-            fun=self.neg_mll,
-            ndim=self.ndim + 2,
-            bounds=self.hyperparam_bounds,
-            x0=x0,
-            maxiter=maxiter,
-            n_restarts=n_restarts,
-            optimizer_kwargs=optimizer_kwargs
-        )
-
-        hyperparams = 10 ** best_params
-        self.lengthscales = hyperparams[:self.ndim]
-        self.kernel_variance = hyperparams[self.ndim]
-        self.tausq = hyperparams[-1]
-        log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}, final MLL = {-best_f}")
-        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-        self.cholesky = jnp.linalg.cholesky(K)
-        self.alphas = cho_solve((self.cholesky, True), self.train_y)
-        self.fitted = True
-
-
-
-    @classmethod
-    def load(cls, filename, **kwargs):
-        """
-        Loads a SAAS_GP from a file
-        
-        Arguments
-        ---------
-        filename: str
-            The name of the file to load the GP from (with or without .npz extension)
-        **kwargs: 
-            Additional keyword arguments to pass to the GP constructor
-            
-        Returns
-        -------
-        gp: SAAS_GP
-            The loaded SAAS_GP object
-        """
-        if not filename.endswith('.npz'):
-            filename += '.npz'
-            
-        try:
-            data = np.load(filename)
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Could not find file {filename}")
-        
-        # Extract data from the file
-        train_x = jnp.array(data['train_x'])
-        train_y = jnp.array(data['train_y'])  # This is unstandardized
-        noise = float(data['noise'])
-        lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
-        kernel_variance = float(data['kernel_variance']) if 'kernel_variance' in data.files else None
-        tausq = float(data['tausq']) if 'tausq' in data.files else None
-        
-        # Create SAAS_GP instance - it will automatically standardize train_y and compute cholesky/alphas
-        gp = cls(train_x=train_x, train_y=train_y, noise=noise, 
-                lengthscales=lengthscales, kernel_variance=kernel_variance, tausq=tausq, **kwargs)
-        
-        log.info(f"Loaded SAAS_GP from {filename} with {train_x.shape[0]} training points")
-        return gp
-
-def load_gp(filename, gp_type="auto", **kwargs):
-    """
-    Utility function to load a GP from a file, automatically detecting the GP type if not specified
-    
-    Arguments
-    ---------
-    filename: str
-        The name of the file to load the GP from (with or without .npz extension)
-    gp_type: str
-        The type of GP to create. Can be 'auto', 'GP', 'DSLP', 'SAAS'. If 'auto', attempts to detect
-        the type based on the saved parameters. Default is 'auto'.
-    **kwargs: 
-        Additional keyword arguments to pass to the GP constructor
-        
-    Returns
-    -------
-    gp: GP
-        The loaded GP object (GP, DSLP_GP, or SAAS_GP)
-    """
-    if not filename.endswith('.npz'):
-        filename += '.npz'
-        
-    try:
-        data = np.load(filename)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Could not find file {filename}")
-    
-    if gp_type == "auto":
-        # Try to detect GP type based on saved parameters
-        if 'hyperparam_priors' in data.files:
-            hyperparam_priors = str(data['hyperparam_priors'].item()).lower()
-            if hyperparam_priors == 'saas':
-                gp_type = "SAAS"
-                log.info("Auto-detected SAAS_GP from hyperparam_priors")
-            elif hyperparam_priors == 'dslp':
-                gp_type = "DSLP"
-                log.info("Auto-detected DSLP_GP from hyperparam_priors")
-            elif hyperparam_priors == 'uniform':
-                gp_type = "GP"
-                log.info("Auto-detected GP (uniform priors) from hyperparam_priors")
-            else:
-                gp_type = "GP"
-                log.info(f"Unknown hyperparam_priors '{hyperparam_priors}', defaulting to GP")
-        elif 'tausq' in data.files:
-            # Fallback: if tausq exists but no hyperparam_priors, assume SAAS
-            gp_type = "SAAS"
-            log.info("Auto-detected SAAS_GP from presence of tausq parameter")
-        else:
-            # Fallback: no clear indicators, default to DSLP for backward compatibility
-            gp_type = "DSLP" 
-            log.info("No clear indicators, defaulting to DSLP_GP for backward compatibility")
-    
-    if gp_type.upper() == "GP":
-        return GP.load(filename, **kwargs)
-    elif gp_type.upper() == "DSLP":
-        return DSLP_GP.load(filename, **kwargs)
-    elif gp_type.upper() == "SAAS":
-        return SAAS_GP.load(filename, **kwargs)
-    else:
-        raise ValueError(f"Unknown GP type: {gp_type}. Must be 'GP', 'DSLP', 'SAAS', or 'auto'")
-       
