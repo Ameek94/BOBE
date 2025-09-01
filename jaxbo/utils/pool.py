@@ -96,7 +96,10 @@ class MPI_Pool:
             if self.is_worker:
                 self._worker_loop()
                 sys.exit(0)  # Workers exit after loop
-                
+            
+            if self.size == 1:
+                self.worker_state = WorkerState()
+
             self.print(f"Initialized MPI_Pool with {self.size} processes")
             
         except ImportError:
@@ -141,18 +144,11 @@ class MPI_Pool:
                 
             self.worker_state.initialized = True
             
-    def run_map(self, func, items, **kwargs):
-        """Run a map operation in parallel or serial"""
+    def run_map(self, items: List, **kwargs) -> Optional[np.ndarray]:
+        """Run a map operation for objective evaluation in parallel or serial"""
         if self.is_worker:
             return None
-            
-        # For backward compatibility, treat this as objective evaluation
-        if callable(func):
-            # This is the old-style call where func is passed directly
-            return self._map_objective_evaluation(items, **kwargs)
-        else:
-            # Error - shouldn't reach here with new implementation
-            raise ValueError("Invalid function passed to run_map. Use specialized methods instead.")
+        return self._map_objective_evaluation(items, **kwargs)
             
     def _map_objective_evaluation(self, points, batch_size=1):
         """Map objective evaluation across workers or run locally"""

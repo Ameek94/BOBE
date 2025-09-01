@@ -582,18 +582,6 @@ class GPwithClassifier(GP):
         log.info(f"Max logl found = {np.max(logps):.4f}")
         return samples_dict
 
-    # def reset_threshold_points(self):
-    #     """
-    #     Resets the GP training data based on the current `gp_threshold`.
-
-    #     This method is intended to be called periodically to prune the GP training set,
-    #     keeping only the points near the current maximum.
-    #     Note: This method is not fully implemented after a recent refactoring.
-    #     """
-    #     full_size = self.train_x_clf.shape[0]
-    #     if full_size > 0 and full_size % 100 == 0:
-    #         log.warning("reset_threshold_points is not fully implemented after refactoring. The method `reset_train_data` does not exist in the base GP class.")
-
     def copy(self):
         """
         Creates a deep copy of the GPwithClassifier instance.

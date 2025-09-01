@@ -40,7 +40,7 @@ def make_distribution(spec: dict) -> dist.Distribution:
     if dist_class is None:
         raise ValueError(f"Distribution {spec['name']} not found in numpyro.distributions.")
     
-    # Remove "name" and pass the rest as kwargs
+    # Remove "name"
     kwargs = {k: v for k, v in spec.items() if k != "name"}
     return dist_class(**kwargs)
 
@@ -161,13 +161,13 @@ class GP:
         if train_x.ndim != 2:
             raise ValueError("train_x must be 2D")
         
-        log.debug(f"GP training size = {self.train_x.shape[0]}")
 
         self.ndim = train_x.shape[1]
         self.y_mean = jnp.mean(train_y)
         self.y_std = jnp.std(train_y)
         self.train_x = train_x
         self.train_y = (train_y - self.y_mean) / self.y_std
+        log.debug(f"GP training size = {self.train_x.shape[0]}")
 
         self.kernel_name = kernel if kernel=="rbf" else "matern"
         self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
