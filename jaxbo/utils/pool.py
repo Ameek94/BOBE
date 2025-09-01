@@ -1,169 +1,412 @@
-from __future__ import annotations
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import atexit
 import numpy as np
 import sys
-import time
-from .logging_utils import get_logger
-log = get_logger("pool")
+import os
+from typing import Callable, Dict, List, Any, Union, Optional, Tuple
+import importlib
+import pickle
+import importlib
+import inspect
 
-# A reusable module for MPI-based or serial task parallelism. 
-# In BOBE, this is used to evaluate the likelihood in parallel for a batch of candidate points. Useful for slow likelihoods (t>1s)
+def create_worker_config(obj, include_class_path=True):
+    """
+    Create a serializable configuration dictionary from an object
+    
+    Args:
+        obj: The object to serialize
+        include_class_path: Whether to include the class path
+        
+    Returns:
+        Dict containing class path and parameters
+    """
+    config = {}
+    
+    if include_class_path:
+        # Get the full class path
+        cls = obj.__class__
+        module_name = cls.__module__
+        class_name = cls.__name__
+        config['class_path'] = f"{module_name}.{class_name}"
+    
+    # Extract constructor parameters
+    params = {}
+    signature = inspect.signature(obj.__class__.__init__)
+    
+    for param_name in signature.parameters:
+        if param_name != 'self' and hasattr(obj, param_name):
+            params[param_name] = getattr(obj, param_name)
+    
+    config['params'] = params
+    return config
 
-# To implement in the future: modify to run more operations in parallel, most importantly gp fitting, maybe acquisition optimisations and possibly MCMC/Nested sampling.
+def get_likelihood_config(likelihood):
+    """Create serializable configuration for likelihood object"""
+    config = create_worker_config(likelihood)
+    
+    # Special handling for any non-serializable parts
+    if 'external_function' in config['params']:
+        del config['params']['external_function']
+        
+    return config
 
-try:
-    from mpi4py import MPI
-    IS_MPI_AVAILABLE = True
-except ImportError:
-    MPI = None
-    IS_MPI_AVAILABLE = False
+def get_gp_config(gp):
+    """Create serializable configuration for GP object"""
+    config = create_worker_config(gp)
+    
+    # Special handling for GP parameters that need custom serialization
+    # For example, kernel configuration, etc.
+    
+    return config
+
+class WorkerState:
+    """Class to hold worker state data that persists across calls"""
+    def __init__(self):
+        self.loglikelihood = None
+        self.gp = None
+        self.acquisition = None
+        self.initialized = False
+        self.rank = 0  # Default for serial mode
+    
+    def __str__(self):
+        return f"WorkerState(rank={self.rank}, initialized={self.initialized})"
 
 class MPI_Pool:
-    """A hybrid pool that supports the 'pre-instantiate' pattern for MPI
-    and provides a serial fallback."""
+    """Enhanced MPI Pool with support for managing worker state and multiple task types"""
     
-    def __init__(self):
-        """Initializes the pool based on whether MPI is available and active."""
-        if IS_MPI_AVAILABLE:
-            self.comm = MPI.COMM_WORLD
+    TASK_OBJECTIVE_EVAL = 0
+    TASK_GP_FIT = 1
+    TASK_ACQUISITION_OPT = 2
+    TASK_INIT = 99
+    TASK_EXIT = 100
+    
+    def __init__(self, comm=None, debug=False):
+        self.debug = debug
+        
+        # Try to import MPI, fall back to serial mode if not available
+        try:
+            from mpi4py import MPI
+            self.mpi_available = True
+            self.comm = comm if comm is not None else MPI.COMM_WORLD
             self.rank = self.comm.Get_rank()
             self.size = self.comm.Get_size()
-            self.is_mpi = self.size > 1
-        else:
-            self.comm = None
+            self.is_master = self.rank == 0
+            self.is_worker = self.rank != 0
+            
+            # Start the worker loop if we're not the master
+            if self.is_worker:
+                self._worker_loop()
+                sys.exit(0)  # Workers exit after loop
+                
+            self.print(f"Initialized MPI_Pool with {self.size} processes")
+            
+        except ImportError:
+            # Serial fallback mode
+            self.mpi_available = False
             self.rank = 0
             self.size = 1
-            self.is_mpi = False
-
-    def is_master(self):
-        return self.rank == 0
+            self.is_master = True
+            self.is_worker = False
+            self.worker_state = WorkerState()  # Create local worker state for serial execution
+            self.print("MPI not available, running in serial mode")
     
-    def run_map(self, function, tasks):
-        """
-        MASTER METHOD: Manages task distribution, does not execute tasks itself.
-        """
-        if not self.is_master():
-            return None
-
-        if not self.is_mpi:
-            return function(tasks)
-
-        # mpi specific block
-        n_tasks = len(tasks)
-        results = [None] * n_tasks
-        task_index = 0
-        
-        for worker_rank in range(1, self.size):
-            if task_index < n_tasks:
-                self.comm.send((tasks[task_index], task_index), dest=worker_rank)
-                task_index += 1
-        
-        for _ in range(n_tasks):
-            status = MPI.Status()
-            result, original_index = self.comm.recv(source=MPI.ANY_SOURCE, status=status)
-            worker_rank = status.Get_source()
-            
-            results[original_index] = result
-            
-            if task_index < n_tasks:
-                # since the worker is free send it another taskx
-                self.comm.send((tasks[task_index], task_index), dest=worker_rank)
-                task_index += 1
-        
-        return np.array(results)
-
-    def worker_wait(self, function):
-        """
-        WORKER METHOD: Waits for tasks. Only runs in MPI mode.
-        """
-        if self.is_master() or not self.is_mpi:
+    def print(self, msg):
+        """Print with rank information if debug is enabled"""
+        if self.debug:
+            print(f"[Rank {self.rank}] {msg}", flush=True)
+    
+    def initialize_workers(self, loglikelihood_config, gp_config=None):
+        """Initialize worker states with copies of necessary objects"""
+        if self.is_worker:
             return
-
-        while True:
-            payload = self.comm.recv(source=0)
-            if payload is None:
-                break
-
-            point, original_index = payload
-            result = function(point)
-            self.comm.send((result, original_index), dest=0)
             
-    def close(self):
-        """
-        MASTER METHOD: Sends a termination signal to all worker processes.
-        """
-        if self.is_master() and self.is_mpi:
-            for worker_rank in range(1, self.size):
-                self.comm.send(None, dest=worker_rank)
-
-    # Method for evaluating loglikelihood on Master as well.
-    # def run_map(self, function, tasks):
-    #     """
-    #     MASTER METHOD: Distributes tasks to all processes, including itself.
-    #     """
-    #     if not self.is_master():
-    #         return None
-
-    #     if not self.is_mpi:
-    #         return function(tasks)
-
-    #     n_tasks = len(tasks)
+        if self.mpi_available:
+            self.print("Sending initialization data to workers")
+            # Send initialization task and config to all workers
+            data = {
+                'loglikelihood_config': loglikelihood_config,
+                'gp_config': gp_config
+            }
+            for i in range(1, self.size):
+                self.comm.send((self.TASK_INIT, data), dest=i)
+        else:
+            # Serial mode: Initialize the local worker state
+            self.print("Initializing local worker state")
+            if loglikelihood_config is not None:
+                self.worker_state.loglikelihood = self._create_object_from_config(
+                    loglikelihood_config['class_path'], loglikelihood_config['params'])
+                
+            if gp_config is not None:
+                self.worker_state.gp = self._create_object_from_config(
+                    gp_config['class_path'], gp_config['params'])
+                
+            self.worker_state.initialized = True
+            
+    def run_map(self, func, items, **kwargs):
+        """Run a map operation in parallel or serial"""
+        if self.is_worker:
+            return None
+            
+        # For backward compatibility, treat this as objective evaluation
+        if callable(func):
+            # This is the old-style call where func is passed directly
+            return self._map_objective_evaluation(items, **kwargs)
+        else:
+            # Error - shouldn't reach here with new implementation
+            raise ValueError("Invalid function passed to run_map. Use specialized methods instead.")
+            
+    def _map_objective_evaluation(self, points, batch_size=1):
+        """Map objective evaluation across workers or run locally"""
+        if self.is_worker:
+            return None
+            
+        self.print(f"Mapping objective evaluation over {len(points)} points")
+        results = np.zeros((len(points),))
         
-    #     # Create a task queue (using a list's pop method) and results array.
-    #     task_queue = list(enumerate(tasks)) # Store as (original_index, task)
-    #     results = [None] * n_tasks
-    #     n_results_received = 0
-
-    #     # Send the first wave of tasks to the actual workers (ranks > 0)
-    #     worker_ranks = list(range(1, self.size))
-    #     for worker_rank in worker_ranks:
-    #         if task_queue:
-    #             original_index, task = task_queue.pop(0)
-    #             self.comm.send((task, original_index), dest=worker_rank)
-
-    #     # Main loop: The master now does work and manages workers.
-    #     while n_results_received < n_tasks:
-    #         # If there are still tasks to do, the master takes one for itself.
-    #         if task_queue:
-    #             original_index, task = task_queue.pop(0)
-    #             # Master computes the result locally
-    #             result = function(task)
-    #             results[original_index] = result
-    #             n_results_received += 1
+        if self.mpi_available and self.size > 1:
+            # MPI mode: Distribute work to workers
+            worker_assignments = self._get_worker_assignments(len(points))
             
-    #         # Whether the master worked or not, it must check for results from workers.
-    #         # This call will block until any worker has finished its task.
-    #         # It's safe to do this even if all tasks are done, as workers will
-    #         # be sending back their final results.
-    #         if self.size > 1 and n_results_received < n_tasks:
-    #             status = MPI.Status()
-    #             result, original_index = self.comm.recv(source=MPI.ANY_SOURCE, status=status)
-    #             worker_rank = status.Get_source()
+            # Send data to workers
+            for worker_id, indices in worker_assignments.items():
+                worker_points = points[indices]
+                self.comm.send((self.TASK_OBJECTIVE_EVAL, worker_points), dest=worker_id)
+            
+            # Collect results
+            for worker_id, indices in worker_assignments.items():
+                worker_results = self.comm.recv(source=worker_id)
+                results[indices] = worker_results
+        else:
+            # Serial mode: Evaluate locally
+            for i, point in enumerate(points):
+                results[i] = self.worker_state.loglikelihood(point)
                 
-    #             results[original_index] = result
-    #             n_results_received += 1
+        return results
+        
+    def run_parallel_gp_fit(self, train_x, train_y, fit_params):
+        """Run GP fitting in parallel or locally"""
+        if self.is_worker:
+            return None
+            
+        self.print("Running GP fitting")
+        
+        if self.mpi_available and self.size > 1:
+            # MPI mode: Send to all workers and collect results
+            for i in range(1, self.size):
+                self.comm.send((self.TASK_GP_FIT, {
+                    'train_x': train_x,
+                    'train_y': train_y,
+                    'fit_params': fit_params
+                }), dest=i)
+            
+            # Collect results - use the best result
+            best_result = None
+            best_loss = float('inf')
+            
+            for i in range(1, self.size):
+                worker_result = self.comm.recv(source=i)
+                if worker_result['loss'] < best_loss:
+                    best_loss = worker_result['loss']
+                    best_result = worker_result
+        else:
+            # Serial mode: Run locally
+            # Update GP training data
+            self.worker_state.gp.train_x = train_x
+            self.worker_state.gp.train_y = train_y
+            
+            # Perform GP fitting
+            self.worker_state.gp.fit(**fit_params)
+            best_result = {
+                'loss': self.worker_state.gp.training_loss if hasattr(self.worker_state.gp, 'training_loss') else 0.0,
+                'params': self.worker_state.gp.get_params()
+            }
+            
+        return best_result
+        
+    def run_parallel_acquisition(self, acq_type, acq_params, n_batch=1):
+        """Run acquisition function optimization in parallel or locally"""
+        if self.is_worker:
+            return None
+            
+        self.print(f"Running acquisition optimization for {acq_type}")
+        
+        if self.mpi_available and self.size > 1:
+            # MPI mode: Send to all workers
+            for i in range(1, self.size):
+                self.comm.send((self.TASK_ACQUISITION_OPT, {
+                    'acq_type': acq_type,
+                    'acq_params': acq_params,
+                    'n_batch': n_batch
+                }), dest=i)
+            
+            # Collect and combine results
+            all_points = []
+            all_values = []
+            
+            for i in range(1, self.size):
+                worker_result = self.comm.recv(source=i)
+                all_points.append(worker_result['points'])
+                all_values.append(worker_result['values'])
                 
-    #             # If there are still tasks left in the queue, send a new one
-    #             # to the worker that just finished.
-    #             if task_queue:
-    #                 new_original_index, new_task = task_queue.pop(0)
-    #                 self.comm.send((new_task, new_original_index), dest=worker_rank)
-
-    #     return np.array(results)
-
-    # def worker_wait(self, function):
-    #     """
-    #     WORKER METHOD: Waits for tasks. Only runs in MPI mode.
-    #     """
-    #     if self.is_master() or not self.is_mpi:
-    #         return
-
-    #     while True:
-    #         payload = self.comm.recv(source=0)
-    #         if payload is None:
-    #             break
-
-    #         point, original_index = payload
-    #         result = function(point)
-    #         self.comm.send((result, original_index), dest=0)
+            # Combine and select the best n_batch points
+            all_points = np.vstack(all_points)
+            all_values = np.concatenate(all_values)
+        else:
+            # Serial mode: Run locally
+            # Create or update acquisition function
+            if not hasattr(self.worker_state, 'acquisition') or self.worker_state.acquisition.name != acq_type:
+                acq_module = importlib.import_module('jaxbo.acquisition')
+                acq_class = getattr(acq_module, acq_type)
+                self.worker_state.acquisition = acq_class()
+            
+            # Optimize acquisition function
+            points, values = self.worker_state.acquisition.optimize(self.worker_state.gp, **acq_params['kwargs'])
+            all_points = points
+            all_values = values
+            
+        # Sort by acquisition value (assuming higher is better)
+        indices = np.argsort(-all_values)[:n_batch]
+        return all_points[indices], all_values[indices]
+        
+    def update_gp_state(self, gp_state_dict):
+        """Update GP state on all workers or locally"""
+        if self.is_worker:
+            return
+            
+        if self.mpi_available and self.size > 1:
+            self.print("Updating GP state on workers")
+            # Send new state to all workers
+            for i in range(1, self.size):
+                self.comm.send(('update_gp', gp_state_dict), dest=i)
+        else:
+            # Serial mode: Update local GP state
+            if hasattr(self.worker_state, 'gp') and self.worker_state.gp is not None:
+                self.worker_state.gp.set_params(gp_state_dict)
+                
+    def _get_worker_assignments(self, num_items):
+        """Divide work among available workers"""
+        assignments = {}
+        num_workers = self.size - 1  # Exclude master
+        
+        if num_workers == 0:
+            return {0: np.arange(num_items)}
+            
+        items_per_worker = max(1, num_items // num_workers)
+        
+        for i in range(num_workers):
+            start = i * items_per_worker
+            end = (i + 1) * items_per_worker if i < num_workers - 1 else num_items
+            if start < end:  # Only assign if there's work to do
+                assignments[i + 1] = np.arange(start, end)
+                
+        return assignments
+    
+    def _create_object_from_config(self, class_path, params):
+        """Dynamically create an object from its module path and parameters"""
+        module_path, class_name = class_path.rsplit('.', 1)
+        module = importlib.import_module(module_path)
+        class_ = getattr(module, class_name)
+        return class_(**params)
+        
+    def _worker_loop(self):
+        """Main loop for worker processes - only used in MPI mode"""
+        if not self.is_worker:
+            return
+            
+        # Initialize worker state
+        state = WorkerState()
+        state.rank = self.rank
+        self.print(f"Worker starting")
+        
+        while True:
+            # Wait for task from master
+            task_data = self.comm.recv(source=0)
+            task_type, data = task_data
+            
+            try:
+                if task_type == self.TASK_INIT:
+                    # Initialize worker objects
+                    ll_config = data['loglikelihood_config']
+                    state.loglikelihood = self._create_object_from_config(
+                        ll_config['class_path'], ll_config['params'])
+                    
+                    if data['gp_config']:
+                        gp_config = data['gp_config']
+                        state.gp = self._create_object_from_config(
+                            gp_config['class_path'], gp_config['params'])
+                        
+                    state.initialized = True
+                    self.print(f"Worker initialized with {state.loglikelihood}")
+                    self.comm.send("initialized", dest=0)
+                    
+                elif task_type == self.TASK_OBJECTIVE_EVAL:
+                    # Evaluate objective function
+                    points = data
+                    results = []
+                    for point in points:
+                        result = state.loglikelihood(point)
+                        results.append(result)
+                    self.comm.send(np.array(results), dest=0)
+                    
+                elif task_type == self.TASK_GP_FIT:
+                    # Update GP training data and fit
+                    train_x = data['train_x']
+                    train_y = data['train_y']
+                    fit_params = data['fit_params']
+                    
+                    # Update GP training data
+                    state.gp.train_x = train_x
+                    state.gp.train_y = train_y
+                    
+                    # Perform GP fitting with possibly different random restarts
+                    result = state.gp.fit(**fit_params)
+                    self.comm.send({
+                        'loss': state.gp.training_loss if hasattr(state.gp, 'training_loss') else 0.0,
+                        'params': state.gp.get_params()
+                    }, dest=0)
+                    
+                elif task_type == self.TASK_ACQUISITION_OPT:
+                    # Run acquisition optimization
+                    acq_type = data['acq_type']
+                    acq_params = data['acq_params']
+                    n_batch = data['n_batch']
+                    
+                    # Create or update acquisition function
+                    if state.acquisition is None or state.acquisition.name != acq_type:
+                        acq_module = importlib.import_module('jaxbo.acquisition')
+                        acq_class = getattr(acq_module, acq_type)
+                        state.acquisition = acq_class()
+                    
+                    # Optimize acquisition function
+                    points, values = state.acquisition.optimize(state.gp, **acq_params['kwargs'])
+                    
+                    self.comm.send({
+                        'points': points,
+                        'values': values
+                    }, dest=0)
+                    
+                elif task_type == 'update_gp':
+                    # Update GP state
+                    if state.gp is not None:
+                        state.gp.set_params(data)
+                    self.comm.send("gp_updated", dest=0)
+                    
+                elif task_type == self.TASK_EXIT:
+                    # Exit worker loop
+                    self.print("Worker exiting")
+                    break
+                    
+            except Exception as e:
+                import traceback
+                self.print(f"Error in worker: {e}")
+                self.print(traceback.format_exc())
+                self.comm.send(("error", str(e)), dest=0)
+                
+        return
+        
+    def close(self):
+        """Shut down the pool by telling all workers to exit"""
+        if self.is_worker:
+            return
+            
+        if self.mpi_available and self.size > 1:
+            for i in range(1, self.size):
+                self.comm.send((self.TASK_EXIT, None), dest=i)

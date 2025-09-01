@@ -372,6 +372,47 @@ class GP:
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
         self.fitted = True
 
+    def _single_fit(self,x0):
+        """
+        Fits the GP model to a single set of hyperparameters.
+        """
+        # log.info(f"Fitting GP with initial params: {x0}")
+        result = self.mll_optimize(
+            fun=self.neg_mll,
+            ndim=self.ndim + 1,
+            bounds=self.hyperparam_bounds,
+            x0=x0,
+            maxiter=200,
+            n_restarts=1,
+            optimizer_kwargs=self.optimizer_kwargs
+        )
+        return result
+
+    def get_current_state(self):
+        """
+        Get the current state of the GP model.
+        """
+        state_dict = {
+            "train_x": self.train_x,
+            "train_y": self.train_y,
+            "lengthscales": self.lengthscales,
+            "kernel_variance": self.kernel_variance,
+            "cholesky": self.cholesky,
+            "alphas": self.alphas
+        }
+        return state_dict
+
+    def update_state(self,state_dict):
+        """
+        Update the current state of the GP model.
+        """
+        self.train_x = state_dict.get("train_x", self.train_x)
+        self.train_y = state_dict.get("train_y", self.train_y)
+        self.lengthscales = state_dict.get("lengthscales", self.lengthscales)
+        self.kernel_variance = state_dict.get("kernel_variance", self.kernel_variance)
+        self.cholesky = state_dict.get("cholesky", self.cholesky)
+        self.alphas = state_dict.get("alphas", self.alphas)        
+
     def save(self,outfile='gp'):
         """
         Saves the GP to a file
