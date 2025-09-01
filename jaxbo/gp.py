@@ -213,15 +213,10 @@ class GP:
         lengthscales = hyperparams[0:-1]
         kernel_variance = hyperparams[-1]
         K = self.kernel(self.train_x, self.train_x, lengthscales, kernel_variance, noise=self.noise, include_noise=True)
-        cholesky = jax.scipy.linalg.cho_factor(K, lower=True)
-        log_det_K = 2 * jnp.sum(jnp.log(jnp.diag(cholesky[0])))
-        mll = -0.5 * self.train_y.T @ jax.scipy.linalg.cho_solve(cholesky, self.train_y) - 0.5 * log_det_K - 0.5 * self.npoints * jnp.log(2 * jnp.pi)
-        
-        logprior = 0.0
-        logprior += self.kernel_variance_prior_dist.log_prob(kernel_variance)
-        logprior += self.lengthscale_prior_dist.log_prob(lengthscales).sum()
-
-        return -mll + logprior
+        mll = gp_mll(K,self.train_y,self.train_y.shape[0])        
+        mll += self.kernel_variance_prior_dist.log_prob(kernel_variance)
+        mll += self.lengthscale_prior_dist.log_prob(lengthscales).sum()
+        return -mll
 
     def fit(self, maxiter=200,n_restarts=4):
         """ 
@@ -364,6 +359,9 @@ class GP:
         # Remove unpicklable attributes
         state.pop("cholesky", None)
         state.pop("alphas", None)
+        # Remove function references that can't be pickled
+        state.pop("kernel", None)
+        state.pop("mll_optimize", None)
         return state
 
     def __setstate__(self, state):
@@ -371,6 +369,15 @@ class GP:
         Custom setstate method to unpickle the GP object.
         """
         self.__dict__.update(state)
+        
+        # Recreate function references that were removed during pickling
+        self.kernel = rbf_kernel if self.kernel_name == "rbf" else matern_kernel
+        
+        if self.optimizer_method == "scipy":
+            self.mll_optimize = optimize_scipy
+        else:
+            self.mll_optimize = optimize_optax
+        
         # Recompute cholesky and alphas
         self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True))
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
