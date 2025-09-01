@@ -12,10 +12,11 @@ os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={num_devices}
 # Arg 2: Classifier type ('svm' or 'gp')
 clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 
-# Arg 3: Run mode ('mpi' or 'serial')
-name = str(sys.argv[3]) if len(sys.argv) > 3 else 'serial'
-# Arg 4: Number of log EI iterations
-n_log_ei_iters = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+# # Arg 3: Run mode ('mpi' or 'serial')
+# name = str(sys.argv[3]) if len(sys.argv) > 3 else 'serial'
+
+# Arg 3: Number of log EI iterations
+n_log_ei_iters = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 
 # --- Imports ---
 from jaxbo.run import run_bobe
@@ -30,11 +31,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm' 
-
-    name = str(sys.argv[3]) if len(sys.argv) > 3 else 'serial'
-
-    likelihood_name = f'Planck_DESI_Omk_{name}_{clf_type}_logei_{n_log_ei_iters}'
+    likelihood_name = f'Planck_DESI_Omk_{clf_type}_logei_{n_log_ei_iters}'
 
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -46,17 +43,17 @@ def main():
         },
         verbosity='INFO',
         n_log_ei_iters=n_log_ei_iters,
-        n_cobaya_init=8,
-        n_sobol_init=32,
-        min_evals=900,
+        n_cobaya_init=16,
+        n_sobol_init=64,
+        min_evals=1000,
         max_eval_budget=2500,
-        max_gp_size=1800,
+        max_gp_size=1700,
         fit_step=5,
         zeta_ei=0.1,
         wipv_batch_size=5,
         ns_step=5,
         num_hmc_warmup=512,
-        num_hmc_samples=6000, 
+        num_hmc_samples=9000, 
         mc_points_size=512,
         lengthscale_priors='DSLP', 
         use_clf=True,
