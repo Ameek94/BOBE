@@ -41,6 +41,8 @@ def main():
             'noise_std': 0.0,
             'name': likelihood_name,
         },
+        resume=True,
+        resume_file=f'{likelihood_name}',
         verbosity='INFO',
         n_log_ei_iters=n_log_ei_iters,
         n_cobaya_init=16,
@@ -63,7 +65,7 @@ def main():
         clf_update_step=1,  # SVM update step
         clf_type=clf_type,  # Using SVM for classification
         minus_inf=-1e5,
-        logz_threshold=0.015,
+        logz_threshold=0.01,
         seed=10000,  # For reproducibility
         do_final_ns=True,
     )
