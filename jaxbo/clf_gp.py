@@ -427,7 +427,7 @@ class GPwithClassifier:
         return gp_clf
         
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
-                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4,np_rng=None, rng_key=None):
+                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=6,np_rng=None, rng_key=None):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.

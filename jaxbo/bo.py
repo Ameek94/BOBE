@@ -408,12 +408,12 @@ class BOBE:
             kernel_variance = float(self.gp.kernel_variance)
             self.results_manager.update_gp_hyperparams(ii, lengthscales, kernel_variance)
 
-
+            if not refit:
+                self.results_manager.start_timing('GP Training')
+                self.gp.fit(maxiter=50,n_restarts=1)
+                self.results_manager.end_timing('GP Training')
+                
             if acq_str == 'WIPV' and not ns_flag:
-                if not refit:
-                    self.results_manager.start_timing('GP Training')
-                    self.gp.fit(maxiter=50,n_restarts=1)
-                    self.results_manager.end_timing('GP Training')
                 self.results_manager.start_timing('MCMC Sampling')
                 jax_rng_key = get_jax_key()
                 self.mc_samples = get_mc_samples(
