@@ -627,7 +627,7 @@ class BOBE:
             bool: Whether convergence is achieved based on logz only
         """
         # Standard logz convergence check
-        delta = 2 * logz_dict['std']
+        delta =  logz_dict['std']
         converged = delta < self.logz_threshold
         
         # Compute KL divergences if we have nested sampling samples

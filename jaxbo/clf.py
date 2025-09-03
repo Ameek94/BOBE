@@ -342,7 +342,7 @@ class EllipsoidClassifier(nn.Module):
     def get_predict_proba_fn(self, params):
         def predict_proba_fn(x):
             logits = self.apply(params, x, train=False)
-            return jax.nn.sigmoid(logits.squeeze(-1))
+            return jax.nn.sigmoid(logits.squeeze())
         return jax.jit(predict_proba_fn)
 
 def train_ellipsoid(
