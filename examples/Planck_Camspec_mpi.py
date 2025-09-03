@@ -28,12 +28,12 @@ def main():
     clf_update_step = 1 if clf_type == 'svm' else 2
 
     # Set up the cosmological likelihood
-    cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
+    cobaya_input_file = './cosmo_input/LCDM_Planck_DESIDr2.yaml'
     
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Camspec_{clf_type}_saas_prior_logei_{n_log_ei_iters}'
+    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -68,16 +68,16 @@ def main():
         
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=4096,
+        num_hmc_samples=9000,
         mc_points_size=512,
         
         # GP settings
-        lengthscale_priors='SAAS',
+        lengthscale_priors='DSLP',
         noise=1e-6,
         kernel='rbf',
 
         # resume
-        resume=True,
+        resume=False,
         resume_file=f'{likelihood_name}',
         
         # Classifier settings
@@ -136,7 +136,7 @@ def main():
             param_labels=likelihood.param_labels,
             plot_params=param_list_LCDM,
             output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
+            reference_file='./cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
             reference_ignore_rows=0.0,
             reference_label='PolyChord',
             scatter_points=False,
@@ -149,9 +149,9 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             output_file=f'{likelihood.name}_full',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
+            reference_file='./cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
             scatter_points=False,
         )
 

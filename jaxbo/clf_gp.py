@@ -11,24 +11,13 @@ from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
 from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
-from .clf import train_svm, svm_predict_proba, train_nn, train_nn_multiple_restarts,train_ellipsoid_multiple_restarts, nn_predict_proba, train_ellipsoid, ellipsoid_predict_proba
+from .clf import (
+    SVMClassifier, MLPClassifier, EllipsoidClassifier
+)
 from .utils.seed_utils import get_new_jax_key, get_numpy_rng
 from .utils.logging_utils import get_logger
 log = get_logger("clf_gp")
 
-
-available_classifiers = {
-    'svm': {
-        'train': train_svm,
-    },
-    'nn': {
-        'train': train_nn_multiple_restarts,
-    },
-    'ellipsoid': {
-        'train': train_ellipsoid_multiple_restarts,
-     },
-    # ... maybe add other classifiers
-}
 
 class GPwithClassifier:
     def __init__(self, train_x=None, train_y=None, clf_flag=True,
@@ -87,6 +76,15 @@ class GPwithClassifier:
         self.probability_threshold = probability_threshold
         self.minus_inf = minus_inf
         self.clf_flag = clf_flag  # Whether to use classifier or not
+        
+        if self.clf_type == 'svm':
+            self.classifier = SVMClassifier(**self.clf_settings)
+        elif self.clf_type == 'nn':
+            self.classifier = MLPClassifier(**self.clf_settings)
+        elif self.clf_type == 'ellipsoid':
+            self.classifier = EllipsoidClassifier(d=self.train_x_clf.shape[1], mu=jnp.zeros(self.train_x_clf.shape[1]), **self.clf_settings)
+        else:
+            raise ValueError(f"Unsupported classifier type: {self.clf_type}")
 
         # Handle Thresholds
         self.clf_threshold = clf_threshold 
@@ -118,11 +116,9 @@ class GPwithClassifier:
         self.clf_model_params = None
         self._clf_predict_func = None # Will hold the jitted prediction function
 
-        if self.use_clf and self.clf_type in available_classifiers:
+        if self.use_clf:
              if train_clf_on_init:
-                 self._train_classifier() # Initial training if enough data
-        elif self.use_clf and self.clf_type not in available_classifiers:
-             raise ValueError(f"Classifier type '{self.clf_type}' not supported. Available: {list(available_classifiers.keys())}")
+                 self._train_classifier()
         else:
              log.info(f"Not enough data ({self.clf_data_size}) to use classifier (need {self.clf_use_size} points), or classifier type not set.")
 
@@ -147,22 +143,28 @@ class GPwithClassifier:
             return 
 
         # Get training function and parameters
-        train_func = available_classifiers[self.clf_type]['train']
+        if self.clf_type == 'ellipsoid':
+            best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+            self.clf_params, self.clf_metrics = self.classifier.train(self.train_x_clf, labels, best_pt=best_pt)
+        else:
+            self.clf_params, self.clf_metrics = self.classifier.train(self.train_x_clf,labels) #available_classifiers[self.clf_type]['train']
+
+        self._clf_predict_func = self.classifier.get_predict_proba_fn(self.clf_params)
 
         # Call the specific training function
         # Training functions return (predict_func, model_params, metrics_dict)
 
-        best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
-        kwargs = {
-            'best_pt': best_pt,
-            'probability_threshold': self.probability_threshold,
-        }
-        self._clf_predict_func, self.clf_params, self.clf_metrics = train_func(self.train_x_clf, 
-                                                                               labels, init_params = self.clf_params,
-                                                                               **kwargs)
+        # best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+        # kwargs = {
+        #     'best_pt': best_pt,
+        #     'probability_threshold': self.probability_threshold,
+        # }
+        # self._clf_predict_func, self.clf_params, self.clf_metrics = train_func(self.train_x_clf, 
+        #                                                                        labels, init_params = self.clf_params,
+        #                                                                        **kwargs)
 
-        log.debug(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
-        log.debug(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
+        log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
+        log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
 
     def fit(self, maxiter=300, n_restarts=4):
         """Fits the GP hyperparameters."""
@@ -379,15 +381,15 @@ class GPwithClassifier:
         train_y_clf = jnp.array(data['train_y_clf'])
         
         # Extract GP settings
-        clf_threshold = float(data['clf_threshold']) if 'clf_threshold' in data.files else 250
-        gp_threshold = float(data['gp_threshold']) if 'gp_threshold' in data.files else 1000
+        clf_threshold = float(data['clf_threshold']) if 'clf_threshold' in data.files else 300
+        gp_threshold = float(data['gp_threshold']) if 'gp_threshold' in data.files else 600
         clf_type = str(data['clf_type']) if 'clf_type' in data.files else 'svm'
-        clf_use_size = int(data['clf_use_size']) if 'clf_use_size' in data.files else 300
-        clf_update_step = int(data['clf_update_step']) if 'clf_update_step' in data.files else 5
+        clf_use_size = int(data['clf_use_size']) if 'clf_use_size' in data.files else 30
+        clf_update_step = int(data['clf_update_step']) if 'clf_update_step' in data.files else 1
         probability_threshold = float(data['probability_threshold']) if 'probability_threshold' in data.files else 0.5
         minus_inf = float(data['minus_inf']) if 'minus_inf' in data.files else -1e5
         clf_flag = bool(data['clf_flag']) if 'clf_flag' in data.files else True
-        noise = float(data['noise']) if 'noise' in data.files else 1e-8
+        noise = float(data['noise']) if 'noise' in data.files else 1e-6
         
         # Determine GP type and create lengthscale_priors
         lengthscale_priors = str(data['hyperparam_priors'].item()) if 'hyperparam_priors' in data.files else 'DSLP'
@@ -420,6 +422,8 @@ class GPwithClassifier:
         # Restore saved classifier parameters if available
         if 'clf_params' in data.files:
             gp_clf.clf_params = data['clf_params'].item()
+            # Set the prediction function using the saved parameters
+            gp_clf._clf_predict_func = gp_clf.classifier.get_predict_proba_fn(gp_clf.clf_params)
         if 'clf_metrics' in data.files:
             gp_clf.clf_metrics = data['clf_metrics'].item()
             
@@ -561,22 +565,10 @@ class GPwithClassifier:
         gp_clf_copy.clf_params = copy.deepcopy(self.clf_params)
         gp_clf_copy.clf_metrics = copy.deepcopy(self.clf_metrics)
         gp_clf_copy.use_clf = self.use_clf
-        # gp_clf_copy._clf_predict_func = self._clf_predict_func # Pass the jitted function directly
-
-
-        # # Copy classifier state (but not retrain unless explicitly needed)
-        # gp_clf_copy.clf_params = copy.deepcopy(self.clf_params)
-        # gp_clf_copy.clf_metrics = copy.deepcopy(self.clf_metrics)
-        # gp_clf_copy.use_clf = self.use_clf
-
-        # Retrain classifier if needed
-        if self._clf_predict_func is not None:
-            try:
-                gp_clf_copy._clf_predict_func = copy.deepcopy(self._clf_predict_func)
-            except Exception:
-                # If deepcopy fails, retrain instead
-                log.info("Could not deepcopy classifier predict function, retraining...")
-                gp_clf_copy._train_classifier()
+        
+        # Regenerate prediction function if classifier parameters exist
+        if self.clf_params is not None:
+            gp_clf_copy._clf_predict_func = gp_clf_copy.classifier.get_predict_proba_fn(gp_clf_copy.clf_params)
 
         return gp_clf_copy
 
