@@ -8,7 +8,7 @@ theory:
       lens_potential_accuracy: 1
       num_massive_neutrinos: 1
       nnu: 3.046
-      dark_energy_model: ppf
+      dark_energy_model: fluid
       theta_H0_range:
       - 10
       - 200
@@ -20,26 +20,6 @@ likelihood:
   bao.desi_dr2.desi_bao_all: null
   sn.union3: null
 params:
-  w:
-    prior:
-      min: -1.4
-      max: -0.4
-    ref:
-      dist: norm
-      loc: -0.827
-      scale: 0.063
-    proposal: 0.05
-    latex: w_0
-  wa:
-    prior:
-      min: -2
-      max: 0.5
-    ref:
-      dist: norm
-      loc: -0.75
-      scale: 0.1
-    proposal: 0.05
-    latex: w_a
   omk: 0.
   omch2:
    latex: \Omega_\mathrm{c} h^2
@@ -116,6 +96,6 @@ sampler:
   #   proposal_scale: 1.9
   #   covmat: auto
   #   Rminus1_stop: 0.03
-  #   Rminus1_cl_stop: 0.2
-output: chains/union3_CPL_pchord
+  #   Rminus1_cl_stop: 0.2   
+output: chains/union3_LCDM_pchord
 

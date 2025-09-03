@@ -14,14 +14,14 @@ from jaxbo.utils.logging_utils import get_logger
 def main():
 
     # Set up the cosmological likelihood
-    cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_CPL.yaml'
-    
+    cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_Union3.yaml'
+
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
     clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm' 
 
-    likelihood_name = f'Planck_DESI_PPlus_CPL_{clf_type}'
+    likelihood_name = f'Planck_DESI_U3_LCDM_{clf_type}'
 
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -35,16 +35,16 @@ def main():
         n_log_ei_iters=0,
         n_cobaya_init=16,
         n_sobol_init=64,
-        min_evals=1000,
+        min_evals=750,
         max_eval_budget=5000,
-        max_gp_size=1800,
+        max_gp_size=1600,
         fit_step=10, 
         zeta_ei = 0.1,
         wipv_batch_size=5,
         ns_step=5,
         num_hmc_warmup=512,
-        num_hmc_samples=15000, 
-        mc_points_size=600,
+        num_hmc_samples=10000, 
+        mc_points_size=512,
         lengthscale_priors='DSLP', 
         use_clf=True,
         resume=False,
@@ -95,7 +95,7 @@ def main():
         plt.rcParams['text.usetex'] = True 
         plt.rcParams['font.family'] = 'serif'
 
-        param_list_CPL = ['w','wa','omch2','ombh2','H0','logA','ns','tau']
+        param_list_CPL = ['omch2','ombh2','H0','logA','ns','tau']
         plot_final_samples(
             gp, 
             {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
@@ -104,7 +104,7 @@ def main():
             param_labels=likelihood.param_labels,
             plot_params=param_list_CPL,
             output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
+            reference_file='./cosmo_input/chains/Union3_LCDMflat',
             reference_ignore_rows=0.0,
             reference_label='PolyChord',
             scatter_points=False
@@ -118,9 +118,9 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             output_file=f'{likelihood.name}_full',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_CPL_pchord_flat',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
+            reference_file='./cosmo_input/chains/Union3_LCDMflat',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
             scatter_points=False
         )
 

@@ -47,3 +47,4 @@ test_methods/
 *.png
 *.ranges
 *results_plots/
+examples/plot_CPL.ipynb

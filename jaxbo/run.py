@@ -1,11 +1,11 @@
 from .bo import BOBE
-from .likelihood import CobayaLikelihood, ExternalLikelihood
+from .likelihood import BaseLikelihood, CobayaLikelihood, ExternalLikelihood
 from .utils.pool import MPI_Pool
 from .utils.logging_utils import setup_logging, get_logger
 from typing import Union, Callable, Dict, Any, Optional
     
 
-def run_bobe(likelihood: Union[Callable,str], 
+def run_bobe(likelihood: Union[BaseLikelihood, str], 
              likelihood_kwargs: Dict[str, Any] = {},
              verbosity: str ='INFO', 
              log_file: Optional[str] = None, 
@@ -41,8 +41,8 @@ def run_bobe(likelihood: Union[Callable,str],
     pool = MPI_Pool()
 
     # setup likelihood
-    if isinstance(likelihood, Callable):
-        My_Likelihood = ExternalLikelihood(loglikelihood=likelihood,pool=pool,**likelihood_kwargs)
+    if isinstance(likelihood, BaseLikelihood):
+        My_Likelihood = likelihood
     elif isinstance(likelihood, str):
         My_Likelihood = CobayaLikelihood(input_file_dict=likelihood,pool=pool,**likelihood_kwargs)
 
