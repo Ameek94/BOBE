@@ -13,7 +13,7 @@ def main():
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/LCDM_6D.yaml'
     ls_priors = 'uniform'
-    likelihood_name = f'Planck_lite_{ls_priors}_ls_priors'
+    likelihood_name = f'Planck_lite_svm'
 
     start = time.time()
     print("Starting BOBE run...")
@@ -37,16 +37,17 @@ def main():
         ns_step=3,
         wipv_batch_size=3,
         num_hmc_warmup=512,
-        num_hmc_samples=512, 
+        num_hmc_samples=1024, 
         mc_points_size=128,
         lengthscale_priors=ls_priors, 
         use_clf=True,
         clf_use_size=10,
-        clf_threshold=350,
+        clf_threshold=250,
+        gp_threshold=500,
         clf_update_step=1,
         clf_type='svm',
         minus_inf=-1e5,
-        logz_threshold=0.005,
+        logz_threshold=0.001,
         seed=10,
         do_final_ns=False,
     )
@@ -96,7 +97,7 @@ def main():
             reference_file='./cosmo_input/chains/Planck_lite_LCDM',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
-            scatter_points=False
+            scatter_points=True
         )
 
         # Print detailed timing analysis

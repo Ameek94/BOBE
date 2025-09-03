@@ -31,7 +31,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Planck_DESI_Omk_{clf_type}_logei_{n_log_ei_iters}'
+    likelihood_name = f'Planck_DESIDR2_Omk_{clf_type}'
 
     results = run_bobe(
         likelihood=cobaya_input_file,
