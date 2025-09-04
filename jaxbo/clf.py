@@ -175,14 +175,14 @@ def train_with_restarts(
 
 # Neural Network Classifier
 class MLPClassifier(nn.Module):
-    hidden_dims: list = (64, 64)
+    hidden_dims: list = (32, 32)
     dropout_rate: float = 0.1
     lr: float = 1e-3
     weight_decay: float = 1e-4
     n_epochs: int = 1000
-    batch_size: int = 128
+    batch_size: int = 64
     early_stop_patience: int = 50
-    n_restarts: int = 2
+    n_restarts: int = 4
     val_frac: float = 0.2
     seed_offset: int = 0
     split_seed: int = 42
@@ -301,7 +301,7 @@ class EllipsoidClassifier(nn.Module):
     lr: float = 1e-2
     weight_decay: float = 1e-4
     n_epochs: int = 1000
-    batch_size: int = 32
+    batch_size: int = 64
     patience: int = 50
     n_restarts: int = 2
     val_frac: float = 0.2

@@ -60,7 +60,7 @@ def main():
         
         # Step settings
         fit_step=5,
-        wipv_batch_size=5,
+        wipv_batch_size=10,
         ns_step=5,
         
         # Acquisition function settings
@@ -84,7 +84,7 @@ def main():
         use_clf=True,
         clf_type=clf_type,
         clf_use_size=30,
-        clf_update_step=clf_update_step,
+        clf_update_step=1,
         clf_threshold=300,
         gp_threshold=600,
         

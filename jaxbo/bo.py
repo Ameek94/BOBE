@@ -71,6 +71,7 @@ class BOBE:
                  clf_threshold=250,
                  gp_threshold=5000,
                  logz_threshold=1.0,
+                 convergence_n_iters=2,
                  minus_inf=-1e5,
                  pool: MPI_Pool = None,
                  do_final_ns=True,
@@ -128,6 +129,8 @@ class BOBE:
         logz_threshold : float
             Threshold for convergence of the nested sampling logz. 
             If the difference between the upper and lower bounds of logz is less than this value, the sampling will end.
+        convergence_n_iters : int
+            Number of successive iterations the logz threshold must be met for convergence to be declared. Defaults to 2.
         minus_inf : float
             Value to use for minus infinity. This is used to set the lower bound of the loglikelihood.
         """
@@ -151,8 +154,10 @@ class BOBE:
         self.return_getdist_samples = return_getdist_samples
         self.do_final_ns = do_final_ns
         self.logz_threshold = logz_threshold
+        self.convergence_n_iters = convergence_n_iters
         self.converged = False
         self.prev_converged = False
+        self.convergence_counter = 0  # Track successive convergence iterations
         self.termination_reason = "Max evaluation budget reached"
         self.optimizer = optimizer
         # Initialize results manager BEFORE any timing operations
@@ -184,6 +189,7 @@ class BOBE:
                 'clf_update_step': clf_update_step,
                 'gp_threshold': gp_threshold,
                 'logz_threshold': logz_threshold,
+                'convergence_n_iters': convergence_n_iters,
                 'minus_inf': minus_inf,
                 'do_final_ns': do_final_ns,
                 'return_getdist_samples': return_getdist_samples,
@@ -681,14 +687,14 @@ class BOBE:
 
         log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
         if converged:
-            if self.prev_converged:
-                log.info("Convergence achieved after 2 successive iterations")
+            self.convergence_counter += 1
+            if self.convergence_counter >= self.convergence_n_iters:
+                log.info(f"Convergence achieved after {self.convergence_n_iters} successive iterations")
                 return True
             else:
-                self.prev_converged = True
-                log.info(f"Convergence not yet achieved in successive iterations")
+                log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
                 # Checkpoint for saving some results
-                log.info("Saving checkpoint results for single convergence")
+                log.info("Saving checkpoint results for partial convergence")
                 
                 # Create checkpoint filename with suffix
                 checkpoint_filename = f"{self.output_file}_checkpoint"
@@ -703,5 +709,5 @@ class BOBE:
 
                 return False
         else:
-            self.prev_converged = False
+            self.convergence_counter = 0  # Reset counter if not converged
             return False
