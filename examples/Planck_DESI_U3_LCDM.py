@@ -105,8 +105,8 @@ def main():
             plot_params=param_list_CPL,
             output_file=f'{likelihood.name}_cosmo',
             reference_file='./cosmo_input/chains/Union3_LCDMflat',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
             scatter_points=False
         )
 
