@@ -12,7 +12,7 @@ from numpyro.util import enable_x64
 enable_x64()
 from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
 from .clf import (
-    SVMClassifier, MLPClassifier, EllipsoidClassifier
+    CLASSIFIER_REGISTRY
 )
 from .utils.seed_utils import get_new_jax_key, get_numpy_rng
 from .utils.logging_utils import get_logger
@@ -77,14 +77,12 @@ class GPwithClassifier:
         self.minus_inf = minus_inf
         self.clf_flag = clf_flag  # Whether to use classifier or not
         
-        if self.clf_type == 'svm':
-            self.classifier = SVMClassifier(**self.clf_settings)
-        elif self.clf_type == 'nn':
-            self.classifier = MLPClassifier(**self.clf_settings)
-        elif self.clf_type == 'ellipsoid':
-            self.classifier = EllipsoidClassifier(d=self.train_x_clf.shape[1], mu=jnp.zeros(self.train_x_clf.shape[1]), **self.clf_settings)
-        else:
+        # Store classifier functions and settings
+        if self.clf_type not in CLASSIFIER_REGISTRY:
             raise ValueError(f"Unsupported classifier type: {self.clf_type}")
+        
+        self.clf_train_fn = CLASSIFIER_REGISTRY[self.clf_type]['train_fn']
+        self.clf_predict_fn = CLASSIFIER_REGISTRY[self.clf_type]['predict_fn']
 
         # Handle Thresholds
         self.clf_threshold = clf_threshold 
@@ -142,26 +140,17 @@ class GPwithClassifier:
             self.use_clf = False
             return 
 
-        # Get training function and parameters
-        if self.clf_type == 'ellipsoid':
-            best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
-            self.clf_params, self.clf_metrics = self.classifier.train(self.train_x_clf, labels, best_pt=best_pt)
-        else:
-            self.clf_params, self.clf_metrics = self.classifier.train(self.train_x_clf,labels) #available_classifiers[self.clf_type]['train']
+        # Prepare kwargs for training
+        kwargs = {}
+        best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+        kwargs['best_pt'] = best_pt
 
-        self._clf_predict_func = self.classifier.get_predict_proba_fn(self.clf_params)
-
-        # Call the specific training function
-        # Training functions return (predict_func, model_params, metrics_dict)
-
-        # best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
-        # kwargs = {
-        #     'best_pt': best_pt,
-        #     'probability_threshold': self.probability_threshold,
-        # }
-        # self._clf_predict_func, self.clf_params, self.clf_metrics = train_func(self.train_x_clf, 
-        #                                                                        labels, init_params = self.clf_params,
-        #                                                                        **kwargs)
+        # Train classifier using the registered function
+        # This now returns params, metrics, and predict_fn
+        self.clf_params, self.clf_metrics, self._clf_predict_func = self.clf_train_fn(
+            self.train_x_clf, labels, self.clf_settings, 
+            init_params=self.clf_params, **kwargs
+        )
 
         log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
         log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
@@ -330,6 +319,7 @@ class GPwithClassifier:
             'kernel_variance': self.gp.kernel_variance,
             'hyperparam_priors': self.gp.hyperparam_priors,
             'clf_type': self.clf_type,
+            'clf_settings': self.clf_settings,  # Save classifier settings
             'clf_use_size': self.clf_use_size,
             'clf_update_step': self.clf_update_step,
             'probability_threshold': self.probability_threshold,
@@ -384,6 +374,7 @@ class GPwithClassifier:
         clf_threshold = float(data['clf_threshold']) if 'clf_threshold' in data.files else 300
         gp_threshold = float(data['gp_threshold']) if 'gp_threshold' in data.files else 600
         clf_type = str(data['clf_type']) if 'clf_type' in data.files else 'svm'
+        clf_settings = data['clf_settings'].item() if 'clf_settings' in data.files else {}
         clf_use_size = int(data['clf_use_size']) if 'clf_use_size' in data.files else 30
         clf_update_step = int(data['clf_update_step']) if 'clf_update_step' in data.files else 1
         probability_threshold = float(data['probability_threshold']) if 'probability_threshold' in data.files else 0.5
@@ -404,6 +395,7 @@ class GPwithClassifier:
             train_y=train_y_clf,
             clf_flag=clf_flag,
             clf_type=clf_type,
+            clf_settings=clf_settings,
             clf_use_size=clf_use_size,
             clf_update_step=clf_update_step,
             probability_threshold=probability_threshold,
@@ -422,8 +414,16 @@ class GPwithClassifier:
         # Restore saved classifier parameters if available
         if 'clf_params' in data.files:
             gp_clf.clf_params = data['clf_params'].item()
-            # Set the prediction function using the saved parameters
-            gp_clf._clf_predict_func = gp_clf.classifier.get_predict_proba_fn(gp_clf.clf_params)
+            # Set the prediction function using the saved parameters (for loading from file)
+            if gp_clf.clf_type == 'svm':
+                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params)
+            elif gp_clf.clf_type == 'nn':
+                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params, gp_clf.clf_settings)
+            elif gp_clf.clf_type == 'ellipsoid':
+                d = gp_clf.train_x_clf.shape[1]
+                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(
+                    gp_clf.clf_params, gp_clf.clf_settings, d
+                )
         if 'clf_metrics' in data.files:
             gp_clf.clf_metrics = data['clf_metrics'].item()
             
@@ -568,7 +568,15 @@ class GPwithClassifier:
         
         # Regenerate prediction function if classifier parameters exist
         if self.clf_params is not None:
-            gp_clf_copy._clf_predict_func = gp_clf_copy.classifier.get_predict_proba_fn(gp_clf_copy.clf_params)
+            if self.clf_type == 'svm':
+                gp_clf_copy._clf_predict_func = gp_clf_copy.clf_predict_fn(gp_clf_copy.clf_params)
+            elif self.clf_type == 'nn':
+                gp_clf_copy._clf_predict_func = gp_clf_copy.clf_predict_fn(gp_clf_copy.clf_params, gp_clf_copy.clf_settings)
+            elif self.clf_type == 'ellipsoid':
+                d = gp_clf_copy.train_x_clf.shape[1]
+                gp_clf_copy._clf_predict_func = gp_clf_copy.clf_predict_fn(
+                    gp_clf_copy.clf_params, gp_clf_copy.clf_settings, d
+                )
 
         return gp_clf_copy
 

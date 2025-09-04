@@ -19,6 +19,133 @@ except ImportError:
     log.warning("Flax is not available. Only SVM classifier will be available.")
 
 # -----------------------------------------------------------------------------
+# Standalone training and prediction functions for classifiers
+# -----------------------------------------------------------------------------
+
+def train_svm_classifier(X, Y, settings, init_params=None, **kwargs):
+    """Train SVM classifier and return parameters, metrics, and predict function."""
+    gamma = settings.get('gamma', 'scale')
+    C = settings.get('C', 1e7)
+    kernel = settings.get('kernel', 'rbf')
+    
+    clf = SVC(kernel=kernel, gamma=gamma, C=C)
+    clf.fit(X, Y) 
+    support_vectors = clf.support_vectors_
+    dual_coef = clf.dual_coef_[0]  # convert to 1D array
+    intercept = float(clf.intercept_[0])
+    gamma_eff = float(clf._gamma) # note: this is the effective gamma value used by scikit-learn
+
+    # convert to jax arrays
+    support_vectors = jnp.array(support_vectors)
+    dual_coef = jnp.array(dual_coef)
+    metrics = {
+        'n_support_vectors': len(support_vectors),
+        'gamma': f"{gamma_eff:.2e}",
+        'C': f"{C:.2e}",
+        'intercept': f"{intercept:.2e}",
+    }
+    params = {
+        'support_vectors': support_vectors,
+        'dual_coef': dual_coef,
+        'intercept': intercept,
+        'gamma_eff': gamma_eff
+    }
+    
+    # Create predict function
+    predict_fn = jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, 
+                                dual_coef=dual_coef, intercept=intercept, gamma=gamma_eff))
+    
+    return params, metrics, predict_fn
+
+def get_svm_predict_proba_fn(params):
+    """Get prediction function for SVM classifier from parameters (for loading from file)."""
+    support_vectors = params['support_vectors']
+    dual_coef = params['dual_coef']
+    intercept = params['intercept']
+    gamma = params['gamma_eff']
+    return jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, 
+                          dual_coef=dual_coef, intercept=intercept, gamma=gamma))
+
+def train_nn_classifier(X, Y, settings, init_params=None, **kwargs):
+    """Train neural network classifier and return parameters, metrics, and predict function."""
+    # Create model with settings
+    model = MLPClassifier(**settings)
+    
+    # Train with multiple restarts
+    params, metrics = train_nn_multiple_restarts(
+        model=model,
+        x=X, y=Y,
+        init_params=init_params
+    )
+    
+    # Create predict function
+    def predict_proba_fn(x):
+        logits = model.apply(params, x, train=False)
+        return jax.nn.sigmoid(logits.squeeze(-1))
+    predict_fn = jax.jit(predict_proba_fn)
+    
+    return params, metrics, predict_fn
+
+def get_nn_predict_proba_fn(params, settings, **kwargs):
+    """Get prediction function for NN classifier from parameters (for loading from file)."""
+    # Recreate model with same settings to get the apply function
+    model = MLPClassifier(**settings)
+    
+    def predict_proba_fn(x):
+        logits = model.apply(params, x, train=False)
+        return jax.nn.sigmoid(logits.squeeze(-1))
+    return jax.jit(predict_proba_fn)
+
+def train_ellipsoid_classifier(X, Y, settings, init_params=None, **kwargs):
+    """Train ellipsoid classifier and return parameters, metrics, and predict function."""
+    d = X.shape[1]
+    mu = kwargs.get('best_pt', 0.5*jnp.ones(d))
+    
+    # Create model with settings
+    model = EllipsoidClassifier(d=d, mu=mu, **settings)
+    
+    # Train with multiple restarts
+    params, metrics = train_ellipsoid_multiple_restarts(
+        model=model,
+        x=X, y=Y,
+        init_params=init_params,
+    )
+    
+    def predict_proba_fn(x):
+        logits = model.apply(params, x, train=False)
+        return jax.nn.sigmoid(logits.squeeze())
+    predict_fn = jax.jit(predict_proba_fn)
+    
+    return params, metrics, predict_fn
+
+def get_ellipsoid_predict_proba_fn(params, settings, d, **kwargs):
+    """Get prediction function for ellipsoid classifier from parameters (for loading from file)."""
+    mu = kwargs.get('best_pt', 0.5*jnp.ones(d))
+    model = EllipsoidClassifier(d=d, mu=mu, **settings)
+    
+    def predict_proba_fn(x):
+        # Use provided best_pt or fall back to default
+        logits = model.apply(params, x, train=False)
+        return jax.nn.sigmoid(logits.squeeze())
+    return jax.jit(predict_proba_fn)
+
+# Dictionary mapping classifier types to their functions
+CLASSIFIER_REGISTRY = {
+    'svm': {
+        'train_fn': train_svm_classifier,
+        'predict_fn': get_svm_predict_proba_fn,
+    },
+    'nn': {
+        'train_fn': train_nn_classifier,
+        'predict_fn': get_nn_predict_proba_fn,
+    },
+    'ellipsoid': {
+        'train_fn': train_ellipsoid_classifier,
+        'predict_fn': get_ellipsoid_predict_proba_fn,
+    }
+}
+
+# -----------------------------------------------------------------------------
 # Scikit-learn SVM Classifier using JAX for prediction.
 # -----------------------------------------------------------------------------
 
