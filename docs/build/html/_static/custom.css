@@ -1,1 +1,69 @@
-/* This file intentionally left blank. */
+/* Custom CSS for JaxBo documentation */
+
+/* Make code blocks more readable */
+.highlight {
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 10px;
+}
+
+/* Style for API documentation */
+.py.class, .py.function, .py.method {
+    border-left: 3px solid #2980B9;
+    padding-left: 10px;
+    margin-bottom: 20px;
+}
+
+/* Style for parameter lists */
+.field-list {
+    margin-bottom: 20px;
+}
+
+.field-name {
+    font-weight: bold;
+    color: #2980B9;
+}
+
+/* Style for note and warning admonitions */
+.admonition.note {
+    background-color: #e8f4f8;
+    border-left: 4px solid #2980B9;
+}
+
+.admonition.warning {
+    background-color: #fdf2e8;
+    border-left: 4px solid #e67e22;
+}
+
+/* Style for code examples */
+.literal-block-wrapper {
+    margin: 10px 0;
+}
+
+/* Improve table styling */
+table.docutils {
+    border-collapse: collapse;
+    border: 1px solid #ddd;
+    margin: 20px 0;
+}
+
+table.docutils th,
+table.docutils td {
+    border: 1px solid #ddd;
+    padding: 8px 12px;
+}
+
+table.docutils th {
+    background-color: #f8f9fa;
+    font-weight: bold;
+}
+
+/* Style for inline code */
+code.docutils.literal {
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 3px;
+    padding: 2px 4px;
+    font-size: 90%;
+}
