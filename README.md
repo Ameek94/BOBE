@@ -1,15 +1,40 @@
-# Bayesian Optimization for Bayesian Evidence (BOBE) using Jax
+# JaxBO
 
-
+JaxBO is a package for performing Bayesian model comparison by computing the Bayesian Evidence using Bayesian Optimization for expensive likelihood functions, developed for applications to cosmology. It uses a Gaussian process surrogate for the expensive likelihood function and iteratively builds this surrogate using Bayesian Optimization. Acquisition functions such as EI, LogEI and integrated posterior variance as currently supported. 
 To install run
 
 ``python -m pip install .``
 
 from the package directory. For an editable (dev) install do
 
-``python -m pip install -e .`` instead.
+``python -m pip install -e .`` 
 
-See the examples folder for guidance on how to run the code, documentation is currently a work in progress.
+instead. If you face installations issues related to incompatible versions of some dependencies, you can also set up an environment for JaxBo with the exact package versions it was developed and tested with.
+
+```bash
+# Create environment from the minimal essential packages
+conda env create -f environment.yml
+
+# Activate the environment
+conda activate jaxbo
+
+# Install JaxBo in development mode
+pip install -e .
+```
+
+Documentation is currently a work in progress, however the examples folder contains several example on how to run the code with different likelihoods, including cosmological likelihoods interfaced through the Cobaya package or your own custom likelihoods. The examples can simply be run as 
+
+``
+python your_chosen_example.py
+``
+
+The code can also be run in MPI mode using
+
+``
+mpirun -n X python your_bo_script.py
+``
+
+where X is the number of MPI process. In mpi mode, the code will distribute the computation of the likelihood functions at several candidiate points across the different MPI processes. This can be very useful when dealing with likelihood with typical evaluation times of a few seconds or more. 
 
 ## References
 

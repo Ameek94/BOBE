@@ -27,9 +27,9 @@ class GPwithClassifier:
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
                  optimizer="optax", optimizer_kwargs={'lr': 5e-3, 'name': 'adam'},
-                 kernel_variance_bounds = [-4, 8], lengthscale_bounds=[np.log10(0.01), 2],
+                 kernel_variance_bounds = [1e-4, 1e8], lengthscale_bounds=[0.01, 100],
                  lengthscale_priors='DSLP', lengthscales=None, kernel_variance=1.0,
-                 tausq=None, tausq_bounds=[-4, 4], train_clf_on_init=True,  # Prevent retraining on copy
+                 tausq=None, tausq_bounds=[1e-4, 1e4], train_clf_on_init=True,  # Prevent retraining on copy
 
                  ):
         """
@@ -61,7 +61,7 @@ class GPwithClassifier:
             Threshold for adding points to the GP training set. Default is 5000.
         noise, kernel, optimizer, kernel_variance_bounds, lengthscale_bounds,
         lengthscale_priors, lengthscales, kernel_variance:
-            GP parameters (see DSLP_GP/SAAS_GP).
+            GP parameters (see DSLP_GP/SAAS_GP). Note: bounds are now in actual space, not log10.
         """
         # Store Data and Classifier Settings
         self.train_x_clf = jnp.array(train_x)
@@ -442,7 +442,8 @@ class GPwithClassifier:
         prob = rng_mcmc.uniform(0, 1)
         high_temp = rng_mcmc.uniform(1.5,6.) 
         # high_temp = rng_mcmc.uniform(1.,2.) ** 2
-        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        # temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        temp=1. # For now always use temp=1
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 

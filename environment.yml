@@ -1,0 +1,39 @@
+name: jaxbo
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # Python version (exact)
+  - python=3.12.2
+    
+  # Essential system packages via conda
+  - pip=24.0
+  
+  # Core scientific computing (exact versions from working environment)
+  - numpy=1.26.4
+  - scipy=1.13.1  # Note: your current has 1.16.1 which may be unreleased, using stable version
+  - matplotlib=3.8.4
+  - scikit-learn=1.3.0
+  - tqdm=4.66.1
+
+
+  
+  # Install JAX ecosystem and other Python packages via pip (exact versions)
+  - pip:
+    # JAX ecosystem - core requirements (exact versions from your environment)
+    - jax==0.4.25
+    - jaxlib==0.4.25
+    - numpyro==0.15.0
+    - optax==0.2.2
+    
+    # TensorFlow ecosystem (required for tensorflow-probability)
+    - tensorflow-probability==0.23.0
+    
+    # Cosmology packages - essential for JaxBo (exact versions)
+    - cobaya==3.5.7
+    - getdist==1.4.7
+    - dynesty==2.1.4
+    
+    # Optional dependencies (exact versions)
+    - mpi4py==3.1.5  # optional: for parallel computing
+    - flax==0.8.2    # optional: for neural network classifiers

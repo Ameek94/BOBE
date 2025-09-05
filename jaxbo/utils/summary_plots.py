@@ -628,7 +628,7 @@ class BOBESummaryPlotter:
         return ax
     
     def plot_kl_divergences(self, kl_data: Optional[Dict] = None,
-                           ax: Optional[plt.Axes] = None) -> plt.Axes:
+                           ax: Optional[plt.Axes] = None, annotate=False) -> plt.Axes:
         """
         Plot successive KL divergences between NS iterations (reverse, forward, symmetric).
         
@@ -695,7 +695,8 @@ class BOBESummaryPlotter:
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         
         # Add annotation
-        ax.text(0.02, 0.98, 'KL divergences between successive NS iterations\n'
+        if annotate:
+            ax.text(0.02, 0.98, 'KL divergences between successive NS iterations\n'
                             'Invalid values shown as 1000', 
                transform=ax.transAxes, va='top', ha='left', 
                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7), fontsize=10)

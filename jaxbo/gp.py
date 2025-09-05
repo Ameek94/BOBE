@@ -120,7 +120,7 @@ class GP:
 
     def __init__(self,train_x,train_y,noise=1e-6,kernel="rbf"
                  ,optimizer="optax",optimizer_kwargs={'lr': 5e-3, 'name': 'adam'}
-                 ,kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2]
+                 ,kernel_variance_bounds = [1e-4,1e8],lengthscale_bounds = [0.05,100]
                  ,lengthscales=None,kernel_variance=None):
         """
         Arguments
@@ -133,6 +133,10 @@ class GP:
             Noise parameter to add to the diagonal of the kernel, default 1e-8
         kernel: str
             Kernel to use, either "rbf" or "matern"
+        kernel_variance_bounds: list
+            Bounds for the kernel variance in actual space, default [1e-4, 1e8]
+        lengthscale_bounds: list  
+            Bounds for the lengthscales in actual space, default [0.05, 100]
         """
         self.train_x = train_x
         self.train_y = train_y
@@ -164,11 +168,18 @@ class GP:
         self.train_y = (train_y - self.y_mean) / self.y_std
         self.lengthscales = jnp.ones(self.ndim) if lengthscales is None else jnp.array(lengthscales)
         self.kernel_variance = 1. if kernel_variance is None else kernel_variance
-        self.lengthscale_bounds = lengthscale_bounds
-        self.kernel_variance_bounds = kernel_variance_bounds
+        
+        # Convert actual bounds to log10 space for internal use
+        self.lengthscale_bounds_actual = lengthscale_bounds
+        self.kernel_variance_bounds_actual = kernel_variance_bounds
+        self.lengthscale_bounds = [jnp.log10(lengthscale_bounds[0]), jnp.log10(lengthscale_bounds[1])]
+        self.kernel_variance_bounds = [jnp.log10(kernel_variance_bounds[0]), jnp.log10(kernel_variance_bounds[1])]
+
         self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.kernel_variance_bounds]
         self.hyperparam_bounds = jnp.array(self.hyperparam_bounds).T # shape (2, D+1)
         log.debug(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
+        log.debug(f" Actual lengthscale bounds =  {self.lengthscale_bounds_actual}")
+        log.debug(f" Actual kernel variance bounds =  {self.kernel_variance_bounds_actual}")
 
         self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True))
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
@@ -346,7 +357,7 @@ class GP:
         init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
         if n_restarts>1:
             addn_init_params = init_params_u + 0.25*np.random.normal(size=(n_restarts-1, init_params.shape[0]))
-            init_params_u = np.vstack([init_params_u, addn_init_params])
+            init_params_u = jnp.vstack([init_params_u, addn_init_params])
         x0 = jnp.clip(init_params_u, 0.0, 1.0)
         log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
 
@@ -378,7 +389,8 @@ class GP:
         """
         train_y = self.train_y * self.y_std + self.y_mean  # unstandardize the training targets
         np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=train_y,noise=self.noise,
-         lengthscales=self.lengthscales,kernel_variance=self.kernel_variance,hyperparam_priors=self.hyperparam_priors)
+         lengthscales=self.lengthscales,kernel_variance=self.kernel_variance,hyperparam_priors=self.hyperparam_priors,
+         lengthscale_bounds_actual=self.lengthscale_bounds_actual,kernel_variance_bounds_actual=self.kernel_variance_bounds_actual)
 
     @classmethod
     def load(cls, filename, **kwargs):
@@ -413,9 +425,26 @@ class GP:
         kernel_variance = float(data['kernel_variance']) if 'kernel_variance' in data.files else None
         optimizer = str(data['optimizer']) if 'optimizer' in data.files else "optax"
         optimizer_kwargs = dict(data['optimizer_kwargs']) if 'optimizer_kwargs' in data.files else {"name": "adam", "lr": 1e-3}
+        
+        # Load bounds - handle both old (log10) and new (actual) formats
+        if 'lengthscale_bounds_actual' in data.files:
+            lengthscale_bounds = data['lengthscale_bounds_actual'].tolist()
+        else:
+            # Legacy: convert from log10 bounds to actual bounds
+            old_bounds = kwargs.get('lengthscale_bounds', [np.log10(0.05), 2])
+            lengthscale_bounds = [10**old_bounds[0], 10**old_bounds[1]]
+            
+        if 'kernel_variance_bounds_actual' in data.files:
+            kernel_variance_bounds = data['kernel_variance_bounds_actual'].tolist()
+        else:
+            # Legacy: convert from log10 bounds to actual bounds
+            old_bounds = kwargs.get('kernel_variance_bounds', [-4, 8])
+            kernel_variance_bounds = [10**old_bounds[0], 10**old_bounds[1]]
+        
         # Create GP instance - it will automatically standardize train_y and compute cholesky/alphas
         gp = cls(train_x=train_x, train_y=train_y, noise=noise, 
-                lengthscales=lengthscales, kernel_variance=kernel_variance, optimizer=optimizer, optimizer_kwargs=optimizer_kwargs, **kwargs)
+                lengthscales=lengthscales, kernel_variance=kernel_variance, optimizer=optimizer, optimizer_kwargs=optimizer_kwargs, 
+                lengthscale_bounds=lengthscale_bounds, kernel_variance_bounds=kernel_variance_bounds, **kwargs)
 
         log.info(f"Loaded GP from {filename} with {train_x.shape[0]} training points")
         return gp
@@ -553,7 +582,7 @@ class DSLP_GP(GP):
     hyperparam_priors: str = 'dslp'
 
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
-                 kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,kernel_variance=None):
+                 kernel_variance_bounds = [1e-4,1e8],lengthscale_bounds = [0.05,100],lengthscales=None,kernel_variance=None):
         """
         Class for the Gaussian Process, single output based on maximum likelihood hyperparameters.
         Uses the dimension scaled lengthscale priors from the paper "Vanilla Bayesian Optimization Performs Great in High Dimensions" (2024),
@@ -570,11 +599,11 @@ class DSLP_GP(GP):
         kernel: Kernel type for the GP
             Default is 'rbf'. This is the kernel type for the GP. Can be 'rbf' or 'matern'.
         optimizer: Optimizer type for the GP
-            Default is 'adam'. This is the optimizer type for the GP.
-        kernel_variance_bounds: Bounds for the kernel variance of the GP (in log10 space) 
-            Default is [-4,4]. These are the bounds for the kernel variance of the GP.
-        lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
-            Default is [np.log10(0.05),2]. These are the boundsfor the length scale of the GP.
+            Default is 'optax'. This is the optimizer type for the GP.
+        kernel_variance_bounds: Bounds for the kernel variance in actual space
+            Default is [1e-4, 1e8]. These are the bounds for the kernel variance of the GP.
+        lengthscale_bounds: Bounds for the length scale in actual space
+            Default is [0.05, 100]. These are the bounds for the length scale of the GP.
         """
         super().__init__(train_x,train_y,noise,kernel,optimizer,optimizer_kwargs,
                          kernel_variance_bounds,lengthscale_bounds,lengthscales=lengthscales,kernel_variance=kernel_variance)
@@ -594,9 +623,9 @@ class SAAS_GP(GP):
 
     def __init__(self,
                  train_x, train_y, noise=1e-8, kernel="rbf", 
-                 optimizer="adam",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
-                 kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2],
-                 tausq_bounds = [-4,4],lengthscales=None,kernel_variance=None,tausq=None):
+                 optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
+                 kernel_variance_bounds = [1e-4,1e8],lengthscale_bounds = [0.05,100],
+                 tausq_bounds = [1e-4,1e4],lengthscales=None,kernel_variance=None,tausq=None):
         """
         Class for the Gaussian Process with SAAS priors, using maximum likelihood hyperparameters. 
         The implementation is based on the paper "High-Dimensional Bayesian Optimization with Sparse Axis-Aligned Subspaces", 2021
@@ -612,19 +641,23 @@ class SAAS_GP(GP):
         kernel: Kernel type for the GP
             Default is 'rbf'. This is the kernel type for the GP. Can be 'rbf' or 'matern'.
         optimizer: Optimizer type for the GP
-            Default is 'adam'. This is the optimizer type for the GP.
-        kernel_variance_bounds: Bounds for the kernel variance of the GP (in log10 space) 
-            Default is [-4,4]. These are the bounds for the kernel variance of the GP.
-        lengthscale_bounds: Bounds for the length scale of the GP (in log10 space) 
-            Default is [np.log10(0.05),2]. These are the bounds for the length scale of the GP.
-        tausq_bounds: Bounds for the tausq parameter of the GP (in log10 space)
-            Default is [-4,4]. These are the bounds for the tausq parameter of the GP.
+            Default is 'optax'. This is the optimizer type for the GP.
+        kernel_variance_bounds: Bounds for the kernel variance in actual space
+            Default is [1e-4, 1e8]. These are the bounds for the kernel variance of the GP.
+        lengthscale_bounds: Bounds for the length scale in actual space
+            Default is [0.05, 100]. These are the bounds for the length scale of the GP.
+        tausq_bounds: Bounds for the tausq parameter in actual space
+            Default is [1e-4, 1e4]. These are the bounds for the tausq parameter of the GP.
         """
         super().__init__(train_x, train_y, noise, kernel, optimizer,optimizer_kwargs,kernel_variance_bounds,lengthscale_bounds,lengthscales=lengthscales,kernel_variance=kernel_variance)
         self.tausq = tausq if tausq is not None else 1.0
-        self.tausq_bounds = jnp.array(tausq_bounds)
+        
+        # Convert actual tausq bounds to log10 space for internal use
+        self.tausq_bounds_actual = tausq_bounds
+        self.tausq_bounds = [np.log10(tausq_bounds[0]), np.log10(tausq_bounds[1])]
         self.hyperparam_bounds = jnp.vstack([self.hyperparam_bounds.T, self.tausq_bounds]).T # shape (2, D+2)
-        print(f'HP bounds shape: {self.hyperparam_bounds.shape}')
+        log.debug(f'HP bounds shape: {self.hyperparam_bounds.shape}')
+        log.debug(f'Actual tausq bounds: {self.tausq_bounds_actual}')
 
     def neg_mll(self, log10_params):
         hyperparams = 10**log10_params
@@ -678,6 +711,16 @@ class SAAS_GP(GP):
         self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
         self.fitted = True
+
+    def save(self,outfile='gp'):
+        """
+        Saves the SAAS_GP to a file
+        """
+        train_y = self.train_y * self.y_std + self.y_mean  # unstandardize the training targets
+        np.savez(f'{outfile}.npz',train_x=self.train_x,train_y=train_y,noise=self.noise,
+         lengthscales=self.lengthscales,kernel_variance=self.kernel_variance,tausq=self.tausq,hyperparam_priors=self.hyperparam_priors,
+         lengthscale_bounds_actual=self.lengthscale_bounds_actual,kernel_variance_bounds_actual=self.kernel_variance_bounds_actual,
+         tausq_bounds_actual=self.tausq_bounds_actual)
 
 
 
