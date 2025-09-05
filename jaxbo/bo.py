@@ -7,18 +7,11 @@ jax.config.update("jax_enable_x64", True)
 from numpyro.util import enable_x64
 enable_x64()
 from typing import Optional, Union, Tuple, Dict, Any
-from optax import adam, apply_updates
-from getdist import plots, MCSamples, loadMCSamples
-import tqdm
-import time
-from scipy import stats
 # from .acquisition import WIPV, EI #, logEI
 from .gp import GP, DSLP_GP, SAAS_GP, load_gp #, sample_GP_NUTS
 from .clf_gp import GPwithClassifier, load_clf_gp
-from .likelihood import BaseLikelihood, ExternalLikelihood, CobayaLikelihood
-from cobaya.yaml import yaml_load
-from cobaya.model import get_model
-from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, kl_divergence_gaussian, kl_divergence_samples
+from .likelihood import BaseLikelihood, CobayaLikelihood
+from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, kl_divergence_gaussian, kl_divergence_samples, get_threshold_for_nsigma
 from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
 from .nested_sampler import nested_sampling_Dy
 from .utils.logging_utils import get_logger
@@ -46,15 +39,13 @@ class BOBE:
                  n_cobaya_init=4,
                  n_sobol_init=32,
                  min_evals=200,
-                 max_eval_budget=1500,
+                 max_evals=1500,
                  max_gp_size=1200,
                  resume=False,
                  resume_file=None,
                  save=True,
-                 save_step=25,
-                 noise = 1e-8,
+                 save_step=5,
                  fit_step=10,
-                 kernel='rbf',
                  wipv_batch_size=4,
                  ns_step=10,
                  num_hmc_warmup=512,
@@ -66,18 +57,16 @@ class BOBE:
                  zeta_ei = 0.1,
                  use_clf=True,
                  clf_type = "svm",
-                 clf_use_size = 300,
-                 clf_update_step=5,
-                 clf_threshold=250,
-                 gp_threshold=5000,
+                 clf_nsigma_threshold=25.0,
+                 clf_use_size = 40,
+                 clf_update_step=1,
                  logz_threshold=1.0,
-                 convergence_n_iters=2,
+                 convergence_n_iters=1,
                  minus_inf=-1e5,
                  pool: MPI_Pool = None,
                  do_final_ns=True,
-                 return_getdist_samples=False,
-                 optimizer: str = 'optax',
-                 seed: Optional[int] = None):
+                 seed: Optional[int] = None,
+                 gp_kwargs: Dict[str, Any] = None):
         """
         Initialize the BOBE sampler class.
 
@@ -92,7 +81,7 @@ class BOBE:
             Number of initial Sobol points for sobol when starting a run. 
         min_evals : int
             Minimum number of true objective evaluations before checking convergence.
-        max_eval_budget : int
+        max_evals : int
             Maximum number of true objective function evaluations.
         max_gp_size : int
             Maximum number of points used to train the GP. 
@@ -133,6 +122,17 @@ class BOBE:
             Number of successive iterations the logz threshold must be met for convergence to be declared. Defaults to 2.
         minus_inf : float
             Value to use for minus infinity. This is used to set the lower bound of the loglikelihood.
+        optimizer : str
+            Optimizer to use for both GP and acquisition function optimization. Options are 'optax' or 'scipy'.
+        gp_kwargs : Dict[str, Any], optional
+            Additional keyword arguments to pass to GP constructors. These can include:
+            - noise: Noise parameter for GP (float, default: 1e-8)
+            - kernel: Kernel type ('rbf', 'matern', etc., default: 'rbf')
+            - optimizer_kwargs: Dict for optimizer settings (e.g., {'lr': 1e-3, 'name': 'adam'})
+            - kernel_variance_bounds: List of [lower, upper] bounds for kernel variance
+            - lengthscale_bounds: List of [lower, upper] bounds for lengthscales  
+            - lengthscales: Initial lengthscale values (array-like)
+            - kernel_variance: Initial kernel variance value (float)
         """
 
         self.pool = pool
@@ -151,7 +151,6 @@ class BOBE:
         self.output_file = self.loglikelihood.name
         self.save = save
         self.save_step = save_step
-        self.return_getdist_samples = return_getdist_samples
         self.do_final_ns = do_final_ns
         self.logz_threshold = logz_threshold
         self.convergence_n_iters = convergence_n_iters
@@ -159,7 +158,16 @@ class BOBE:
         self.prev_converged = False
         self.convergence_counter = 0  # Track successive convergence iterations
         self.termination_reason = "Max evaluation budget reached"
-        self.optimizer = optimizer
+
+        self.optimizer = 'optax'
+        
+        # Store GP kwargs for passing to GP constructors
+        self.gp_kwargs = gp_kwargs if gp_kwargs is not None else {}
+        
+        # Extract GP-specific parameters with defaults
+        self.gp_optimizer = self.gp_kwargs.get('optimizer', 'optax')
+        self.noise = self.gp_kwargs.get('noise', 1e-8)
+        self.kernel = self.gp_kwargs.get('kernel', 'rbf')
         # Initialize results manager BEFORE any timing operations
         self.results_manager = BOBEResults(
             output_file=self.output_file,
@@ -170,10 +178,10 @@ class BOBE:
                 'n_cobaya_init': n_cobaya_init,
                 'n_sobol_init': n_sobol_init,
                 'min_evals': min_evals,
-                'max_eval_budget': max_eval_budget,
+                'max_evals': max_evals,
                 'max_gp_size': max_gp_size,
                 'fit_step': fit_step,
-                'kernel': kernel,
+                'kernel': self.kernel,
                 'wipv_batch_size': wipv_batch_size,
                 'ns_step': ns_step,
                 'num_hmc_warmup': num_hmc_warmup,
@@ -184,16 +192,12 @@ class BOBE:
                 'acq': acq,
                 'use_clf': use_clf,
                 'clf_type': clf_type,
-                'clf_use_size': clf_use_size,
-                'clf_threshold': clf_threshold,
-                'clf_update_step': clf_update_step,
-                'gp_threshold': gp_threshold,
+                'clf_nsigma_threshold': clf_nsigma_threshold,
                 'logz_threshold': logz_threshold,
                 'convergence_n_iters': convergence_n_iters,
                 'minus_inf': minus_inf,
                 'do_final_ns': do_final_ns,
-                'return_getdist_samples': return_getdist_samples,
-                'optimizer': optimizer,
+                'gp_optimizer': self.gp_optimizer,
                 'seed': seed
             },
             likelihood_name=self.loglikelihood.name,
@@ -220,23 +224,33 @@ class BOBE:
             self.results_manager.end_timing('True Objective Evaluations')
             train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
             train_y = jnp.array(init_vals)
+            gp_init_kwargs = {'train_x': train_x, 'train_y': train_y, 'noise': self.noise, 'kernel': self.kernel, 'optimizer': self.gp_optimizer}
+            # Add any additional GP parameters from gp_kwargs
+            for key, value in self.gp_kwargs.items():
+                if key in ['optimizer_kwargs', 'kernel_variance_bounds', 'lengthscale_bounds', 
+                              'lengthscales', 'kernel_variance', 'kernel', 'noise']:
+                    gp_init_kwargs[key] = value
             # GP setup
             if use_clf:
-                self.gp = GPwithClassifier(
-                train_x=train_x, train_y=train_y,noise=noise,
-                minus_inf=minus_inf, lengthscale_priors=lengthscale_priors,
-                clf_type=clf_type, clf_use_size=clf_use_size, clf_update_step=clf_update_step,
-                clf_threshold=clf_threshold, gp_threshold=gp_threshold,
-                optimizer=self.optimizer)
+                # Add clf specific parameters to gp_init_kwargs
+                clf_threshold = get_threshold_for_nsigma(clf_nsigma_threshold,self.ndim)
+                gp_init_kwargs.update(
+                    {'minus_inf': minus_inf,
+                    'lengthscale_priors': lengthscale_priors,
+                    'clf_type': clf_type,
+                    'clf_use_size': clf_use_size,
+                    'clf_update_step': clf_update_step,
+                    'clf_threshold': clf_threshold,
+                    'gp_threshold': 2 * clf_threshold
+                })
+                
+                self.gp = GPwithClassifier(**gp_init_kwargs)
             else:
                 self.gp = {
                     'UNIFORM': GP,
                     'DSLP': DSLP_GP,
                     'SAAS': SAAS_GP
-                }[lengthscale_priors.upper()](
-                train_x=train_x, train_y=train_y,
-                noise=noise, kernel=kernel,
-                optimizer=self.optimizer)
+                }[lengthscale_priors.upper()](**gp_init_kwargs)
             self.results_manager.start_timing('GP Training')
             self.gp.fit(maxiter=200,n_restarts=4)
             self.results_manager.end_timing('GP Training')
@@ -250,7 +264,7 @@ class BOBE:
 
         # Store remaining settings
         self.min_evals = min_evals
-        self.max_eval_budget = max_eval_budget
+        self.max_evals = max_evals
         self.max_gp_size = max_gp_size
         self.fit_step = fit_step
         self.ns_step = ns_step
@@ -270,7 +284,7 @@ class BOBE:
         self.prev_samples = None
 
 
-    def run(self, n_log_ei_iters = 100):
+    def run(self, n_log_ei_iters = 20):
         """
         Run the iterative Bayesian Optimization loop.
 
@@ -283,7 +297,7 @@ class BOBE:
         gp : GP object
             The fitted GP object.
         ns_samples : MCSamples | Nested sampling samples
-            The samples from the final nested sampling run. This is a either a getdist MCSamples instance or a dictionary with the following keys ['x','weights','logl'].
+            The samples from the final nested sampling run.
         logz_dict : dict
             The logz dictionary from the nested sampling run. This contains the upper and lower bounds of the logz.
         """
@@ -330,7 +344,7 @@ class BOBE:
             self.mc_samples['method'] = 'MCMC'        
             # self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
 
-        while current_evals < self.max_eval_budget:
+        while current_evals < self.max_evals:
 
             # ideally, we want to decide whether to do the mc_update depending on the results of the previous steps
             #  e.g. if using ns_samples we can stay on it for a bit longer since it explores the space better
@@ -351,7 +365,7 @@ class BOBE:
             acq_str = self.acquisition.name
 
             print("\n")
-            log.info(f" Iteration {ii}, objective evals {current_evals}/{self.max_eval_budget}, refit={refit}, ns={ns_flag}, acq={acq_str}")
+            log.info(f" Iteration {ii}, objective evals {current_evals}/{self.max_evals}, refit={refit}, ns={ns_flag}, acq={acq_str}")
 
 
             self.results_manager.start_timing('Acquisition Optimization')
@@ -488,7 +502,7 @@ class BOBE:
 
         log.info(f" Sampling stopped: {self.termination_reason}")
         log.info(f" Final GP training set size: {self.gp.train_x.shape[0]}, max size: {self.max_gp_size}")
-        # log.info(f" Number of iterations: {ii}, max iterations: {self.max_eval_budget}")
+        # log.info(f" Number of iterations: {ii}, max iterations: {self.max_evals}")
 
 
         if not self.converged:
@@ -587,25 +601,11 @@ class BOBE:
                 log.info(f"{phase}: {time_spent:.2f}s ({percentage:.1f}%)")
         log.info(f"{'='*50}")
 
-        if self.return_getdist_samples:
-            # Use the results manager to create GetDist samples
-            output_samples = self.results_manager.get_getdist_samples()
-            if output_samples is None:
-                # Fallback to manual creation if GetDist not available
-                sampler_method = 'nested' if ns_samples is not None else 'mcmc'
-                ranges = dict(zip(self.loglikelihood.param_list,self.loglikelihood.param_bounds.T))
-                gd_samples = MCSamples(samples=samples, names=self.loglikelihood.param_list, labels=self.loglikelihood.param_labels, 
-                                    ranges=ranges, weights=weights,loglikes=loglikes,label='GP',sampler=sampler_method)
-                output_samples = gd_samples
-            log.info(f"Returning getdist samples")
-        else:
-            output_samples = samples_dict
-
         # Get comprehensive results from results manager
         comprehensive_results = self.results_manager.get_results_dict()
         
         # Prepare return dictionary with both legacy and new format
-        results_dict['samples'] = output_samples
+        results_dict['samples'] = samples_dict
         results_dict['gp'] = self.gp
         results_dict['likelihood'] = self.loglikelihood
         

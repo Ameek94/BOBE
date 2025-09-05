@@ -109,8 +109,6 @@ def kl_divergence_gaussian(mu1, Cov1, mu2, Cov2):
         'symmetric': kl_symmetric
     }
 
-
-
 #----Misc----
 
 # Classifier threshold util

@@ -7,8 +7,22 @@ from typing import Union, Callable, Dict, Any, Optional
 
 def run_bobe(likelihood: Union[BaseLikelihood, str], 
              likelihood_kwargs: Dict[str, Any] = {},
+             gp_kwargs: Dict[str, Any] = {},
+             use_clf: bool = True,
+             clf_type: str = 'svm',
+             clf_nsigma_threshold: float = 25.0,
              verbosity: str ='INFO', 
              log_file: Optional[str] = None, 
+             min_evals: int = 100,
+             max_evals: int = 1000,
+             max_gp_size: int = 1200,
+             fit_step: int = 5,
+             ns_step: int = 5,
+             wipv_batch_size: int = 5,
+             zeta_ei: float = 0.1,
+             n_log_ei_iters: int = 20,
+             resume: bool = False,
+             resume_file: Optional[str] = None,
              **sampler_kwargs):
     """
     High-level wrapper to run the BOBE sampler.
@@ -16,24 +30,30 @@ def run_bobe(likelihood: Union[BaseLikelihood, str],
 
     Arguments
     ----------
-    likelihood: Union[Callable, str]
-        The log-likelihood function or a string identifier for a Cobaya model.
+    likelihood: Union[BaseLikelihood, str]
+        The log-likelihood object which inherits from the BaseLikelihood class or a string for a Cobaya model yaml file.
     likelihood_kwargs: Dict[str, Any]
         Additional keyword arguments to pass to the likelihood. See loglike.py for details.
+    gp_kwargs: Dict[str, Any]
+        Additional keyword arguments to pass to the GP constructor. These can include:
+        - lengthscale_priors: str, choice of GP type ('DSLP', 'SAAS', 'uniform'), defaults to 'DSLP'
+        - noise: Noise parameter for GP (float, default: 1e-8)
+        - kernel: Kernel type ('rbf', 'matern', etc., default: 'rbf')
+        - optimizer: Optimizer type ('optax', 'scipy', default: 'optax')
+        - optimizer_kwargs: Dict for optimizer settings (e.g., {'lr': 1e-3, 'name': 'adam'})
+        - kernel_variance_bounds: List of [lower, upper] bounds for kernel variance
+        - lengthscale_bounds: List of [lower, upper] bounds for lengthscales  
+        - lengthscales: Initial lengthscale values (array-like)
+        - kernel_variance: Initial kernel variance value (float)
     verbosity: str
         The logging verbosity level.
     log_file: Optional[str]
         The path to a log file.
     sampler_kwargs:
-        Additional keyword arguments to pass to the sampler. See bo.py for details.
+        Additional keyword arguments to pass to the sampler. These can include:
+        - optimizer: str, optimizer type ('optax', 'scipy', default: 'optax') - affects both GP and acquisition optimization
+        - All other BOBE constructor parameters. See bo.py for details.
     """
-
-    # try:
-    #     from mpi4py import MPI
-    #     rank = MPI.COMM_WORLD.Get_rank()
-    #     size = MPI.COMM_WORLD.Get_size()
-    # except Exception as e:
-    #     print(f"[SANITY CHECK] Rank unknown. Error: {e}", flush=True)
 
 
     setup_logging(verbosity=verbosity,log_file=log_file)
@@ -54,10 +74,36 @@ def run_bobe(likelihood: Union[BaseLikelihood, str],
         # here should setup default arguments for all necessary parameters
         n_log_ei_iters = sampler_kwargs.pop('n_log_ei_iters', 20)
 
+        # Handle lengthscale_priors specially to validate the choice
+        lengthscale_priors = gp_kwargs.get('lengthscale_priors', 'DSLP')
+        valid_priors = ['DSLP', 'SAAS', 'uniform']
+        if lengthscale_priors not in valid_priors:
+            print(f"Warning: Invalid lengthscale_priors '{lengthscale_priors}'. Defaulting to 'DSLP'.")
+            lengthscale_priors = 'DSLP'
+        
+        # Pass lengthscale_priors as a top-level parameter (still needed for GP type selection)
+        sampler_kwargs['lengthscale_priors'] = lengthscale_priors
+        
+        # Store the full gp_kwargs for passing to GP constructors
+        sampler_kwargs['gp_kwargs'] = gp_kwargs
+
         # Master creates the sampler and runs it
         sampler = BOBE(
             loglikelihood=My_Likelihood,
             pool=pool,
+            min_evals=min_evals,
+            max_evals=max_evals,
+            max_gp_size=max_gp_size,
+            fit_step=fit_step,
+            ns_step=ns_step,
+            wipv_batch_size=wipv_batch_size,
+            zeta_ei=zeta_ei,
+            n_log_ei_iters=n_log_ei_iters,
+            resume=resume,
+            resume_file=resume_file,
+            use_clf=use_clf,
+            clf_type=clf_type,
+            clf_nsigma_threshold=clf_nsigma_threshold,
             **sampler_kwargs
         )
         results = sampler.run(n_log_ei_iters=n_log_ei_iters)
