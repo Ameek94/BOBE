@@ -48,3 +48,5 @@ test_methods/
 *.ranges
 *results_plots/
 examples/plot_CPL.ipynb
+docs/build/
+docs/build/html/
