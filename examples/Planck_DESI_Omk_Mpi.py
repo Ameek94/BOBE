@@ -18,6 +18,9 @@ clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 # Arg 3: Number of log EI iterations
 n_log_ei_iters = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 
+# Arg 4: LS priors
+ls_priors = str(sys.argv[4]) if len(sys.argv) > 4 else 'SAAS'
+
 # --- Imports ---
 from jaxbo.run import run_bobe
 from jaxbo.utils.logging_utils import get_logger
@@ -31,7 +34,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Planck_DESIDR2_Omk_{clf_type}'
+    likelihood_name = f'Planck_DESIDR2_Omk_{clf_type}_{ls_priors}'
 
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -46,10 +49,10 @@ def main():
         verbosity='INFO',
         n_log_ei_iters=n_log_ei_iters,
         n_cobaya_init=16,
-        n_sobol_init=64,
+        n_sobol_init=32,
         min_evals=1000,
-        max_eval_budget=2500,
-        max_gp_size=1700,
+        max_evals=3000,
+        max_gp_size=1600,
         fit_step=5,
         zeta_ei=0.1,
         wipv_batch_size=5,
@@ -57,17 +60,16 @@ def main():
         num_hmc_warmup=512,
         num_hmc_samples=10000, 
         mc_points_size=512,
-        lengthscale_priors='DSLP', 
+        gp_kwargs={'lengthscale_prior': ls_priors,}, 
         use_clf=True,
         clf_use_size=10,
-        clf_threshold=350,
-        gp_threshold=700,
         clf_update_step=1,  # SVM update step
         clf_type=clf_type,  # Using SVM for classification
         minus_inf=-1e5,
         logz_threshold=0.01,
         seed=10000,  # For reproducibility
         do_final_ns=True,
+        convergence_n_iters=1,
     )
 
     end = time.time()
@@ -115,7 +117,7 @@ def main():
             param_labels=likelihood.param_labels,
             plot_params=param_list_LCDM,
             output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_MCMC_Omk',
+            reference_file='./cosmo_input/chains/Planck_DESIDR2_LCDM_Omk_MCMC',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
             scatter_points=False
@@ -129,7 +131,7 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             output_file=f'{likelihood.name}_full',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_MCMC_Omk',
+            reference_file='./cosmo_input/chains/Planck_DESIDR2_LCDM_Omk_MCMC',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
             scatter_points=False

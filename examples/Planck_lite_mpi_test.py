@@ -12,7 +12,7 @@ from jaxbo.run import run_bobe
 def main():
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/LCDM_lite.yaml'
-    ls_priors = 'dslp'
+    ls_priors = 'DSLP'
     likelihood_name = f'Planck_lite_{ls_priors}'
 
     start = time.time()
@@ -26,12 +26,12 @@ def main():
             'noise_std': 0.0,
             'name': likelihood_name,
         },
-        resume=True,
+        resume=False,
         resume_file=f'{likelihood_name}',
         verbosity='INFO',
         n_cobaya_init=2, 
         n_sobol_init=4, 
-        min_evals=0, 
+        min_evals=25, 
         max_evals=250,
         max_gp_size=200,
         fit_step=5, 
@@ -41,11 +41,11 @@ def main():
         num_hmc_warmup=512,
         num_hmc_samples=4096, 
         mc_points_size=256,
-        gp_kwargs={'lengthscale_priors': ls_priors, 'fixed_kernel_variance': False}, 
+        gp_kwargs={'lengthscale_prior': ls_priors,}, 
         use_clf=True,
         clf_type='svm',
         minus_inf=-1e5,
-        logz_threshold=0.005,
+        logz_threshold=0.01,
         seed=10,
         do_final_ns=False,
     )
@@ -53,7 +53,7 @@ def main():
     end = time.time()
 
     if results is not None:
-        log = get_logger("[main]")
+        log = get_logger("main")
         manual_timing = end - start
 
         log.info("\n" + "="*60)

@@ -48,8 +48,8 @@ def main():
         verbosity='INFO',
         n_cobaya_init=4,
         n_sobol_init=8,
-        min_evals=2,
-        n_log_ei_iters=0,
+        min_evals=18,
+        n_log_ei_iters=10,
         max_evals=100,
         max_gp_size=200,
         fit_step=1,
@@ -69,7 +69,7 @@ def main():
     end = time.time()
 
     if results is not None:
-        log = get_logger("[main]")
+        log = get_logger("main")
         manual_timing = end - start
 
         log.info("\n" + "="*60)

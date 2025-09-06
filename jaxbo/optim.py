@@ -30,21 +30,21 @@ def _get_optimizer(optimizer_name: str, learning_rate: float = 1e-3, optimizer_k
         except AttributeError:
             raise ValueError(f"Optimizer '{optimizer_name}' not found in optax library")
 
-def _setup_bounds(bounds: Optional[Union[List, Tuple, jnp.ndarray]], ndim: int) -> jnp.ndarray:
+def _setup_bounds(bounds: Optional[Union[List, Tuple, jnp.ndarray]], num_params: int) -> jnp.ndarray:
     """Setup parameter bounds."""
     if bounds is None:
-        return jnp.array([[0., 1.]] * ndim).T
+        return jnp.array([[0., 1.]] * num_params).T
     bounds = jnp.array(bounds)
     if bounds.shape == (2,):  # Same bounds for all dimensions
-        bounds = jnp.tile(bounds.reshape(1, 2), (ndim, 1)).T
-    elif bounds.shape != (2, ndim):
-        raise ValueError(f"Bounds shape {bounds.shape} incompatible with {ndim} dimensions")
+        bounds = jnp.tile(bounds.reshape(1, 2), (num_params, 1)).T
+    elif bounds.shape != (2, num_params):
+        raise ValueError(f"Bounds shape {bounds.shape} incompatible with {num_params} dimensions")
     return bounds
 
 def _setup_initial_points(
     x0: Optional[jnp.ndarray], 
     n_restarts: int, 
-    ndim: int, 
+    num_params: int, 
 ) -> jnp.ndarray:
     """
     Generates initial points for optimization restarts in the unit cube.
@@ -55,7 +55,7 @@ def _setup_initial_points(
         Initial guess(es), assumed to be in the unit cube.
     n_restarts : int
         Number of restarts.
-    ndim : int
+    num_params : int
         Number of dimensions.
 
     Returns:
@@ -65,7 +65,7 @@ def _setup_initial_points(
     """
     if x0 is None:
         # Generate all points randomly in the unit cube
-        x0_arr = np.random.uniform(low=0.0, high=1.0, size=(n_restarts, ndim))
+        x0_arr = np.random.uniform(low=0.0, high=1.0, size=(n_restarts, num_params))
     else:
         # Use provided points and add more if needed
         x0_arr = jnp.atleast_2d(x0)
@@ -73,7 +73,7 @@ def _setup_initial_points(
         
         if n_x0 < n_restarts:
             needed = n_restarts - n_x0
-            new_points = np.random.uniform(low=0.0, high=1.0, size=(needed, ndim))
+            new_points = np.random.uniform(low=0.0, high=1.0, size=(needed, num_params))
             x0_arr = jnp.concatenate([x0_arr, new_points], axis=0)
         elif n_x0 > n_restarts:
             x0_arr = x0_arr[:n_restarts]
@@ -84,7 +84,7 @@ def optimize_optax(
     fun: Callable,
     fun_args: Optional[Tuple] = (),
     fun_kwargs: Optional[dict] = {},
-    ndim: int = 1,
+    num_params: int = 1,
     bounds: Optional[Union[List, Tuple, jnp.ndarray]] = None,
     x0: Optional[jnp.ndarray] = None,
     optimizer_kwargs: Optional[dict] = {"name": "adam", "lr": 1e-3, "early_stop_patience": 25},
@@ -104,10 +104,10 @@ def optimize_optax(
         Positional arguments to pass to the objective function.
     fun_kwargs: Optional[dict]
         Keyword arguments to pass to the objective function.
-    ndim: int
+    num_params: int
         Number of parameters.
     bounds: Optional[Union[List, Tuple, jnp.ndarray]]
-        Parameter bounds in shape (2, ndim).
+        Parameter bounds in shape (2, num_params).
     x0: Optional[jnp.ndarray]
         Initial guess for the parameters, rescaled to unit space.
     optimizer_kwargs: Optional[dict]
@@ -123,7 +123,7 @@ def optimize_optax(
     Tuple[jnp.ndarray, float]
         The best parameters found and the corresponding function value.
     """
-    bounds_arr = _setup_bounds(bounds, ndim)
+    bounds_arr = _setup_bounds(bounds, num_params)
     
     # Scaled function: operates in unit space [0,1], then maps to real bounds
     def scaled_func(x):
@@ -146,7 +146,7 @@ def optimize_optax(
         return u_params, opt_state, val
     
     init_params_unit = _setup_initial_points(
-        x0, n_restarts, ndim)
+        x0, n_restarts, num_params)
 
     # Global best across all restarts
     global_best_f = np.inf
@@ -213,7 +213,7 @@ def optimize_scipy(
     fun: Callable,
     fun_args: Optional[Tuple] = (),
     fun_kwargs: Optional[dict] = {},
-    ndim: int = 1,
+    num_params: int = 1,
     bounds: Optional[Union[List, Tuple, jnp.ndarray]] = None,
     x0: Optional[jnp.ndarray] = None,
     optimizer_kwargs: Optional[dict] = {"method": "L-BFGS-B", "ftol": 1e-6, "gtol": 1e-6},
@@ -232,10 +232,10 @@ def optimize_scipy(
         Additional arguments to pass to the function
     fun_kwargs : dict, optional
         Additional keyword arguments to pass to the function
-    ndim: int
+    num_params: int
         Number of parameters.
     bounds: Optional[Union[List, Tuple, jnp.ndarray]]
-        Parameter bounds in shape (2, ndim).
+        Parameter bounds in shape (2, num_params).
     x0: Optional[jnp.ndarray]
         Initial guess for the parameters, rescaled to unit space.
     optimizer_kwargs: Optional[dict]
@@ -254,10 +254,10 @@ def optimize_scipy(
 
     method = optimizer_kwargs.get("method", "L-BFGS-B")
 
-    bounds_arr = _setup_bounds(bounds, ndim)
+    bounds_arr = _setup_bounds(bounds, num_params)
     
     # Create scipy bounds format: list of (min, max) tuples
-    scipy_bounds = [(float(bounds_arr[0, i]), float(bounds_arr[1, i])) for i in range(ndim)]
+    scipy_bounds = [(float(bounds_arr[0, i]), float(bounds_arr[1, i])) for i in range(num_params)]
 
     # JIT-compiled function that computes both value and gradient
     @jax.jit
@@ -266,7 +266,7 @@ def optimize_scipy(
     
     # Generate initial points
     x0_list = _setup_initial_points(
-        x0, n_restarts, ndim,)
+        x0, n_restarts, num_params,)
 
     x0_list = scale_from_unit(x0_list, bounds_arr)  # Convert to numpy for scipy
 

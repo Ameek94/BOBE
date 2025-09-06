@@ -150,7 +150,7 @@ def nested_sampling_Dy(gp: GP
     # add check for all same logl values in case of initial plateau
     if np.all(logl == logl[0]):
         success = False
-        nlive = 1500
+        nlive = 2*nlive
         log.warning("All initial logl values are the same. Retrying with the dynamic nested sampler and increased nlive.")
         sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
                                        sample=sample_method,nlive=nlive)

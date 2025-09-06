@@ -10,7 +10,7 @@ import numpyro.distributions as dist
 from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
-from .gp import GP, DSLP_GP, SAAS_GP, safe_noise_floor
+from .gp import GP, safe_noise_floor
 from .clf import (
     CLASSIFIER_REGISTRY
 )
@@ -19,17 +19,17 @@ from .utils.logging_utils import get_logger
 log = get_logger("clf_gp")
 
 
-class GPwithClassifier:
-    def __init__(self, train_x=None, train_y=None, clf_flag=True,
+class GPwithClassifier(GP):
+    def __init__(self, train_x=None, train_y=None,
                  clf_type='svm', clf_settings={},
                  clf_use_size=10, clf_update_step=1,
                  probability_threshold=0.5, minus_inf=-1e5,
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
                  optimizer="optax", optimizer_kwargs={'lr': 5e-3, 'name': 'adam'},
-                 kernel_variance_bounds=[1e-4, 1e8], fixed_kernel_variance = False, lengthscale_bounds=[0.01, 10],
+                 kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.01, 10],
                  tausq=None, tausq_bounds=[1e-4, 1e4],
-                 lengthscale_priors='DSLP', lengthscales=None, kernel_variance=1.0,
+                 kernel_variance_prior=None, lengthscale_prior=None, lengthscales=None, kernel_variance=1.0,
                  train_clf_on_init=True,  # Prevent retraining on copy
                  ):
         """
@@ -66,7 +66,6 @@ class GPwithClassifier:
         # Store Data and Classifier Settings
         self.train_x_clf = jnp.array(train_x)
         self.train_y_clf = jnp.array(train_y).reshape(-1, 1) # Ensure 2D
-        # self.clf_data_size = self.train_x_clf.shape[0]
         self.clf_use_size = clf_use_size
         self.clf_update_step = clf_update_step
         self.clf_type = clf_type.lower()
@@ -75,7 +74,6 @@ class GPwithClassifier:
         self.clf_metrics = {}
         self.probability_threshold = probability_threshold
         self.minus_inf = minus_inf
-        self.clf_flag = clf_flag  # Whether to use classifier or not
         
         # Store classifier functions and settings
         if self.clf_type not in CLASSIFIER_REGISTRY:
@@ -94,9 +92,7 @@ class GPwithClassifier:
         train_x_gp = self.train_x_clf[mask_gp]
         train_y_gp = self.train_y_clf[mask_gp] 
 
-        # Initialize GP 
-        self.ndim = train_x_gp.shape[1] 
-
+        # Initialize GP using inheritance
         gp_init_kwargs = {
             'train_x': train_x_gp,
             'train_y': train_y_gp,
@@ -108,20 +104,18 @@ class GPwithClassifier:
             'lengthscale_bounds': lengthscale_bounds,
             'lengthscales': lengthscales,
             'kernel_variance': kernel_variance,
+            'lengthscale_prior': lengthscale_prior if lengthscale_prior is not None else "DSLP",
+            'kernel_variance_prior': kernel_variance_prior,
+            'tausq': tausq,
+            'tausq_bounds': tausq_bounds,
         }
-        if lengthscale_priors.upper() == 'DSLP':
-            gp_init_kwargs.update({'fixed_kernel_variance': fixed_kernel_variance})
-            self.gp = DSLP_GP(**gp_init_kwargs)
-        elif lengthscale_priors.upper() == 'SAAS':
-            self.gp = SAAS_GP(**gp_init_kwargs)
-        else:
-            log.warning(f"Not using DSLP or SAAS priors (got '{lengthscale_priors}'), using default GP")
-            self.gp = GP(**gp_init_kwargs)
+                    
+        super().__init__(**gp_init_kwargs)
 
         # Initialize Classifier
-        self.use_clf = (self.clf_data_size >= self.clf_use_size) and self.clf_flag
+        self.use_clf = self.clf_data_size >= self.clf_use_size
         self.clf_model_params = None
-        self._clf_predict_func = None # Will hold the jitted prediction function
+        self._clf_predict_func = None
 
         if self.use_clf:
              if train_clf_on_init:
@@ -166,10 +160,10 @@ class GPwithClassifier:
 
     def fit(self, maxiter=300, n_restarts=4):
         """Fits the GP hyperparameters."""
-        self.gp.fit(maxiter=maxiter, n_restarts=n_restarts)
+        super().fit(maxiter=maxiter, n_restarts=n_restarts)
 
     def predict_mean_single(self,x):
-        gp_mean = self.gp.predict_mean_single(x)
+        gp_mean = super().predict_mean_single(x)
         if not self.use_clf or self._clf_predict_func is None:
             return gp_mean
 
@@ -177,7 +171,7 @@ class GPwithClassifier:
         return jnp.where(clf_probs >= self.probability_threshold, gp_mean, self.minus_inf)
 
     def predict_var_single(self,x):
-        var  = self.gp.predict_var_single(x)
+        var  = super().predict_var_single(x)
         if not self.use_clf or self._clf_predict_func is None:
             return var
 
@@ -192,24 +186,8 @@ class GPwithClassifier:
         x = jnp.atleast_2d(x)
         return jax.vmap(self.predict_var_single)(x)
 
-    def predict_mean(self,x):
-        res = self.gp.predict_mean(x)
-        if not self.use_clf or self._clf_predict_func is None:
-            return res
-
-        clf_probs = self._clf_predict_func(x)
-        return jnp.where(clf_probs >= self.probability_threshold, res, self.minus_inf)
-    
-    def predict_var(self,x):
-        var = self.gp.predict_var(x)
-        if not self.use_clf or self._clf_predict_func is None:
-            return var
-
-        clf_probs = self._clf_predict_func(x)
-        return jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
-
     def predict_single(self,x):
-        mean, var = self.gp.predict_single(x)
+        mean, var = super().predict_single(x)
         if not self.use_clf or self._clf_predict_func is None:
             return mean, var
 
@@ -223,7 +201,7 @@ class GPwithClassifier:
         Computes the fantasy variance, see gp.py for more details.
         Classifier logic could potentially be added here if needed.
         """
-        return self.gp.fantasy_var(new_x, mc_points,k_train_mc)
+        return super().fantasy_var(new_x, mc_points,k_train_mc)
 
     def update(self, new_x, new_y, refit=True, maxiter=500, n_restarts=6):
         """
@@ -233,57 +211,48 @@ class GPwithClassifier:
         new_x = jnp.atleast_2d(new_x)
         new_y = jnp.atleast_2d(new_y)
 
-        if not self.clf_flag:
-            gp_not_updated = self.gp.update(new_x, new_y, refit=refit, maxiter=maxiter, n_restarts=n_restarts)
-        else:
-            # Check for duplicates in data 
-            new_pts_to_add = []
-            new_vals_to_add = []
-            for i in range(new_x.shape[0]):
-                if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x[i], atol=1e-6,rtol=1e-4), axis=1)):
-                    log.info(f"Point {new_x[i]} already exists in the training set, not updating")
-                    duplicate = True
-                else:
-                    new_pts_to_add.append(new_x[i])
-                    new_vals_to_add.append(new_y[i])
+        # Check for duplicates in data 
+        new_pts_to_add = []
+        new_vals_to_add = []
+        for i in range(new_x.shape[0]):
+            if jnp.any(jnp.all(jnp.isclose(self.train_x_clf, new_x[i], atol=1e-6,rtol=1e-4), axis=1)):
+                log.info(f"Point {new_x[i]} already exists in the training set, not updating")
+            else:
+                new_pts_to_add.append(new_x[i])
+                new_vals_to_add.append(new_y[i])
 
-            new_pts_to_add = jnp.atleast_2d(jnp.array(new_pts_to_add))
-            new_vals_to_add = jnp.atleast_2d(jnp.array(new_vals_to_add))
-            self.train_x_clf = jnp.concatenate([self.train_x_clf, new_pts_to_add], axis=0)
-            self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
-            log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
+        new_pts_to_add = jnp.atleast_2d(jnp.array(new_pts_to_add))
+        new_vals_to_add = jnp.atleast_2d(jnp.array(new_vals_to_add)).reshape(-1, 1)
+        self.train_x_clf = jnp.concatenate([self.train_x_clf, new_pts_to_add], axis=0)
+        self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
+        log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
 
-            # Update GP data if within threshold
-            gp_not_updated = False
-            for i in range(new_pts_to_add.shape[0]):
-                val = new_vals_to_add[i]
-                x = new_pts_to_add[i]
-                if val > (self.train_y_clf.max() - self.gp_threshold):
-                    # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
-                    self.gp.update(x, val,refit=False)
-                else:
-                    log.info("Point not within GP threshold, not updating GP.")
-            if refit:
-                self.gp.fit(maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
+        for i in range(new_pts_to_add.shape[0]):
+            val = new_vals_to_add[i]
+            x = new_pts_to_add[i]
+            if val > (self.train_y_clf.max() - self.gp_threshold):
+                # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
+                super().update(x, val,refit=False)
+            else:
+                log.info("Point not within GP threshold, not updating GP.")
+        if refit:
+            super().fit(maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
 
-            # Check if classifier data size has reached the threshold
-            if not self.use_clf:
-                if self.clf_data_size >= self.clf_use_size:
-                    log.info(f"Classifier data size ({self.clf_data_size}) reached use size ({self.clf_use_size}). Will start using classifier.")
-                    self.use_clf = True
+        # Check if classifier data size has reached the threshold
+        if not self.use_clf:
+            if self.clf_data_size >= self.clf_use_size:
+                log.info(f"Classifier data size ({self.clf_data_size}) reached use size ({self.clf_use_size}). Will start using classifier.")
+                self.use_clf = True
 
             # Retrain classifier if conditions are met
-            if self.use_clf: #
-                self._train_classifier()
-
-        # Return whether GP was updated, classifier is always updated
-        return gp_not_updated
+        if self.use_clf: #
+            self._train_classifier()
 
     def kernel(self,x1,x2,lengthscales,kernel_variance,noise,include_noise=True):
         """
         Returns the kernel function used by the GP.
         """
-        return self.gp.kernel(x1,x2,lengthscales,kernel_variance,noise,include_noise=include_noise)
+        return super().kernel(x1,x2,lengthscales,kernel_variance,noise,include_noise=include_noise)
 
     def get_random_point(self,rng=None):
 
@@ -306,49 +275,131 @@ class GPwithClassifier:
 
         return pt
     
-    def save(self,outfile='gp'):
+    def state_dict(self):
         """
-        Saves the GPwithClassifier to a file
-
-        Arguments
-        ---------
-        outfile: str
-            The name of the file to save the GP to. Default is 'gp'.
+        Returns a dictionary containing the complete state of the GPwithClassifier.
+        This can be used for saving, loading, or copying the GPwithClassifier.
+        
+        Returns
+        -------
+        state: dict
+            Dictionary containing all necessary information to reconstruct the GPwithClassifier
         """
-        # Save both classifier training data and GP training data
-        save_dict = {
-            'train_x_clf': self.train_x_clf,
-            'train_y_clf': self.train_y_clf,
-            'train_x_gp': self.gp.train_x,
-            'train_y_gp': self.gp.train_y * self.gp.y_std + self.gp.y_mean,  # unstandardize
-            'noise': self.noise,
-            'clf_threshold': self.clf_threshold,
-            'gp_threshold': self.gp_threshold,
-            'lengthscales': self.gp.lengthscales,
-            'kernel_variance': self.gp.kernel_variance,
-            'hyperparam_priors': self.gp.hyperparam_priors,
+        # Start with the base GP state
+        state = super().state_dict()
+        
+        # Add classifier-specific data
+        classifier_state = {
+            # Classifier training data
+            'train_x_clf': np.array(self.train_x_clf),
+            'train_y_clf': np.array(self.train_y_clf),
+            
+            # Classifier configuration
             'clf_type': self.clf_type,
-            'clf_settings': self.clf_settings,  # Save classifier settings
+            'clf_settings': self.clf_settings,
             'clf_use_size': self.clf_use_size,
             'clf_update_step': self.clf_update_step,
             'probability_threshold': self.probability_threshold,
             'minus_inf': self.minus_inf,
-            'clf_flag': self.clf_flag,
-            'use_clf': self.use_clf
+            'clf_threshold': self.clf_threshold,
+            'gp_threshold': self.gp_threshold,
+            'use_clf': self.use_clf,
+            
+            # Classifier state
+            'clf_params': self.clf_params,
+            'clf_metrics': self.clf_metrics,
+            
+            # Class identifier
+            'gp_class': 'GPwithClassifier'
         }
         
-        # Add SAAS-specific parameters if applicable
-        if hasattr(self.gp, 'tausq'):
-            save_dict['tausq'] = self.gp.tausq
-            save_dict['tausq_bounds'] = getattr(self.gp, 'tausq_bounds', [-4, 4])
-            
-        # Add classifier parameters if available
-        if self.clf_params is not None:
-            save_dict['clf_params'] = self.clf_params
-        if self.clf_metrics:
-            save_dict['clf_metrics'] = self.clf_metrics
+        # Update the state with classifier-specific data
+        state.update(classifier_state)
         
-        np.savez(f'{outfile}.npz', **save_dict)
+        return state
+    
+    @classmethod
+    def from_state_dict(cls, state):
+        """
+        Creates a GPwithClassifier instance from a state dictionary.
+        
+        Arguments
+        ---------
+        state: dict
+            State dictionary returned by state_dict()
+            
+        Returns
+        -------
+        gp_clf: GPwithClassifier
+            The reconstructed GPwithClassifier object
+        """
+        # Create GPwithClassifier instance
+        gp_clf = cls(
+            train_x=state['train_x_clf'],
+            train_y=state['train_y_clf'],
+            clf_type=state['clf_type'],
+            clf_settings=state['clf_settings'],
+            clf_use_size=state['clf_use_size'],
+            clf_update_step=state['clf_update_step'],
+            probability_threshold=state['probability_threshold'],
+            minus_inf=state['minus_inf'],
+            clf_threshold=state['clf_threshold'],
+            gp_threshold=state['gp_threshold'],
+            noise=state['noise'],
+            kernel=state['kernel_name'],
+            optimizer=state['optimizer_method'],
+            optimizer_kwargs=state['optimizer_kwargs'],
+            kernel_variance_bounds=state['kernel_variance_bounds'],
+            lengthscale_bounds=state['lengthscale_bounds'],
+            lengthscales=state['lengthscales'],
+            kernel_variance=state['kernel_variance'],
+            kernel_variance_prior=state.get('kernel_variance_prior_spec'),
+            lengthscale_prior=state.get('lengthscale_prior_spec'),
+            tausq=state.get('tausq', 1.0),
+            tausq_bounds=state.get('tausq_bounds', [-4, 4]),
+            train_clf_on_init=False,
+        )
+        
+        # Restore computed state if available
+        if state.get('cholesky') is not None:
+            gp_clf.cholesky = jnp.array(state['cholesky'])
+        if state.get('alphas') is not None:
+            gp_clf.alphas = jnp.array(state['alphas'])
+        
+        # Restore classifier state
+        gp_clf.use_clf = state['use_clf']
+        gp_clf.clf_params = state.get('clf_params')
+        gp_clf.clf_metrics = state.get('clf_metrics', {})
+        
+        # Regenerate prediction function if classifier parameters exist
+        if gp_clf.clf_params is not None:
+            if gp_clf.clf_type == 'svm':
+                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params)
+            elif gp_clf.clf_type == 'nn':
+                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params, gp_clf.clf_settings)
+            elif gp_clf.clf_type == 'ellipsoid':
+                d = gp_clf.train_x_clf.shape[1]
+                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(
+                    gp_clf.clf_params, gp_clf.clf_settings, d
+                )
+        
+        return gp_clf
+
+    def save(self, filename='gp'):
+        """
+        Save the GPwithClassifier state to a file using state_dict.
+        
+        Arguments
+        ---------
+        filename: str
+            The filename to save to (with or without .npz extension). Default is 'gp'.
+        """
+        if not filename.endswith('.npz'):
+            filename += '.npz'
+        
+        state = self.state_dict()
+        np.savez(filename, **state)
+        log.info(f"Saved GPwithClassifier state to {filename}")
 
     @classmethod
     def load(cls, filename, **kwargs):
@@ -358,7 +409,7 @@ class GPwithClassifier:
         Arguments
         ---------
         filename: str
-            The name of the file to load the GP from (with or without .npz extension)
+            The name of the file to load the GPwithClassifier from (with or without .npz extension)
         **kwargs: 
             Additional keyword arguments to pass to the GPwithClassifier constructor
             
@@ -375,72 +426,27 @@ class GPwithClassifier:
         except FileNotFoundError:
             raise FileNotFoundError(f"Could not find file {filename}")
         
-        # Extract classifier training data
-        train_x_clf = jnp.array(data['train_x_clf'])
-        train_y_clf = jnp.array(data['train_y_clf'])
+        # Convert arrays back to the expected format
+        state = {}
+        for key in data.files:
+            value = data[key]
+            if isinstance(value, np.ndarray) and value.shape == ():
+                # Handle scalar arrays
+                state[key] = value.item()
+            else:
+                state[key] = value
         
-        # Extract GP settings
-        clf_threshold = float(data['clf_threshold']) if 'clf_threshold' in data.files else 300
-        gp_threshold = float(data['gp_threshold']) if 'gp_threshold' in data.files else 600
-        clf_type = str(data['clf_type']) if 'clf_type' in data.files else 'svm'
-        clf_settings = data['clf_settings'].item() if 'clf_settings' in data.files else {}
-        clf_use_size = int(data['clf_use_size']) if 'clf_use_size' in data.files else 30
-        clf_update_step = int(data['clf_update_step']) if 'clf_update_step' in data.files else 1
-        probability_threshold = float(data['probability_threshold']) if 'probability_threshold' in data.files else 0.5
-        minus_inf = float(data['minus_inf']) if 'minus_inf' in data.files else -1e5
-        clf_flag = bool(data['clf_flag']) if 'clf_flag' in data.files else True
-        noise = float(data['noise']) if 'noise' in data.files else 1e-6
+        # Apply any override kwargs
+        state.update(kwargs)
         
-        # Determine GP type and create lengthscale_priors
-        lengthscale_priors = str(data['hyperparam_priors'].item()) if 'hyperparam_priors' in data.files else 'DSLP'
-        lengthscales = jnp.array(data['lengthscales']) if 'lengthscales' in data.files else None
-        kernel_variance = float(data['kernel_variance']) if 'kernel_variance' in data.files else None
-        tausq = float(data['tausq']) if 'tausq' in data.files else None
-        tausq_bounds = data['tausq_bounds'].tolist() if 'tausq_bounds' in data.files else [-4, 4]
+        # Use from_state_dict for loading
+        gp_clf = cls.from_state_dict(state)
         
-        # Create GPwithClassifier instance
-        gp_clf = cls(
-            train_x=train_x_clf,
-            train_y=train_y_clf,
-            clf_flag=clf_flag,
-            clf_type=clf_type,
-            clf_settings=clf_settings,
-            clf_use_size=clf_use_size,
-            clf_update_step=clf_update_step,
-            probability_threshold=probability_threshold,
-            minus_inf=minus_inf,
-            clf_threshold=clf_threshold,
-            gp_threshold=gp_threshold,
-            noise=noise,
-            lengthscale_priors=lengthscale_priors,
-            lengthscales=lengthscales,
-            kernel_variance=kernel_variance,
-            tausq=tausq,
-            tausq_bounds=tausq_bounds,
-            **kwargs
-        )
-        
-        # Restore saved classifier parameters if available
-        if 'clf_params' in data.files:
-            gp_clf.clf_params = data['clf_params'].item()
-            # Set the prediction function using the saved parameters (for loading from file)
-            if gp_clf.clf_type == 'svm':
-                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params)
-            elif gp_clf.clf_type == 'nn':
-                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params, gp_clf.clf_settings)
-            elif gp_clf.clf_type == 'ellipsoid':
-                d = gp_clf.train_x_clf.shape[1]
-                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(
-                    gp_clf.clf_params, gp_clf.clf_settings, d
-                )
-        if 'clf_metrics' in data.files:
-            gp_clf.clf_metrics = data['clf_metrics'].item()
-            
-        log.info(f"Loaded GPwithClassifier from {filename} with {train_x_clf.shape[0]} training points")
+        log.info(f"Loaded GPwithClassifier from {filename} with {gp_clf.train_x.shape[0]} training points")
         return gp_clf
         
-    def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
-                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4,np_rng=None, rng_key=None):
+    def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,thinning=8,
+                      temp=1.,num_chains=6,np_rng=None, rng_key=None):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
@@ -487,8 +493,8 @@ class GPwithClassifier:
         if num_chains == 1: 
             inits = jnp.array([self.get_random_point(rng=np_rng)])
         else:
-            inits = jnp.vstack([self.get_random_point(rng=np_rng) for _ in range(num_chains-1)])
-            inits = jnp.vstack([inits, self.train_x_clf[jnp.argmax(self.train_y_clf)]])
+            inits = jnp.vstack([self.get_random_point(rng=np_rng) for _ in range(num_chains)])
+            # inits = jnp.vstack([inits, self.train_x_clf[jnp.argmax(self.train_y_clf)]])
 
         log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
 
@@ -534,105 +540,20 @@ class GPwithClassifier:
             mask = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
             train_x_gp = self.train_x_clf[mask]
             train_y_gp = self.train_y_clf[mask] * self.y_std + self.y_mean  # Rescale to original scale
-            hyperparams_dict = self.gp.hyperparams
-            self.gp.reset_train_data(train_x = train_x_gp, train_y = train_y_gp,)
+            hyperparams_dict = getattr(self, "hyperparams", {})
+            # self.reset_train_data  # Method does not exist in base GP(train_x = train_x_gp, train_y = train_y_gp,)
 
     def copy(self):
         """
-        Returns a deep copy of the GPwithClassifier, including its GP and classifier state.
-        """
-        # Copy underlying GP
-        gp_copy = self.gp.copy()
-
-        # Create a new GPwithClassifier object with the same init args
-        gp_clf_copy = GPwithClassifier(
-            train_x=np.array(self.train_x_clf),   # convert to numpy to avoid JAX tracer issues
-            train_y=np.array(self.train_y_clf),
-            clf_flag=self.clf_flag,
-            clf_type=self.clf_type,
-            clf_settings=copy.deepcopy(self.clf_settings),
-            clf_use_size=self.clf_use_size,
-            clf_update_step=self.clf_update_step,
-            probability_threshold=self.probability_threshold,
-            minus_inf=self.minus_inf,
-            clf_threshold=self.clf_threshold,
-            gp_threshold=self.gp_threshold,
-            noise=self.gp.noise,
-            kernel="rbf" if self.gp.kernel_name == "rbf_kernel" else "matern",
-            optimizer="adam",  # adjust if you actually use different optimizers
-            kernel_variance_bounds=self.gp.kernel_variance_bounds,
-            lengthscale_bounds=self.gp.lengthscale_bounds,
-            lengthscale_priors="DSLP",  # or SAAS depending on your setup
-            lengthscales=np.array(self.gp.lengthscales),
-            kernel_variance=float(self.gp.kernel_variance),
-            train_clf_on_init=False,
-        )
-
-        # Replace the gp with the already-trained copy
-        gp_clf_copy.gp = gp_copy
-
-        # Copy classifier state
-        gp_clf_copy.clf_params = copy.deepcopy(self.clf_params)
-        gp_clf_copy.clf_metrics = copy.deepcopy(self.clf_metrics)
-        gp_clf_copy.use_clf = self.use_clf
+        Creates a deep copy of the GPwithClassifier using state_dict.
         
-        # Regenerate prediction function if classifier parameters exist
-        if self.clf_params is not None:
-            if self.clf_type == 'svm':
-                gp_clf_copy._clf_predict_func = gp_clf_copy.clf_predict_fn(gp_clf_copy.clf_params)
-            elif self.clf_type == 'nn':
-                gp_clf_copy._clf_predict_func = gp_clf_copy.clf_predict_fn(gp_clf_copy.clf_params, gp_clf_copy.clf_settings)
-            elif self.clf_type == 'ellipsoid':
-                d = gp_clf_copy.train_x_clf.shape[1]
-                gp_clf_copy._clf_predict_func = gp_clf_copy.clf_predict_fn(
-                    gp_clf_copy.clf_params, gp_clf_copy.clf_settings, d
-                )
-
-        return gp_clf_copy
-
-    @property
-    def lengthscales(self):
-        """Access the underlying GP's lengthscales."""
-        return self.gp.lengthscales
-    
-    @property
-    def kernel_variance(self):
-        """Access the underlying GP's kernel_variance."""
-        return self.gp.kernel_variance
-    
-    @property
-    def tausq(self):
-        """Access the underlying GP's tausq if available."""
-        return getattr(self.gp, 'tausq', None)
-    
-    @property
-    def train_x(self):
-        """Access the underlying GP's training inputs."""
-        return self.gp.train_x
-    
-    @property
-    def train_y(self):
-        """Access the underlying GP's training outputs."""
-        return self.gp.train_y
-    
-    @property
-    def y_mean(self):
-        """Access the underlying GP's y_mean."""
-        return self.gp.y_mean
-    
-    @property
-    def y_std(self):
-        """Access the underlying GP's y_std."""
-        return self.gp.y_std
-    
-    @property
-    def noise(self):
-        """Access the underlying GP's noise parameter."""
-        return self.gp.noise
-    
-    @property
-    def hyperparams(self): 
-        return self.gp.hyperparams
+        Returns
+        -------
+        gp_clf_copy: GPwithClassifier
+            A deep copy of the current GPwithClassifier
+        """
+        state = self.state_dict()
+        return self.__class__.from_state_dict(state)
 
     @property
     def clf_data_size(self):
@@ -642,169 +563,6 @@ class GPwithClassifier:
     @property
     def npoints(self):
         return self.train_x_clf.shape[0]
-    
-    # def create_jitted_single_predict(self):
-
-    #     @jax.jit
-    #     def predict_one_mean(x):
-    #         gp_mean = self.gp.jitted_single_predict_mean(x)
-    #         if self.use_clf:
-    #             clf_probs = self._clf_predict_func(x)
-    #             return jnp.where(clf_probs >= self.probability_threshold, gp_mean, self.minus_inf)
-    #         return gp_mean
-
-    #     @jax.jit
-    #     def predict_one_var(x):
-    #         var = self.gp.jitted_single_predict_var(x)
-    #         if self.use_clf:
-    #             clf_probs = self._clf_predict_func(x)
-    #             return jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
-    #         return var
-
-    #     self.jitted_single_predict_mean = predict_one_mean
-    #     self.jitted_single_predict_var = predict_one_var
-
-    # def gp_numpyro_model(self,temp=1.):
-    #     """
-    #     Returns a numpyro model for the GP.
-    #     This is used for sampling using GP surrogate using the mean as the target for NUTS or SA.
-    #     """
-    #     x = numpyro.sample('x', dist.Uniform(
-    #             low=jnp.zeros(self.train_x_clf.shape[1]),
-    #             high=jnp.ones(self.train_x_clf.shape[1])
-    #         ))
-            
-    #     mean = self.predict_mean(x)
-    #     numpyro.factor('y', mean/temp)
-    #     numpyro.deterministic('logp', mean)
-
-    # def sample_GP_NUTS_old(self, warmup_steps=512, num_samples=512, progress_bar=True, thinning=8, verbose=True,
-    #                    init_params=None, temp=4., restart_on_flat_logp=True):
-    #     """
-    #     Obtain samples from the posterior represented by the GP mean as the logprob.
-    #     Optionally restarts MCMC if all logp values are the same or if HMC fails.
-    #     """
-    #     start = time.time()
-
-    #     rng_mcmc = get_numpy_rng()
-    #     # high_temp = rng_mcmc.uniform(np.sqrt(2), ) ** 2
-    #     prob = rng_mcmc.uniform(0, 1)
-    #     # temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-    #     high_temp = rng_mcmc.uniform(1., 2.) ** 2
-    #     temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-    #     log.info(f"Running MCMC chains with temperature {temp:.4f}")
-        
-    #     num_chains = 4
-
-    #     samples_x = []
-    #     samples_logp = []
-        
-    #     # temps = np.arange(1, num_chains+1, 1)
-
-    #     rng_mcmc = get_numpy_rng()
-    #     prob = rng_mcmc.uniform(0, 1)
-    #     # temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-    #     high_temp = rng_mcmc.uniform(1., 2.) ** 2
-    #     temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-    #     log.info(f"Running MCMC chains with temperature {temp:.4f}")
-        
-    #     def model():
-    #         x = numpyro.sample('x', dist.Uniform(
-    #             low=jnp.zeros(self.train_x_clf.shape[1]),
-    #             high=jnp.ones(self.train_x_clf.shape[1])
-    #         ))
-
-    #         mean = self.jitted_single_predict_mean(x)
-    #         numpyro.factor('y', mean/temp)
-    #         numpyro.deterministic('logp', mean)
-
-    #     rng_key = get_new_jax_key()
-
-    #     for i in range(num_chains):
-    #         if i== 0:
-    #             init_params = self.train_x_clf[jnp.argmax(self.train_y_clf)]
-    #         else:
-    #             init_params = self.get_random_point() #if init_params is None else init_params
-        
-    #         if self.use_clf and init_params is not None:
-    #             init_strategy = init_to_value(values={'x': init_params})
-    #         else:
-    #             init_strategy = init_to_sample()
-        
-    #     # First attempt with NUTS
-    #         try:
-    #             kernel = NUTS(model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
-    #             mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
-    #                     num_chains=1, progress_bar=progress_bar, thinning=thinning)
-    #             mcmc.run(rng_key)
-
-    #             # Check if HMC ran successfully
-    #             mc_samples = mcmc.get_samples()
-    #             logp_vals = mc_samples['logp']
-    #             hmc_success = True
-            
-    #         except Exception as e:
-    #             if verbose:
-    #                 log.error(f"HMC failed with error: {e}. Falling back to SA kernel.")
-    #             hmc_success = False
-    #             logp_vals = None
-
-    #         # Check if we need to restart due to flat logp or HMC failure
-    #         should_restart = False
-        
-    #         if not hmc_success:
-    #             should_restart = True
-    #             if verbose:
-    #                 log.error("HMC failed. Restarting with SA kernel and best point as initial point.")
-    #         elif restart_on_flat_logp and (jnp.any(logp_vals == self.minus_inf) or 
-    #                                    jnp.allclose(logp_vals, logp_vals[0])):
-    #             should_restart = True
-    #             if verbose:
-    #                 log.error("All logp values are the same or contain invalid values. Restarting MCMC from best training point.")
-
-    #         # Restart with SA if needed
-    #         if should_restart:
-    #             try:
-    #                 rng_key = get_new_jax_key()
-    #                 num_chains = 1
-    #                 best_pt = self.train_x_clf[jnp.argmax(self.train_y_clf)]
-    #                 init_strategy = init_to_value(values={'x': best_pt})
-    #                 log.info(f"Reinitializing MCMC with {num_chains} chains using SA kernel.")
-    #                 kernel = SA(model, init_strategy=init_strategy)
-    #                 mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=2 * num_samples,
-    #                         num_chains=num_chains, progress_bar=False, thinning=thinning)
-    #                 mcmc.run(rng_key,)
-    #             except Exception as e:
-    #                 if verbose:
-    #                     log.error(f"SA kernel also failed with error: {e}")
-    #                 raise e
-                
-    #         samples = mcmc.get_samples()
-    #         logp_vals = samples['logp']
-    #         samples_x.append(samples['x'])
-    #         samples_logp.append(logp_vals)
-
-    #         if verbose:
-    #             mcmc.print_summary(exclude_deterministic=False)
-    
-    #     log.info(f"Sampled parameters MCMC took {time.time() - start:.4f} s")
-
-    #     samples_x = jnp.concatenate(samples_x, axis=0)
-    #     samples_logp = jnp.concatenate(samples_logp, axis=0)
-
-    #     samples = {'x': samples_x, 'logp': samples_logp, 'best': samples_x[jnp.argmax(samples_logp)]}
-
-    #     print(f"shape of samples: {samples['x'].shape}")
-
-    #     return samples
-    
-
-    # def prune(self):
-    #     """
-    #     Every time a new maximum is found, we discard points from the GP which do now lie outside the threshold. 
-    #     TO BE IMPLEMENTED
-    #     """
-    #     pass
 
 
 def load_clf_gp(filename, **kwargs):
