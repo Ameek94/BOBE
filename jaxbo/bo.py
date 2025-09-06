@@ -8,7 +8,7 @@ from numpyro.util import enable_x64
 enable_x64()
 from typing import Optional, Union, Tuple, Dict, Any
 # from .acquisition import WIPV, EI #, logEI
-from .gp import GP, DSLP_GP, SAAS_GP, load_gp #, sample_GP_NUTS
+from .gp import GP, DSLP_GP, SAAS_GP, load_gp_from_state_dict as load_gp 
 from .clf_gp import GPwithClassifier, load_clf_gp
 from .likelihood import BaseLikelihood, CobayaLikelihood
 from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, kl_divergence_gaussian, kl_divergence_samples, get_threshold_for_nsigma
@@ -58,7 +58,7 @@ class BOBE:
                  use_clf=True,
                  clf_type = "svm",
                  clf_nsigma_threshold=25.0,
-                 clf_use_size = 40,
+                 clf_use_size = 10,
                  clf_update_step=1,
                  logz_threshold=1.0,
                  convergence_n_iters=1,
@@ -204,17 +204,25 @@ class BOBE:
             resume_from_existing=resume
         )
 
-        # Check if we're resuming from a file or from existing results
+        fresh_start = not resume  # Flag to indicate if we are starting fresh or resuming
+
         if resume and resume_file is not None:
             # Resume from explicit file
-            log.info(f" Resuming from file {resume_file}")
-            # Use the standard naming convention: add _gp if not present
-            gp_file = resume_file+'_gp'
-            if use_clf:
-                self.gp = load_clf_gp(gp_file)
-            else:
-                self.gp = load_gp(gp_file)                
-        else:
+            try:
+                log.info(f" Attempting to resume from file {resume_file}")
+                # Use the standard naming convention: add _gp if not present
+                gp_file = resume_file+'_gp'
+                if use_clf:
+                    self.gp = load_clf_gp(gp_file)
+                else:
+                    self.gp = load_gp(gp_file) 
+                log.info(f" Successfully loaded GP from file {gp_file}")
+            except Exception as e:
+                log.error(f" Failed to load GP from file {gp_file}: {e}")
+                log.info(" Starting a fresh run instead.")
+                fresh_start = True        
+           
+        if fresh_start:
             # Fresh start - evaluate initial points
             self.results_manager.start_timing('True Objective Evaluations')
             if isinstance(self.loglikelihood, CobayaLikelihood):
@@ -228,7 +236,7 @@ class BOBE:
             # Add any additional GP parameters from gp_kwargs
             for key, value in self.gp_kwargs.items():
                 if key in ['optimizer_kwargs', 'kernel_variance_bounds', 'lengthscale_bounds', 
-                              'lengthscales', 'kernel_variance', 'kernel', 'noise']:
+                              'lengthscales', 'kernel_variance','fixed_kernel_variance']:
                     gp_init_kwargs[key] = value
             # GP setup
             if use_clf:
@@ -277,7 +285,7 @@ class BOBE:
         self.zeta_ei = zeta_ei
 
         if self.save:
-            self.gp.save(outfile=f"{self.output_file}_gp")
+            self.gp.save(filename=f"{self.output_file}_gp")
             log.info(f" Saving GP to file {self.output_file}_gp")
 
         # Initialize KL divergence tracking
@@ -408,7 +416,7 @@ class BOBE:
             for k in range(n_batch):
                 new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pts[k].flatten())}
                 log.info(f" New point {new_pt_vals}, {k+1}/{n_batch}")
-                predicted_val = self.gp.predict_mean(new_pts_u[k])
+                predicted_val = self.gp.predict_mean_single(new_pts_u[k])
                 log.info(f" Objective function value = {new_vals[k].item():.4f}, GP predicted value = {predicted_val.item():.4f}")
 
 
@@ -514,7 +522,7 @@ class BOBE:
 
         # Save and final nested sampling
         if self.save:
-            self.gp.save(outfile=f"{self.output_file}_gp")
+            self.gp.save(filename=f"{self.output_file}_gp")
 
         # Prepare final results 
         if self.do_final_ns and not self.converged:
@@ -700,7 +708,7 @@ class BOBE:
                 checkpoint_filename = f"{self.output_file}_checkpoint"
                 
                 # Save GP checkpoint
-                self.gp.save(outfile=f"{checkpoint_filename}_gp")
+                self.gp.save(filename=f"{checkpoint_filename}_gp")
                 log.info(f"Saved GP checkpoint to {checkpoint_filename}_gp.pkl")
 
                 # Save intermediate results checkpoint

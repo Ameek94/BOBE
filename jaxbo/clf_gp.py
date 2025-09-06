@@ -22,15 +22,15 @@ log = get_logger("clf_gp")
 class GPwithClassifier:
     def __init__(self, train_x=None, train_y=None, clf_flag=True,
                  clf_type='svm', clf_settings={},
-                 clf_use_size=400, clf_update_step=5,
+                 clf_use_size=10, clf_update_step=1,
                  probability_threshold=0.5, minus_inf=-1e5,
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
                  optimizer="optax", optimizer_kwargs={'lr': 5e-3, 'name': 'adam'},
-                 kernel_variance_bounds = [1e-4, 1e8], lengthscale_bounds=[0.01, 100],
+                 kernel_variance_bounds=[1e-4, 1e8], fixed_kernel_variance = False, lengthscale_bounds=[0.01, 10],
+                 tausq=None, tausq_bounds=[1e-4, 1e4],
                  lengthscale_priors='DSLP', lengthscales=None, kernel_variance=1.0,
-                 tausq=None, tausq_bounds=[1e-4, 1e4], train_clf_on_init=True,  # Prevent retraining on copy
-
+                 train_clf_on_init=True,  # Prevent retraining on copy
                  ):
         """
         Generic Classifier-GP class combining a GP with a classifier. The GP is trained on the data points
@@ -97,17 +97,26 @@ class GPwithClassifier:
         # Initialize GP 
         self.ndim = train_x_gp.shape[1] 
 
+        gp_init_kwargs = {
+            'train_x': train_x_gp,
+            'train_y': train_y_gp,
+            'noise': noise,
+            'kernel': kernel,
+            'optimizer': optimizer,
+            'optimizer_kwargs': optimizer_kwargs,
+            'kernel_variance_bounds': kernel_variance_bounds,
+            'lengthscale_bounds': lengthscale_bounds,
+            'lengthscales': lengthscales,
+            'kernel_variance': kernel_variance,
+        }
         if lengthscale_priors.upper() == 'DSLP':
-            self.gp = DSLP_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,optimizer_kwargs,
-                              kernel_variance_bounds, lengthscale_bounds, lengthscales=lengthscales, kernel_variance=kernel_variance)
+            gp_init_kwargs.update({'fixed_kernel_variance': fixed_kernel_variance})
+            self.gp = DSLP_GP(**gp_init_kwargs)
         elif lengthscale_priors.upper() == 'SAAS':
-            self.gp = SAAS_GP(train_x_gp, train_y_gp, noise, kernel, optimizer,optimizer_kwargs,
-                              kernel_variance_bounds, lengthscale_bounds, tausq_bounds,
-                              lengthscales=lengthscales, kernel_variance=kernel_variance, tausq=tausq)
+            self.gp = SAAS_GP(**gp_init_kwargs)
         else:
             log.warning(f"Not using DSLP or SAAS priors (got '{lengthscale_priors}'), using default GP")
-            self.gp = GP(train_x_gp, train_y_gp, noise, kernel, optimizer, optimizer_kwargs,
-                          kernel_variance_bounds, lengthscale_bounds, lengthscales=lengthscales, kernel_variance=kernel_variance)
+            self.gp = GP(**gp_init_kwargs)
 
         # Initialize Classifier
         self.use_clf = (self.clf_data_size >= self.clf_use_size) and self.clf_flag
@@ -431,7 +440,7 @@ class GPwithClassifier:
         return gp_clf
         
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,progress_bar=True,thinning=8,verbose=True,
-                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=6,np_rng=None, rng_key=None):
+                       init_params=None,temp=1.,restart_on_flat_logp=True,num_chains=4,np_rng=None, rng_key=None):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
@@ -440,10 +449,10 @@ class GPwithClassifier:
 
         rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1.5,6.) 
-        # high_temp = rng_mcmc.uniform(1.,2.) ** 2
-        # temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        temp=1. # For now always use temp=1
+        # high_temp = rng_mcmc.uniform(1.5,6.) 
+        high_temp = rng_mcmc.uniform(1.,2.) ** 2
+        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        # temp=1. # For now always use temp=1
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 

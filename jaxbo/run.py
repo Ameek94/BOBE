@@ -5,7 +5,7 @@ from .utils.logging_utils import setup_logging, get_logger
 from typing import Union, Callable, Dict, Any, Optional
     
 
-def run_bobe(likelihood: Union[BaseLikelihood, str], 
+def run_bobe(likelihood: Union[Callable, str], 
              likelihood_kwargs: Dict[str, Any] = {},
              gp_kwargs: Dict[str, Any] = {},
              use_clf: bool = True,
@@ -16,11 +16,11 @@ def run_bobe(likelihood: Union[BaseLikelihood, str],
              min_evals: int = 100,
              max_evals: int = 1000,
              max_gp_size: int = 1200,
+             n_log_ei_iters: int = 0,
              fit_step: int = 5,
              ns_step: int = 5,
              wipv_batch_size: int = 5,
              zeta_ei: float = 0.1,
-             n_log_ei_iters: int = 20,
              resume: bool = False,
              resume_file: Optional[str] = None,
              **sampler_kwargs):
@@ -61,8 +61,8 @@ def run_bobe(likelihood: Union[BaseLikelihood, str],
     pool = MPI_Pool()
 
     # setup likelihood
-    if isinstance(likelihood, BaseLikelihood):
-        My_Likelihood = likelihood
+    if isinstance(likelihood, Callable):
+        My_Likelihood = ExternalLikelihood(loglikelihood=likelihood, pool=pool, **likelihood_kwargs)
     elif isinstance(likelihood, str):
         My_Likelihood = CobayaLikelihood(input_file_dict=likelihood,pool=pool,**likelihood_kwargs)
 
@@ -72,12 +72,11 @@ def run_bobe(likelihood: Union[BaseLikelihood, str],
 
         print(f"Rank {pool.rank} running BOBE with likelihood: {My_Likelihood.name}")
         # here should setup default arguments for all necessary parameters
-        n_log_ei_iters = sampler_kwargs.pop('n_log_ei_iters', 20)
 
         # Handle lengthscale_priors specially to validate the choice
         lengthscale_priors = gp_kwargs.get('lengthscale_priors', 'DSLP')
         valid_priors = ['DSLP', 'SAAS', 'uniform']
-        if lengthscale_priors not in valid_priors:
+        if lengthscale_priors.upper() not in valid_priors:
             print(f"Warning: Invalid lengthscale_priors '{lengthscale_priors}'. Defaulting to 'DSLP'.")
             lengthscale_priors = 'DSLP'
         
@@ -98,7 +97,6 @@ def run_bobe(likelihood: Union[BaseLikelihood, str],
             ns_step=ns_step,
             wipv_batch_size=wipv_batch_size,
             zeta_ei=zeta_ei,
-            n_log_ei_iters=n_log_ei_iters,
             resume=resume,
             resume_file=resume_file,
             use_clf=use_clf,

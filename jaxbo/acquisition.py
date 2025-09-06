@@ -219,23 +219,23 @@ class AcquisitionFunction:
 
         x_batch, acq_vals = [], []
 
-        if n_batch == 1:
-            x_next, acq_val_next = self.get_next_point(gp, acq_kwargs=acq_kwargs,
+        x_next, acq_val_next = self.get_next_point(gp, acq_kwargs=acq_kwargs,
                                         maxiter=maxiter,
                                         n_restarts=n_restarts,
                                         verbose=verbose,
                                         early_stop_patience=early_stop_patience,
                                         rng=rng)
-            x_batch.append(x_next)
-            acq_vals.append(acq_val_next)
+        x_batch.append(x_next)
+        acq_vals.append(acq_val_next)
 
-        else:
+        if n_batch > 1:
             if hasattr(gp,'gp'):
                 dummy_gp = gp.gp.copy()
             else:
-                dummy_gp = gp.copy()
+                dummy_gp = gp.copy_from_state_dict()
 
-            for i in range(n_batch):
+            dummy_gp.update(x_next, dummy_gp.predict_mean_single(x_next), refit=False)
+            for i in range(1,n_batch):
                 x_next, acq_val_next = self.get_next_point(dummy_gp, acq_kwargs=acq_kwargs,
                                                         maxiter=maxiter,
                                                         n_restarts=n_restarts,

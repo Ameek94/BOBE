@@ -145,15 +145,16 @@ def nested_sampling_Dy(gp: GP
         sampler = StaticNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
                                       sample=sample_method,nlive=nlive,rstate=rng)
         sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
-        res = sampler.results  # type: ignore # grab our results
-        logl = res['logl']
-        # add check for all same logl values in case of initial plateau
-        if np.all(logl == logl[0]):
-            success = False
-            print("All logl values are the same, this may indicate a problem with the model or the data. Retrying with the dynamic nested sampler.")
-            sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
+    res = sampler.results  # type: ignore # grab our results
+    logl = res['logl']
+    # add check for all same logl values in case of initial plateau
+    if np.all(logl == logl[0]):
+        success = False
+        nlive = 1500
+        log.warning("All initial logl values are the same. Retrying with the dynamic nested sampler and increased nlive.")
+        sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
                                        sample=sample_method,nlive=nlive)
-            sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)     
+        sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)     
             # need a better method to guarantee that at least one finite logl present.
         
     res = sampler.results

@@ -841,7 +841,7 @@ class BOBEResults:
         log.info(f"Saved intermediate results to {intermediate_file}")
 
         if gp is not None and filename is None:  # Only save GP if using default naming
-            gp.save(outfile=f"{self.output_file}_gp")
+            gp.save(filename=f"{self.output_file}_gp")
     
     def get_getdist_samples(self) -> Optional['MCSamples']:
         """

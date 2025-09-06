@@ -49,8 +49,8 @@ def main():
         n_cobaya_init=4,
         n_sobol_init=8,
         min_evals=2,
-        n_log_ei_iters=10,
-        max_eval_budget=100,
+        n_log_ei_iters=0,
+        max_evals=100,
         max_gp_size=200,
         fit_step=1,
         wipv_batch_size=2,
@@ -63,7 +63,6 @@ def main():
         minus_inf=-1e5,
         logz_threshold=1e-3,
         seed=42,
-        optimizer='scipy',
         do_final_ns=False,
     )
 
