@@ -22,7 +22,7 @@ except ImportError:
 # Standalone training and prediction functions for classifiers
 # -----------------------------------------------------------------------------
 
-def train_svm_classifier(X, Y, settings, init_params=None, **kwargs):
+def train_svm_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     """Train SVM classifier and return parameters, metrics, and predict function."""
     gamma = settings.get('gamma', 'scale')
     C = settings.get('C', 1e7)
@@ -66,9 +66,14 @@ def get_svm_predict_proba_fn(params):
     return jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, 
                           dual_coef=dual_coef, intercept=intercept, gamma=gamma))
 
-def train_nn_classifier(X, Y, settings, init_params=None, **kwargs):
+def train_nn_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     """Train neural network classifier and return parameters, metrics, and predict function."""
     # Create model with settings
+    label_size = X.shape[0]
+    if label_size < 500:
+        settings.update({'hidden_dims': [32, 32]})
+    else:
+        settings.update({'hidden_dims': [64, 32]})
     model = MLPClassifier(**settings)
     
     # Train with multiple restarts
@@ -86,7 +91,7 @@ def train_nn_classifier(X, Y, settings, init_params=None, **kwargs):
     
     return params, metrics, predict_fn
 
-def get_nn_predict_proba_fn(params, settings, **kwargs):
+def get_nn_predict_proba_fn(params, settings = {}, **kwargs):
     """Get prediction function for NN classifier from parameters (for loading from file)."""
     # Recreate model with same settings to get the apply function
     model = MLPClassifier(**settings)
@@ -96,7 +101,7 @@ def get_nn_predict_proba_fn(params, settings, **kwargs):
         return jax.nn.sigmoid(logits.squeeze(-1))
     return jax.jit(predict_proba_fn)
 
-def train_ellipsoid_classifier(X, Y, settings, init_params=None, **kwargs):
+def train_ellipsoid_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     """Train ellipsoid classifier and return parameters, metrics, and predict function."""
     d = X.shape[1]
     mu = kwargs.get('best_pt', 0.5*jnp.ones(d))
@@ -124,7 +129,6 @@ def get_ellipsoid_predict_proba_fn(params, settings, d, **kwargs):
     model = EllipsoidClassifier(d=d, mu=mu, **settings)
     
     def predict_proba_fn(x):
-        # Use provided best_pt or fall back to default
         logits = model.apply(params, x, train=False)
         return jax.nn.sigmoid(logits.squeeze())
     return jax.jit(predict_proba_fn)
@@ -302,7 +306,7 @@ def train_with_restarts(
 
 # Neural Network Classifier
 class MLPClassifier(nn.Module):
-    hidden_dims: list = (32, 32)
+    hidden_dims: list = (64, 64)
     dropout_rate: float = 0.1
     lr: float = 1e-3
     weight_decay: float = 1e-4

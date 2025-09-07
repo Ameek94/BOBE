@@ -44,7 +44,7 @@ def main():
             'noise_std': 0.0,
             'name': likelihood_name,
         },
-        resume=False,
+        resume=True,
         resume_file=f'{likelihood_name}',
         verbosity='INFO',
         n_log_ei_iters=n_log_ei_iters,

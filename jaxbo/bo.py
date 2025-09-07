@@ -14,11 +14,12 @@ from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import BaseLikelihood, CobayaLikelihood
 from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, kl_divergence_gaussian, kl_divergence_samples, get_threshold_for_nsigma
-from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility
+from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility, get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
 from .utils.logging_utils import get_logger
 from .utils.results import BOBEResults
 from .acquisition import *
+from .acquisition import get_mc_samples
 from .utils.pool import MPI_Pool
 
 log = get_logger("bo")
@@ -222,10 +223,20 @@ class BOBE:
                 # Use the standard naming convention: add _gp if not present
                 gp_file = resume_file+'_gp'
                 self.gp = load_gp(gp_file, use_clf)
+                                                
+                self.results_manager.start_timing('GP Training')
+                self.gp.fit(maxiter=200, n_restarts=2)
+                self.results_manager.end_timing('GP Training')
+                                            
+                # Test a simple prediction to ensure everything works
+                test_point = self.gp.train_x[0]  # Use first training point as test
+                _ = self.gp.predict_mean_single(test_point)
+                log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
+                                    
                 # Check if resuming and adjust starting iteration
                 if self.results_manager.is_resuming() and not self.fresh_start:
-                    start_iteration = self.results_manager.get_last_iteration()
-                    log.info(f"Resuming from iteration {start_iteration}")
+                    self.start_iteration = self.results_manager.get_last_iteration()
+                    log.info(f"Resuming from iteration {self.start_iteration}")
                     log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
                     # If we have previous best loglikelihood data, restore the best point info
                     if self.results_manager.best_loglike_values:
@@ -277,7 +288,14 @@ class BOBE:
 
         idx_best = jnp.argmax(self.gp.train_y)
         self.best_pt = scale_from_unit(self.gp.train_x[idx_best], self.loglikelihood.param_bounds).flatten()
-        self.best_f = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
+        best_f_from_gp = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
+
+        # Use restored best_f if available and better, otherwise use GP's best
+        if not hasattr(self, 'best_f') or best_f_from_gp > getattr(self, 'best_f', -np.inf):
+            self.best_f = best_f_from_gp
+            # Also update best_pt_iteration if we're using the GP's best point
+            if not hasattr(self, 'best_pt_iteration'):
+                self.best_pt_iteration = self.start_iteration
 
         self.best = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
         log.info(f" Initial best point {self.best} with value = {self.best_f:.4f}")
@@ -378,7 +396,7 @@ class BOBE:
                 n_batch = self.wipv_batch_size # since we only need to update true GP before doing the next MCMC
             else:
                 acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten())}
-                n_restarts = 20
+                n_restarts = 25
                 maxiter = 250
                 early_stop_patience = 50
                 n_batch = 1
@@ -415,7 +433,7 @@ class BOBE:
 
             # GP Training and timing
             self.results_manager.start_timing('GP Training')
-            self.gp.update(new_pts_u, new_vals, refit=refit,n_restarts=4)
+            self.gp.update(new_pts_u, new_vals, refit=refit,n_restarts=4,maxiter=200)
             self.results_manager.end_timing('GP Training')
 
             log.info(f"New GP y_mean: {self.gp.y_mean:.4f}, y_std: {self.gp.y_std:.4f}")

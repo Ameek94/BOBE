@@ -33,7 +33,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}'
+    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}_SAAS'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -48,19 +48,19 @@ def main():
         
         # General run settings
         verbosity='INFO',
-        seed=200,
+        seed=1500,
         
         # Iteration and budget settings
         n_log_ei_iters=n_log_ei_iters,
-        n_cobaya_init=8,
-        n_sobol_init=32,
+        n_cobaya_init=0,
+        n_sobol_init=16,
         min_evals=750,
-        max_eval_budget=2500,
+        max_evals=2500,
         max_gp_size=1500,
         
         # Step settings
         fit_step=5,
-        wipv_batch_size=10,
+        wipv_batch_size=5,
         ns_step=5,
         
         # Acquisition function settings
@@ -68,13 +68,12 @@ def main():
         
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=9000,
+        num_hmc_samples=10000,
         mc_points_size=512,
         
         # GP settings
-        lengthscale_priors='DSLP',
-        noise=1e-6,
-        kernel='rbf',
+        gp_kwargs={'lengthscale_prior': 'SAAS'}, 
+
 
         # resume
         resume=False,
@@ -83,10 +82,6 @@ def main():
         # Classifier settings
         use_clf=True,
         clf_type=clf_type,
-        clf_use_size=30,
-        clf_update_step=1,
-        clf_threshold=300,
-        gp_threshold=600,
         
         # Convergence and other settings
         minus_inf=-1e5,
@@ -137,8 +132,8 @@ def main():
             plot_params=param_list_LCDM,
             output_file=f'{likelihood.name}_cosmo',
             reference_file='./cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
             scatter_points=False,
         )
 

@@ -360,11 +360,11 @@ class GPwithClassifier(GP):
             train_clf_on_init=False,
         )
         
-        # Restore computed state if available
-        if state.get('cholesky') is not None:
-            gp_clf.cholesky = jnp.array(state['cholesky'])
-        if state.get('alphas') is not None:
-            gp_clf.alphas = jnp.array(state['alphas'])
+        # # Restore computed state if available
+        # if state.get('cholesky') is not None:
+        #     gp_clf.cholesky = jnp.array(state['cholesky'])
+        # if state.get('alphas') is not None:
+        #     gp_clf.alphas = jnp.array(state['alphas'])
         
         # Restore classifier state
         gp_clf.use_clf = state['use_clf']
@@ -493,8 +493,8 @@ class GPwithClassifier(GP):
         if num_chains == 1: 
             inits = jnp.array([self.get_random_point(rng=np_rng)])
         else:
-            inits = jnp.vstack([self.get_random_point(rng=np_rng) for _ in range(num_chains)])
-            # inits = jnp.vstack([inits, self.train_x_clf[jnp.argmax(self.train_y_clf)]])
+            inits = jnp.vstack([self.get_random_point(rng=np_rng) for _ in range(num_chains-1)])
+            inits = jnp.vstack([inits, self.train_x_clf[jnp.argmax(self.train_y_clf)]])
 
         log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
 
@@ -529,19 +529,6 @@ class GPwithClassifier(GP):
         log.info(f"Max logl found = {np.max(logps):.4f}")
 
         return samples_dict
-
-
-    def reset_threshold_points(self):
-        """
-        Every 100 steps or so we discard points from the GP which do now lie outside the threshold. 
-        """
-        full_size = self.train_x_clf.shape[0]
-        if full_size % 100 == 0:
-            mask = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
-            train_x_gp = self.train_x_clf[mask]
-            train_y_gp = self.train_y_clf[mask] * self.y_std + self.y_mean  # Rescale to original scale
-            hyperparams_dict = getattr(self, "hyperparams", {})
-            # self.reset_train_data  # Method does not exist in base GP(train_x = train_x_gp, train_y = train_y_gp,)
 
     def copy(self):
         """
