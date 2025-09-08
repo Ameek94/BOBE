@@ -14,7 +14,8 @@ from .core_utils import (
     scale_to_unit, 
     scale_from_unit, 
     renormalise_log_weights, 
-    resample_equal
+    resample_equal,
+    is_cluster_environment
 )
 from .logging_utils import get_logger, setup_logging
 from .seed_utils import get_numpy_rng, get_jax_key, set_global_seed
@@ -27,7 +28,7 @@ __all__ = [
     'BOBESummaryPlotter', 'plot_final_samples', 
     # Core utilities
     'suppress_stdout_stderr', 'split_vmap', 'scale_to_unit', 'scale_from_unit',
-    'renormalise_log_weights', 'resample_equal',
+    'renormalise_log_weights', 'resample_equal', 'is_cluster_environment',
     # Logging
     'get_logger', 'setup_logging',
     # Random number generation

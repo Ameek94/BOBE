@@ -8,7 +8,7 @@ from typing import Union, Callable, Dict, Any, Optional
 def run_bobe(likelihood: Union[Callable, str], 
              likelihood_kwargs: Dict[str, Any] = {},
              gp_kwargs: Dict[str, Any] = {},
-             use_clf: bool = True,
+             use_clf: bool = False,
              clf_type: str = 'svm',
              clf_nsigma_threshold: float = 25.0,
              verbosity: str ='INFO', 

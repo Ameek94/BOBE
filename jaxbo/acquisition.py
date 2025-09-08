@@ -365,7 +365,7 @@ class WIPV(AcquisitionFunction):
             return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
         acq_vals = lax.map(mapped_fn, mc_points)
         acq_val_min = jnp.min(acq_vals)
-        log.info(f"WIPV acquisition min value on MC points: {float(acq_val_min):.4e}")
+        log.debug(f"WIPV acquisition min value on MC points: {float(acq_val_min):.4e}")
         best_x = mc_points[jnp.argmin(acq_vals)]
         x0_acq = best_x
 

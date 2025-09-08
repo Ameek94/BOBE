@@ -26,6 +26,11 @@ sqrt2 = sqrt(2.)
 sqrt3 = sqrt(3.)
 sqrt5 = sqrt(5.)
 
+class DummyDistribution:
+    """A dummy distribution that always returns log_prob = 0.0"""
+    def log_prob(self, x):
+        return 0.0
+
 def make_distribution(spec: dict) -> dist.Distribution:
     """
     Turn a dictionary specification into a NumPyro distribution.
@@ -170,9 +175,11 @@ class GP:
             Initial lengthscale values. If None, defaults to ones. Defaults to None.
         kernel_variance : float, optional
             Initial kernel variance. If None, defaults to 1.0. Defaults to None.
-        kernel_variance_prior : dict, optional
+        kernel_variance_prior : dict or str, optional
             Specification for the kernel variance prior. 
-            If None, defaults to `{'name': 'LogNormal', 'loc': 0.0, 'scale': 0.5}`. Defaults to None.
+            If None, defaults to `{'name': 'LogNormal', 'loc': 0.0, 'scale': 1.0}`.
+            If 'fixed', the kernel variance will be fixed to the initial value and not optimized.
+            Defaults to None.
         lengthscale_prior : str or dict, optional
             Specification for the lengthscale prior. 
             If 'DSLP' or None, uses the DSLP prior. 
@@ -185,37 +192,22 @@ class GP:
             Bounds for the tausq parameter (in log10 space). Only used when lengthscale_prior='SAAS'.
             Defaults to [-4, 4].
         """
-        # check x and y sizes
-        if train_x.shape[0] != train_y.shape[0]:
-            raise ValueError("train_x and train_y must have the same number of points")
-        if train_y.ndim != 2:
-            train_y = train_y.reshape(-1,1)
-        if train_x.ndim != 2:
-            raise ValueError("train_x must be 2D")
-        
+        # Setup and validate training data
+        self._setup_training_data(train_x, train_y)
 
-        self.ndim = train_x.shape[1]
-        self.y_mean = jnp.mean(train_y)
-        self.y_std = jnp.std(train_y)
-        
-        # Handle edge case where std is zero (all values identical or only 1 point)
-        if self.y_std == 0:
-            log.warning("Training targets have zero variance. Setting std to 1.0 to avoid division by zero.")
-            self.y_std = 1.0
-
-        self.train_x = jnp.array(train_x)
-        self.train_y = (train_y - self.y_mean) / self.y_std
-        log.debug(f"GP training size = {self.train_x.shape[0]}")
-
-        self.kernel_name = kernel if kernel=="rbf" else "matern"
-        self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
+        # Setup kernel and initial hyperparameters
+        self.kernel_name = kernel if kernel == "rbf" else "matern"
+        self.kernel = rbf_kernel if kernel == "rbf" else matern_kernel
         self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
         self.kernel_variance = kernel_variance if kernel_variance is not None else 1.0
         self.noise = noise
+        
+        # Compute initial kernel matrices
         K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
         self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
+        # Setup optimizer
         self.optimizer_method = optimizer
         if optimizer == "scipy":
             self.mll_optimize = optimize_scipy
@@ -231,33 +223,83 @@ class GP:
         self.tausq = tausq if tausq is not None else 1.0
         self.tausq_bounds = tausq_bounds
 
-        # Set up prior function and parameter structure
+        # Setup priors and optimization parameters
+        self._setup_kernel_variance_prior(kernel_variance_prior)
+        self._setup_lengthscale_prior(lengthscale_prior)
+        self._setup_optimization_parameters()
+
+    def _setup_training_data(self, train_x, train_y):
+        """Setup and validate training data, compute standardization parameters."""
+        # Check x and y sizes
+        if train_x.shape[0] != train_y.shape[0]:
+            raise ValueError("train_x and train_y must have the same number of points")
+        if train_y.ndim != 2:
+            train_y = train_y.reshape(-1, 1)
+        if train_x.ndim != 2:
+            raise ValueError("train_x must be 2D")
+
+        self.ndim = train_x.shape[1]
+        
+        # Compute standardization parameters
+        self.y_mean = jnp.mean(train_y)
+        self.y_std = jnp.std(train_y)
+        
+        # Handle edge case where std is zero (all values identical or only 1 point)
+        if self.y_std == 0:
+            log.warning("Training targets have zero variance. Setting std to 1.0 to avoid division by zero.")
+            self.y_std = 1.0
+
+        # Store standardized training data
+        self.train_x = jnp.array(train_x)
+        self.train_y = (train_y - self.y_mean) / self.y_std
+        log.debug(f"GP training size = {self.train_x.shape[0]}")
+
+    def _setup_kernel_variance_prior(self, kernel_variance_prior):
+        """Setup kernel variance prior and determine if it should be fixed."""
         self.kernel_variance_prior_spec = kernel_variance_prior
         if self.kernel_variance_prior_spec is None:
-            self.kernel_variance_prior_spec = {'name': 'LogNormal', 'loc': 0.0, 'scale': 1.0}
-        self.kernel_variance_prior_dist = make_distribution(self.kernel_variance_prior_spec)
-           
+            self.kernel_variance_prior_spec = {'name': 'Uniform', 'low': self.kernel_variance_bounds[0], 'high': self.kernel_variance_bounds[1]}
+        
+        # Check if kernel variance should be fixed
+        self.fixed_kernel_variance = (self.kernel_variance_prior_spec == 'fixed')
+        if not self.fixed_kernel_variance:
+            self.kernel_variance_prior_dist = make_distribution(self.kernel_variance_prior_spec)
+        else:
+            # Use dummy distribution that always returns log_prob = 0
+            self.kernel_variance_prior_dist = DummyDistribution()
+
+    def _setup_lengthscale_prior(self, lengthscale_prior):
+        """Setup lengthscale prior and determine prior function."""
         self.lengthscale_prior_spec = lengthscale_prior
         if self.lengthscale_prior_spec is None:
-            self.lengthscale_prior_spec = {'name': 'Uniform', 'low': self.lengthscale_bounds[0], 'high': self.lengthscale_bounds[1]}  # set to Uniform if no prior specified
+            self.lengthscale_prior_spec = {'name': 'Uniform', 'low': self.lengthscale_bounds[0], 'high': self.lengthscale_bounds[1]}
 
+        # Set up lengthscale priors and prior function
         if self.lengthscale_prior_spec == 'DSLP':
             self.lengthscale_prior_dist = dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(self.ndim), scale=sqrt3)
             self.prior_func = self._standard_prior_logprob
-            self.param_names = ['lengthscales', 'kernel_variance']
-            self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.kernel_variance_bounds]
         elif self.lengthscale_prior_spec == 'SAAS':
             self.lengthscale_prior_dist = None
             self.prior_func = self._saas_prior_logprob  
-            self.param_names = ['lengthscales', 'kernel_variance', 'tausq']
-            self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.kernel_variance_bounds] + [self.tausq_bounds]
         else:
             self.lengthscale_prior_dist = make_distribution(self.lengthscale_prior_spec)
             self.prior_func = self._standard_prior_logprob
-            self.param_names = ['lengthscales', 'kernel_variance']
-            self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.kernel_variance_bounds]
 
-        self.hyperparam_bounds = jnp.log10(jnp.array(self.hyperparam_bounds).T) # shape (2, D+1) or (2, D+2) in case of SAAS
+    def _setup_optimization_parameters(self):
+        """Setup parameter names and bounds for optimization."""
+        # Build parameter names and bounds based on what's being optimized
+        self.param_names = ['lengthscales']
+        self.hyperparam_bounds = [self.lengthscale_bounds] * self.ndim
+        
+        if not self.fixed_kernel_variance:
+            self.param_names.append('kernel_variance')
+            self.hyperparam_bounds.append(self.kernel_variance_bounds)
+            
+        if self.lengthscale_prior_spec == 'SAAS':
+            self.param_names.append('tausq')
+            self.hyperparam_bounds.append(self.tausq_bounds)
+
+        self.hyperparam_bounds = jnp.log10(jnp.array(self.hyperparam_bounds).T)
         self.num_hyperparams = self.hyperparam_bounds.shape[1]
         log.debug(f" Hyperparameter bounds =  {self.hyperparam_bounds}")
 
@@ -276,8 +318,17 @@ class GP:
         """Parse log10 parameters into lengthscales, kernel_variance, and optionally tausq."""
         hyperparams = 10**log10_params
         lengthscales = hyperparams[:self.ndim]
-        kernel_variance = hyperparams[self.ndim]
-        tausq = hyperparams[self.ndim + 1] if len(hyperparams) > self.ndim + 1 else self.tausq
+        
+        if self.fixed_kernel_variance:
+            kernel_variance = self.kernel_variance  # Use fixed value
+            if 'tausq' in self.param_names:
+                tausq = hyperparams[self.ndim] if len(hyperparams) > self.ndim else self.tausq
+            else:
+                tausq = self.tausq
+        else:
+            kernel_variance = hyperparams[self.ndim]
+            tausq = hyperparams[self.ndim + 1] if len(hyperparams) > self.ndim + 1 else self.tausq
+            
         return lengthscales, kernel_variance, tausq
 
     def neg_mll(self, log10_params):
@@ -307,9 +358,17 @@ class GP:
             The number of restarts for the optimizer. Default is 4.
         """
         # Prepare initial parameters based on current hyperparameters
-        init_params = jnp.concatenate([self.lengthscales, jnp.array([self.kernel_variance])])
+        init_params = jnp.array(self.lengthscales)
+        if not self.fixed_kernel_variance:
+            init_params = jnp.concatenate([init_params, jnp.array([self.kernel_variance])])
         if 'tausq' in self.param_names:
             init_params = jnp.concatenate([init_params, jnp.array([self.tausq])])
+            
+        if self.fixed_kernel_variance and 'tausq' in self.param_names:
+            log.info(f"Fitting GP with SAAS priors and fixed kernel_variance: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), tausq = {self.tausq}")
+        elif self.fixed_kernel_variance:
+            log.info(f"Fitting GP with fixed kernel_variance: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed)")
+        elif 'tausq' in self.param_names:
             log.info(f"Fitting GP with SAAS priors: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}")
         else:
             log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
@@ -336,10 +395,15 @@ class GP:
         # Update hyperparameters
         lengthscales, kernel_variance, tausq = self._parse_hyperparams(best_params)
         self.lengthscales = lengthscales
-        self.kernel_variance = kernel_variance
+        if not self.fixed_kernel_variance:
+            self.kernel_variance = kernel_variance
         self.tausq = tausq
         
-        if 'tausq' in self.param_names:
+        if self.fixed_kernel_variance and 'tausq' in self.param_names:
+            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), tausq = {self.tausq}, final MLL = {-best_f}")
+        elif self.fixed_kernel_variance:
+            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), final MLL = {-best_f}")
+        elif 'tausq' in self.param_names:
             log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}, final MLL = {-best_f}")
         else:
             log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, final MLL = {-best_f}")
@@ -576,6 +640,7 @@ class GP:
             'kernel_name': self.kernel_name,
             'lengthscale_prior_spec': self.lengthscale_prior_spec,
             'kernel_variance_prior_spec': self.kernel_variance_prior_spec,
+            'fixed_kernel_variance': self.fixed_kernel_variance,
             'optimizer_method': self.optimizer_method,
             'optimizer_kwargs': self.optimizer_kwargs,
             

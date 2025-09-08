@@ -350,7 +350,6 @@ class BOBE:
 
         log.info(f"Starting iteration {ii}")
 
-        self.acquisition = LogEI(optimizer=self.optimizer) # start with LogEI
 
         current_evals = self.gp.npoints  # Number of evaluations so far
     
@@ -362,6 +361,9 @@ class BOBE:
             self.results_manager.end_timing('MCMC Sampling')
             self.mc_samples['method'] = 'MCMC'        
             # self.mc_points = get_mc_points(self.mc_samples, self.mc_points_size)
+            self.acquisition = WIPV(optimizer=self.optimizer)
+        else:
+            self.acquisition = LogEI(optimizer=self.optimizer) # start with LogEI
 
         while current_evals < self.max_evals:
 
@@ -391,8 +393,8 @@ class BOBE:
             if acq_str == 'WIPV':
                 acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
                 n_restarts = 1
-                maxiter = 100
-                early_stop_patience = 25
+                maxiter = 50
+                early_stop_patience = 10
                 n_batch = self.wipv_batch_size # since we only need to update true GP before doing the next MCMC
             else:
                 acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten())}

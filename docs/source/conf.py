@@ -28,7 +28,7 @@ extensions = [
     "sphinx.ext.coverage",
     "sphinx.ext.mathjax",
     "sphinx_autodoc_typehints",
-    "myst_parser",  # For Markdown support
+    "myst_nb",      # For both Markdown and Jupyter notebook support
 ]
 
 # Autodoc settings
@@ -68,7 +68,7 @@ intersphinx_mapping = {
     'jax': ('https://jax.readthedocs.io/en/latest/', None),
 }
 
-# MyST settings
+# MyST settings for both Markdown and Jupyter notebooks
 myst_enable_extensions = [
     "deflist",
     "tasklist",
@@ -76,14 +76,16 @@ myst_enable_extensions = [
     "html_image",
 ]
 
+# MyST-NB settings for Jupyter notebooks
+nb_execution_mode = "off"  # Don't execute notebooks during build
+nb_execution_timeout = 60  # Timeout for notebook execution (if enabled)
+nb_execution_allow_errors = True  # Allow errors in notebooks
+nb_merge_streams = True  # Merge stdout/stderr streams
+
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
-# Source file suffix
-source_suffix = {
-    '.rst': None,
-    '.md': 'myst_parser',
-}
+# Source parsers and file types - removed the source_suffix override
 
 language = 'en'
 

@@ -21,7 +21,7 @@ def main():
 
     clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm' 
 
-    likelihood_name = f'Planck_DESI_U3_CPL_{clf_type}'
+    likelihood_name = f'Planck_DESI_U3_CPL_{clf_type}_uniform'
 
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -32,23 +32,23 @@ def main():
             'name': likelihood_name,
         },
         verbosity='INFO',
-        n_log_ei_iters=150,
-        n_cobaya_init=8,
-        n_sobol_init=32,
-        min_evals=800,
+        n_log_ei_iters=0,
+        n_cobaya_init=16,
+        n_sobol_init=64,
+        min_evals=1000,
         max_evals=2500,
-        max_gp_size=1400,
+        max_gp_size=1600,
         fit_step=10, 
         zeta_ei = 0.01,
-        wipv_batch_size=10,
+        wipv_batch_size=5,
         ns_step=5,
         num_hmc_warmup=512,
         num_hmc_samples=12000, 
         mc_points_size=512,
         # GP settings
-        gp_kwargs={'lengthscale_prior': 'SAAS'}, 
+        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None},
         use_clf=True,
-        resume=False,
+        resume=True,
         resume_file=f'{likelihood_name}',
         clf_type=clf_type,
         minus_inf=-1e5,

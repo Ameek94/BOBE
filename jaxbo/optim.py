@@ -2,7 +2,6 @@ from typing import Optional, Union, List, Tuple, Callable, Any
 import jax
 import jax.numpy as jnp
 import numpy as np
-import tqdm
 import optax
 from scipy.optimize import minimize 
 from .utils.core_utils import scale_to_unit, scale_from_unit, split_vmap 
@@ -171,9 +170,7 @@ def optimize_optax(
             best_f_for_restart = current_value
             
         # Local optimization loop for this restart
-        restart_progress = tqdm.tqdm(range(maxiter), desc=f'Restart {restart_idx + 1}', leave=False)
-        
-        for iter_idx in restart_progress:
+        for iter_idx in range(maxiter):
             # Take optimization step
             current_params, opt_state, current_value = step(current_params, opt_state)
             
@@ -188,7 +185,8 @@ def optimize_optax(
                         log.debug(f"Early stopping for restart {restart_idx + 1} at iteration {iter_idx}")
                     break
             
-            restart_progress.set_postfix({"best_value": float(best_f_for_restart)})
+            if verbose and iter_idx % 10 == 0:
+                log.debug(f"Restart {restart_idx + 1}, iteration {iter_idx}, best value: {float(best_f_for_restart):.4e}")
         
         # Update global best if this restart found a better solution
         if best_f_for_restart < global_best_f:
@@ -204,7 +202,7 @@ def optimize_optax(
 
     if verbose:
         desc = f'Completed optimization with {n_restarts} restarts ({optimizer_name})'
-        log.info(f"{desc}: Final best_f = {float(best_f_original):.4e}")
+        log.debug(f"{desc}: Final best_f = {float(best_f_original):.4e}")
 
     return best_params_original, float(best_f_original)
 
@@ -321,7 +319,7 @@ def optimize_scipy(
             log.warning("All optimizations failed, returning best initial point")
     
     if verbose:
-        log.info(f"Scipy optimization ({method}) completed with {n_restarts} restarts: "
+        log.debug(f"Scipy optimization ({method}) completed with {n_restarts} restarts: "
                 f"Final best_f = {float(global_best_f):.4e}")
     
     return jnp.array(global_best_params), float(global_best_f)

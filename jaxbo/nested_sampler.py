@@ -10,6 +10,7 @@ jax.config.update("jax_enable_x64", True)
 from .gp import GP
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
+from .utils.core_utils import is_cluster_environment
 from scipy.special import logsumexp
 log = get_logger("ns")
 
@@ -83,7 +84,7 @@ def nested_sampling_Dy(gp: GP
                        ,logz_std: bool = True
                        ,maxcall: Optional[int] = None
                         ,boost_maxcall: Optional[int] = 1
-                        ,print_progress : bool = True
+                        ,print_progress : Optional[bool] = True
                         ,equal_weights: bool = False
                         ,sample_method='rwalk',
                         rng=None,
@@ -107,8 +108,15 @@ def nested_sampling_Dy(gp: GP
         Maximum number of function calls
     boost_maxcall : int
         Boost the maximum number of function calls
-    progress : bool
-        Print progress of the nested sampling run
+    print_progress : bool, optional
+        Print progress of the nested sampling run. If None, automatically disables 
+        progress printing in cluster environments and enables it otherwise.
+    equal_weights : bool
+        Resample to obtain equal weights
+    sample_method : str
+        Sampling method for dynesty
+    rng : random number generator
+        Random number generator
 
     Returns
     -------
@@ -116,8 +124,13 @@ def nested_sampling_Dy(gp: GP
         Equally weighted samples from the nested sampler
     logz_dict : dict
         Dictionary containing the mean, upper and lower bounds on logZ and the logZ error from the nested sampler
-    """ 
+    success : bool
+        Whether the nested sampling run was successful
+    """
 
+    # Auto-detect cluster environment if print_progress not explicitly set
+    print_progress = not is_cluster_environment()
+    
     if maxcall is None:
         if ndim<=4:
             maxcall = int(5000*ndim*boost_maxcall) # type: ignore

@@ -72,8 +72,10 @@ def train_nn_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     label_size = X.shape[0]
     if label_size < 500:
         settings.update({'hidden_dims': [32, 32]})
+        settings.update({'batch_size': 64})
     else:
-        settings.update({'hidden_dims': [64, 32]})
+        settings.update({'hidden_dims': [64, 64]})
+        settings.update({'batch_size': 128})
     model = MLPClassifier(**settings)
     
     # Train with multiple restarts
@@ -311,7 +313,7 @@ class MLPClassifier(nn.Module):
     lr: float = 1e-3
     weight_decay: float = 1e-4
     n_epochs: int = 1000
-    batch_size: int = 64
+    batch_size: int = 128
     early_stop_patience: int = 50
     n_restarts: int = 4
     val_frac: float = 0.2
