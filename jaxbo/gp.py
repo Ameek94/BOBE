@@ -147,7 +147,7 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
 
 class GP:
     
-    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
+    def __init__(self,train_x=None,train_y=None,ndim=None,noise=1e-6,kernel="rbf",optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
                  kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,10],lengthscales=None,kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4]):
         """
@@ -192,8 +192,16 @@ class GP:
             Bounds for the tausq parameter (in log10 space). Only used when lengthscale_prior='SAAS'.
             Defaults to [-4, 4].
         """
-        # Setup and validate training data
-        self._setup_training_data(train_x, train_y)
+
+        if train_x is None or train_y is None:
+            self.train_x = None
+            self.train_y = None
+            self.cholesky = None
+            self.alphas = None
+            self.ndim = ndim
+        else:
+            # Setup and validate training data
+            self._setup_training_data(train_x, train_y)
 
         # Setup kernel and initial hyperparameters
         self.kernel_name = kernel if kernel == "rbf" else "matern"
@@ -201,11 +209,7 @@ class GP:
         self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
         self.kernel_variance = kernel_variance if kernel_variance is not None else 1.0
         self.noise = noise
-        
-        # Compute initial kernel matrices
-        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-        self.cholesky = jnp.linalg.cholesky(K)
-        self.alphas = cho_solve((self.cholesky, True), self.train_y)
+    
 
         # Setup optimizer
         self.optimizer_method = optimizer
@@ -253,6 +257,11 @@ class GP:
         self.train_x = jnp.array(train_x)
         self.train_y = (train_y - self.y_mean) / self.y_std
         log.debug(f"GP training size = {self.train_x.shape[0]}")
+        # Compute initial kernel matrices
+        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+        self.cholesky = jnp.linalg.cholesky(K)
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
+
 
     def _setup_kernel_variance_prior(self, kernel_variance_prior):
         """Setup kernel variance prior and determine if it should be fixed."""

@@ -13,8 +13,8 @@ from typing import Optional, Union, Tuple, Dict, Any
 from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import BaseLikelihood, CobayaLikelihood
-from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, kl_divergence_gaussian, kl_divergence_samples, get_threshold_for_nsigma
-from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility, get_numpy_rng
+from .utils.core_utils import scale_from_unit, scale_to_unit, resample_equal, kl_divergence_gaussian, kl_divergence_samples, get_threshold_for_nsigma
+from .utils.seed_utils import set_global_seed, get_jax_key, get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
 from .utils.logging_utils import get_logger
 from .utils.results import BOBEResults
