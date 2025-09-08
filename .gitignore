@@ -50,3 +50,5 @@ test_methods/
 examples/plot_CPL.ipynb
 docs/build/
 docs/build/html/
+build/
+/docs/build
