@@ -1,15 +1,19 @@
 # JaxBO
 
-JaxBO is a package for performing Bayesian model comparison by computing the Bayesian Evidence using Bayesian Optimization for expensive likelihood functions, developed for applications to cosmology. It uses a Gaussian process surrogate for the expensive likelihood function and iteratively builds this surrogate using Bayesian Optimization. Acquisition functions such as EI, LogEI and integrated posterior variance as currently supported. 
+JaxBO is a package for performing Bayesian model comparison for expensive likelihood functions, developed for applications to cosmology. It computes the Bayesian Evidence using Bayesian Optimization to train Gaussian process surrogate for the expensive likelihood function and runs nested sampling/MCMC on the surrogate instead of the underlying expensive likelihood. Acquisition functions such as EI, LogEI and integrated posterior variance as currently supported. 
 To install run
 
-``python -m pip install .``
+```bash
+python -m pip install .
+```
 
 from the package directory. For an editable (dev) install do
 
-``python -m pip install -e .`` 
+```bash
+python -m pip install -e .
+```
 
-instead. If you face installations issues related to incompatible versions of some dependencies, you can also set up an environment for JaxBo with the exact package versions it was developed and tested with.
+If you face installations issues related to incompatible versions of some dependencies, you can also set up an environment for JaxBo with the exact package versions it was developed and tested with.
 
 ```bash
 # Create environment from the minimal essential packages
@@ -34,7 +38,7 @@ The code can also be run in MPI mode using
 mpirun -n X python your_bo_script.py
 ``
 
-where X is the number of MPI process. In mpi mode, the code will distribute the computation of the likelihood functions at several candidiate points across the different MPI processes. This can be very useful when dealing with likelihood with typical evaluation times of a few seconds or more. 
+where X is the number of MPI process. In mpi mode, the code will distribute the computation of the likelihood functions at several candidiate points across the different MPI processes. This can be very useful when dealing with likelihoods with typical evaluation times of a few seconds or more. 
 
 ## References
 
