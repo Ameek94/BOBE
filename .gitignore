@@ -47,3 +47,5 @@ test_methods/
 *.png
 *.ranges
 *results_plots/
+*.doctree
+/docs/build
