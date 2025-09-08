@@ -1,6 +1,6 @@
 # JaxBO
 
-JaxBO is a package for performing Bayesian model comparison by computing the Bayesian Evidence using Bayesian Optimization for expensive likelihood functions, developed for applications to cosmology. It uses a Gaussian process surrogate for the expensive likelihood function and iteratively builds this surrogate using Bayesian Optimization. Acquisition functions such as EI, LogEI and integrated posterior variance as currently supported. 
+JaxBO is a package for performing Bayesian model comparison for expensive likelihood functions, developed for applications to cosmology. It computes the Bayesian Evidence using Bayesian Optimization to train Gaussian process surrogate for the expensive likelihood function and runs nested sampling/MCMC on the surrogate instead of the underlying expensive likelihood. Acquisition functions such as EI, LogEI and integrated posterior variance as currently supported. 
 To install run
 
 ``python -m pip install .``
