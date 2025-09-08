@@ -49,3 +49,6 @@ test_methods/
 *results_plots/
 *.doctree
 /docs/build
+examples/plot_CPL.ipynb
+docs/build/
+docs/build/html/

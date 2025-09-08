@@ -28,12 +28,12 @@ def main():
     clf_update_step = 1 if clf_type == 'svm' else 2
 
     # Set up the cosmological likelihood
-    cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
+    cobaya_input_file = './cosmo_input/LCDM_Planck_DESIDr2.yaml'
     
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Camspec_{clf_type}_saas_prior_logei_{n_log_ei_iters}'
+    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}_uniform'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -48,19 +48,19 @@ def main():
         
         # General run settings
         verbosity='INFO',
-        seed=200,
+        seed=1500,
         
         # Iteration and budget settings
         n_log_ei_iters=n_log_ei_iters,
-        n_cobaya_init=8,
-        n_sobol_init=32,
+        n_cobaya_init=0,
+        n_sobol_init=16,
         min_evals=750,
-        max_eval_budget=2500,
+        max_evals=2500,
         max_gp_size=1500,
         
         # Step settings
         fit_step=5,
-        wipv_batch_size=5,
+        wipv_batch_size=8,
         ns_step=5,
         
         # Acquisition function settings
@@ -68,13 +68,11 @@ def main():
         
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=4096,
+        num_hmc_samples=8000,
         mc_points_size=512,
         
         # GP settings
-        lengthscale_priors='SAAS',
-        noise=1e-6,
-        kernel='rbf',
+        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None},
 
         # resume
         resume=True,
@@ -83,10 +81,6 @@ def main():
         # Classifier settings
         use_clf=True,
         clf_type=clf_type,
-        clf_use_size=30,
-        clf_update_step=clf_update_step,
-        clf_threshold=300,
-        gp_threshold=600,
         
         # Convergence and other settings
         minus_inf=-1e5,
@@ -136,9 +130,9 @@ def main():
             param_labels=likelihood.param_labels,
             plot_params=param_list_LCDM,
             output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
+            reference_file='./cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
             scatter_points=False,
         )
 
@@ -149,9 +143,9 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             output_file=f'{likelihood.name}_full',
-            reference_file='./cosmo_input/chains/Planck_DESI_LCDM_pchord',
-            reference_ignore_rows=0.0,
-            reference_label='PolyChord',
+            reference_file='./cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
             scatter_points=False,
         )
 

@@ -219,23 +219,26 @@ class AcquisitionFunction:
 
         x_batch, acq_vals = [], []
 
-        if n_batch == 1:
-            x_next, acq_val_next = self.get_next_point(gp, acq_kwargs=acq_kwargs,
+        x_next, acq_val_next = self.get_next_point(gp, acq_kwargs=acq_kwargs,
                                         maxiter=maxiter,
                                         n_restarts=n_restarts,
                                         verbose=verbose,
                                         early_stop_patience=early_stop_patience,
                                         rng=rng)
-            x_batch.append(x_next)
-            acq_vals.append(acq_val_next)
+        x_batch.append(x_next)
+        acq_vals.append(acq_val_next)
 
-        else:
-            if hasattr(gp,'gp'):
-                dummy_gp = gp.gp.copy()
-            else:
-                dummy_gp = gp.copy()
-
-            for i in range(n_batch):
+        if n_batch > 1:
+            # Create dummy GP without classifier functionality
+            dummy_gp = GP(train_x=gp.train_x, 
+                         train_y=gp.train_y*gp.y_std + gp.y_mean,
+                         noise=gp.noise,
+                         kernel=gp.kernel_name,
+                         lengthscales=gp.lengthscales,
+                         kernel_variance=gp.kernel_variance,)
+                        
+            dummy_gp.update(x_next, dummy_gp.predict_mean_single(x_next), refit=False)
+            for i in range(1,n_batch):
                 x_next, acq_val_next = self.get_next_point(dummy_gp, acq_kwargs=acq_kwargs,
                                                         maxiter=maxiter,
                                                         n_restarts=n_restarts,
@@ -246,7 +249,7 @@ class AcquisitionFunction:
                 acq_vals.append(acq_val_next)
 
                 mu = dummy_gp.predict_mean_single(x_next)
-                dummy_gp.update(x_next, mu,refit=False)
+                dummy_gp.update(x_next, mu, refit=False)
 
         return np.array(x_batch), np.array(acq_vals)
 
@@ -299,7 +302,7 @@ class EI(AcquisitionFunction):
         return self.acq_optimize(fun=self.fun,
                             fun_args=fun_args,
                             fun_kwargs=fun_kwargs,
-                            ndim=gp.ndim,
+                            num_params=gp.ndim,
                             x0=x0_acq,
                             optimizer_kwargs=self.optimizer_kwargs,
                             maxiter=maxiter,
@@ -362,14 +365,14 @@ class WIPV(AcquisitionFunction):
             return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
         acq_vals = lax.map(mapped_fn, mc_points)
         acq_val_min = jnp.min(acq_vals)
-        log.info(f"WIPV acquisition min value on MC points: {float(acq_val_min):.4e}")
+        log.debug(f"WIPV acquisition min value on MC points: {float(acq_val_min):.4e}")
         best_x = mc_points[jnp.argmin(acq_vals)]
         x0_acq = best_x
 
         return self.acq_optimize(fun=self.fun,
                                   fun_args=(gp,),
                                   fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
-                                  ndim=gp.ndim,
+                                  num_params=gp.ndim,
                                   x0=x0_acq,
                                   optimizer_kwargs=self.optimizer_kwargs,
                                   maxiter=maxiter,

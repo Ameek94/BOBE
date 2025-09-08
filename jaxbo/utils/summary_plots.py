@@ -546,8 +546,10 @@ class BOBESummaryPlotter:
         
         # Prepare timing data
         if timing_data is None:
-            total_time = (self.results.end_time - self.results.start_time) if self.results.end_time else 0
-            timing_data = {'Total Runtime': total_time}
+            # Use proper timing summary that accounts for resumed runs
+            timing_summary = self.results.get_timing_summary()
+            timing_data = timing_summary['phase_times'].copy()
+            timing_data['Total Runtime'] = timing_summary['total_runtime']
         elif 'phase_times' in timing_data:
             timing_data = {phase: time for phase, time in timing_data['phase_times'].items() if time > 0}
         
@@ -626,7 +628,7 @@ class BOBESummaryPlotter:
         return ax
     
     def plot_kl_divergences(self, kl_data: Optional[Dict] = None,
-                           ax: Optional[plt.Axes] = None) -> plt.Axes:
+                           ax: Optional[plt.Axes] = None, annotate=False) -> plt.Axes:
         """
         Plot successive KL divergences between NS iterations (reverse, forward, symmetric).
         
@@ -693,7 +695,8 @@ class BOBESummaryPlotter:
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         
         # Add annotation
-        ax.text(0.02, 0.98, 'KL divergences between successive NS iterations\n'
+        if annotate:
+            ax.text(0.02, 0.98, 'KL divergences between successive NS iterations\n'
                             'Invalid values shown as 1000', 
                transform=ax.transAxes, va='top', ha='left', 
                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7), fontsize=10)
@@ -874,11 +877,18 @@ class BOBESummaryPlotter:
                 else:
                     stats_lines.append(f"log Z = {logz:.4f}")
 
-        # Runtime and convergence
-        if self.results.end_time:
-            runtime = self.results.end_time - self.results.start_time
-            runtime_str = f"{runtime/3600:.2f} hours" if runtime > 3600 else f"{runtime:.1f} seconds"
+        # Runtime and convergence - use timing summary for proper total runtime including resumed runs
+        timing_summary = self.results.get_timing_summary()
+        total_runtime = timing_summary['total_runtime']
+        if total_runtime > 0:
+            runtime_str = f"{total_runtime/3600:.2f} hours" if total_runtime > 3600 else f"{total_runtime:.1f} seconds"
             stats_lines.append(f"Runtime: {runtime_str}")
+            
+            # # If this was a resumed run, show additional info
+            # if timing_summary.get('previous_runtime', 0) > 0:
+            #     prev_runtime = timing_summary['previous_runtime']
+            #     current_runtime = timing_summary['current_session_runtime']
+            #     stats_lines.append(f"  (Previous: {prev_runtime:.1f}s, Current: {current_runtime:.1f}s)")
         
         stats_lines.extend([
             f"Converged: {'Yes' if self.results.converged else 'No'}",

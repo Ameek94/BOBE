@@ -1,5 +1,6 @@
 from contextlib import contextmanager,redirect_stderr,redirect_stdout
 from os import devnull
+import os
 import numpy as np
 import jax.numpy as jnp
 from jax import vmap
@@ -10,6 +11,40 @@ from .logging_utils import get_logger
 from .seed_utils import get_numpy_rng
 import math
 log = get_logger("utils")
+
+def is_cluster_environment():
+    """
+    Detect if running in a cluster environment by checking common environment variables.
+    Returns True if cluster environment is detected, False otherwise.
+    """
+    cluster_indicators = [
+        'SLURM_JOB_ID',      # SLURM
+        'PBS_JOBID',         # PBS/Torque
+        'LSB_JOBID',         # LSF
+        'SGE_TASK_ID',       # SGE
+        'COBALT_JOBID',      # Cobalt
+        'MOAB_JOBID',        # Moab
+        'OMPI_COMM_WORLD_SIZE',  # MPI environment
+        'PMI_RANK',          # Intel MPI
+        'HOSTNAME'           # Check if hostname contains cluster-like patterns
+    ]
+    
+    for var in cluster_indicators:
+        if os.getenv(var):
+            if var == 'HOSTNAME':
+                hostname = os.getenv('HOSTNAME', '').lower()
+                # Common cluster hostname patterns
+                cluster_patterns = ['node', 'compute', 'worker', 'cluster', 'hpc']
+                if any(pattern in hostname for pattern in cluster_patterns):
+                    return True
+            else:
+                return True
+    
+    # Additional check for non-interactive environment
+    if not os.isatty(1):  # stdout is not a terminal
+        return True
+        
+    return False
 
 def renormalise_log_weights(log_weights):
     log_total = logsumexp(log_weights)
@@ -108,8 +143,6 @@ def kl_divergence_gaussian(mu1, Cov1, mu2, Cov2):
         'reverse': kl_reverse,
         'symmetric': kl_symmetric
     }
-
-
 
 #----Misc----
 

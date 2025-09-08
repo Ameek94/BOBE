@@ -11,9 +11,9 @@ from jaxbo.run import run_bobe
 
 def main():
     # Set up the cosmological likelihood
-    cobaya_input_file = './cosmo_input/LCDM_6D.yaml'
-    ls_priors = 'uniform'
-    likelihood_name = f'Planck_lite_{ls_priors}_ls_priors'
+    cobaya_input_file = './cosmo_input/LCDM_lite.yaml'
+    ls_priors = 'SAAS'
+    likelihood_name = f'Planck_lite_{ls_priors}'
 
     start = time.time()
     print("Starting BOBE run...")
@@ -26,27 +26,26 @@ def main():
             'noise_std': 0.0,
             'name': likelihood_name,
         },
+        resume=False,
+        resume_file=f'{likelihood_name}',
         verbosity='INFO',
-        n_cobaya_init=4, 
-        n_sobol_init=8, 
-        min_evals=20, 
-        max_eval_budget=200,
+        n_cobaya_init=2, 
+        n_sobol_init=4, 
+        min_evals=25, 
+        max_evals=250,
         max_gp_size=200,
-        fit_step=3, 
-        n_log_ei_iters=10,
-        ns_step=3,
-        wipv_batch_size=3,
+        fit_step=5, 
+        n_log_ei_iters=0,
+        ns_step=2,
+        wipv_batch_size=4,
         num_hmc_warmup=512,
-        num_hmc_samples=512, 
-        mc_points_size=128,
-        lengthscale_priors=ls_priors, 
+        num_hmc_samples=4096, 
+        mc_points_size=256,
+        gp_kwargs={'lengthscale_prior': ls_priors,}, 
         use_clf=True,
-        clf_use_size=10,
-        clf_threshold=350,
-        clf_update_step=1,
         clf_type='svm',
         minus_inf=-1e5,
-        logz_threshold=0.005,
+        logz_threshold=0.01,
         seed=10,
         do_final_ns=False,
     )
@@ -54,7 +53,7 @@ def main():
     end = time.time()
 
     if results is not None:
-        log = get_logger("[main]")
+        log = get_logger("main")
         manual_timing = end - start
 
         log.info("\n" + "="*60)
@@ -93,10 +92,10 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             output_file=likelihood.name,
-            reference_file='./cosmo_input/chains/Planck_lite_LCDM',
+            reference_file='./cosmo_input/chains/Planck_lite_mcmc',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
-            scatter_points=False
+            scatter_points=True
         )
 
         # Print detailed timing analysis

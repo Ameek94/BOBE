@@ -26,6 +26,11 @@ sqrt2 = sqrt(2.)
 sqrt3 = sqrt(3.)
 sqrt5 = sqrt(5.)
 
+class DummyDistribution:
+    """A dummy distribution that always returns log_prob = 0.0"""
+    def log_prob(self, x):
+        return 0.0
+
 def make_distribution(spec: dict) -> dist.Distribution:
     """
     Turn a dictionary specification into a NumPyro distribution.
@@ -43,6 +48,30 @@ def make_distribution(spec: dict) -> dist.Distribution:
     # Remove "name"
     kwargs = {k: v for k, v in spec.items() if k != "name"}
     return dist_class(**kwargs)
+
+def saas_prior_logprob(lengthscales, kernel_variance, tausq):
+    """
+    Compute SAAS prior log probability.
+    
+    Arguments
+    ---------
+    lengthscales : jnp.ndarray
+        Lengthscale parameters
+    kernel_variance : float
+        Kernel variance parameter  
+    tausq : float
+        SAAS tausq parameter
+        
+    Returns
+    -------
+    logprob : float
+        Log probability under SAAS priors
+    """
+    logprior = dist.LogNormal(0., 1.).log_prob(kernel_variance)
+    logprior += dist.HalfCauchy(0.1).log_prob(tausq)
+    inv_lengthscales_sq = 1 / (tausq * lengthscales**2)
+    logprior += jnp.sum(dist.HalfCauchy(1.).log_prob(inv_lengthscales_sq))
+    return logprior
 
 def dist_sq(x, y):
     """
@@ -119,8 +148,8 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
 class GP:
     
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
-                 kernel_variance_bounds = [-4,8],lengthscale_bounds = [np.log10(0.05),2],lengthscales=None,kernel_variance=None,
-                 kernel_variance_prior=None, lengthscale_prior=None):
+                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,10],lengthscales=None,kernel_variance=None,
+                 kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4]):
         """
         Initializes the Gaussian Process model.
 
@@ -146,79 +175,178 @@ class GP:
             Initial lengthscale values. If None, defaults to ones. Defaults to None.
         kernel_variance : float, optional
             Initial kernel variance. If None, defaults to 1.0. Defaults to None.
-        kernel_variance_prior : dict, optional
+        kernel_variance_prior : dict or str, optional
             Specification for the kernel variance prior. 
-            If None, defaults to `{'name': 'LogNormal', 'loc': 0.0, 'scale': 0.5}`. Defaults to None.
+            If None, defaults to `{'name': 'LogNormal', 'loc': 0.0, 'scale': 1.0}`.
+            If 'fixed', the kernel variance will be fixed to the initial value and not optimized.
+            Defaults to None.
         lengthscale_prior : str or dict, optional
             Specification for the lengthscale prior. 
-            If 'DSLP' or None, uses the DSLP prior. Otherwise, uses the provided distribution spec. Defaults to None.
+            If 'DSLP' or None, uses the DSLP prior. 
+            If 'SAAS', uses the SAAS prior with tausq parameter.
+            Otherwise, uses the provided distribution spec. Defaults to None.
+        tausq : float, optional
+            Initial tausq parameter for SAAS prior. Only used when lengthscale_prior='SAAS'. 
+            If None, defaults to 1.0. Defaults to None.
+        tausq_bounds : list, optional
+            Bounds for the tausq parameter (in log10 space). Only used when lengthscale_prior='SAAS'.
+            Defaults to [-4, 4].
         """
-        # check x and y sizes
-        if train_x.shape[0] != train_y.shape[0]:
-            raise ValueError("train_x and train_y must have the same number of points")
-        if train_y.ndim != 2:
-            raise ValueError("train_y must be 2D")
-        if train_x.ndim != 2:
-            raise ValueError("train_x must be 2D")
-        
+        # Setup and validate training data
+        self._setup_training_data(train_x, train_y)
 
-        self.ndim = train_x.shape[1]
-        self.y_mean = jnp.mean(train_y)
-        self.y_std = jnp.std(train_y)
-        self.train_x = train_x
-        self.train_y = (train_y - self.y_mean) / self.y_std
-        log.debug(f"GP training size = {self.train_x.shape[0]}")
-
-        self.kernel_name = kernel if kernel=="rbf" else "matern"
-        self.kernel = rbf_kernel if kernel=="rbf" else matern_kernel
+        # Setup kernel and initial hyperparameters
+        self.kernel_name = kernel if kernel == "rbf" else "matern"
+        self.kernel = rbf_kernel if kernel == "rbf" else matern_kernel
         self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
         self.kernel_variance = kernel_variance if kernel_variance is not None else 1.0
         self.noise = noise
+        
+        # Compute initial kernel matrices
         K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-        self.L = jnp.linalg.cholesky(K)
-        self.alphas = cho_solve((self.L, True), self.train_y)
+        self.cholesky = jnp.linalg.cholesky(K)
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
+        # Setup optimizer
         self.optimizer_method = optimizer
         if optimizer == "scipy":
             self.mll_optimize = optimize_scipy
         else:
             self.mll_optimize = optimize_optax
         self.optimizer_kwargs = optimizer_kwargs
-        
-        self.kernel_variance_prior_spec = kernel_variance_prior
-        if self.kernel_variance_prior_spec is None:
-            self.kernel_variance_prior_spec = {'name': 'LogNormal', 'loc': 0.0, 'scale': 0.5}
-        self.kernel_variance_prior_dist = make_distribution(self.kernel_variance_prior_spec)
-           
-        self.lengthscale_prior_spec = lengthscale_prior
-        if self.lengthscale_prior_spec is None:
-            self.lengthscale_prior_spec = 'DSLP'
+    
 
-        if self.lengthscale_prior_spec == 'DSLP':
-            self.lengthscale_prior_dist = dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(self.ndim), scale=sqrt3)
-        else:
-            self.lengthscale_prior_dist = make_distribution(self.lengthscale_prior_spec)
-
+        # Store bounds
         self.lengthscale_bounds = lengthscale_bounds
         self.kernel_variance_bounds = kernel_variance_bounds
-        self.hyperparam_bounds = [self.lengthscale_bounds]*self.ndim + [self.kernel_variance_bounds]
-        self.hyperparam_bounds = jnp.array(self.hyperparam_bounds).T # shape (2, D+1)
-        log.debug(f" Hyperparameter bounds (log10) =  {self.hyperparam_bounds}")
+        # Always store tausq for convenience even though it is only used for SAAS
+        self.tausq = tausq if tausq is not None else 1.0
+        self.tausq_bounds = tausq_bounds
 
-    def neg_mll(self,log10_params):
+        # Setup priors and optimization parameters
+        self._setup_kernel_variance_prior(kernel_variance_prior)
+        self._setup_lengthscale_prior(lengthscale_prior)
+        self._setup_optimization_parameters()
+
+    def _setup_training_data(self, train_x, train_y):
+        """Setup and validate training data, compute standardization parameters."""
+        # Check x and y sizes
+        if train_x.shape[0] != train_y.shape[0]:
+            raise ValueError("train_x and train_y must have the same number of points")
+        if train_y.ndim != 2:
+            train_y = train_y.reshape(-1, 1)
+        if train_x.ndim != 2:
+            raise ValueError("train_x must be 2D")
+
+        self.ndim = train_x.shape[1]
+        
+        # Compute standardization parameters
+        self.y_mean = jnp.mean(train_y)
+        self.y_std = jnp.std(train_y)
+        
+        # Handle edge case where std is zero (all values identical or only 1 point)
+        if self.y_std == 0:
+            log.warning("Training targets have zero variance. Setting std to 1.0 to avoid division by zero.")
+            self.y_std = 1.0
+
+        # Store standardized training data
+        self.train_x = jnp.array(train_x)
+        self.train_y = (train_y - self.y_mean) / self.y_std
+        log.debug(f"GP training size = {self.train_x.shape[0]}")
+
+    def _setup_kernel_variance_prior(self, kernel_variance_prior):
+        """Setup kernel variance prior and determine if it should be fixed."""
+        self.kernel_variance_prior_spec = kernel_variance_prior
+        if self.kernel_variance_prior_spec is None:
+            self.kernel_variance_prior_spec = {'name': 'Uniform', 'low': self.kernel_variance_bounds[0], 'high': self.kernel_variance_bounds[1]}
+        
+        # Check if kernel variance should be fixed
+        self.fixed_kernel_variance = (self.kernel_variance_prior_spec == 'fixed')
+        if not self.fixed_kernel_variance:
+            self.kernel_variance_prior_dist = make_distribution(self.kernel_variance_prior_spec)
+        else:
+            # Use dummy distribution that always returns log_prob = 0
+            self.kernel_variance_prior_dist = DummyDistribution()
+
+    def _setup_lengthscale_prior(self, lengthscale_prior):
+        """Setup lengthscale prior and determine prior function."""
+        self.lengthscale_prior_spec = lengthscale_prior
+        if self.lengthscale_prior_spec is None:
+            self.lengthscale_prior_spec = {'name': 'Uniform', 'low': self.lengthscale_bounds[0], 'high': self.lengthscale_bounds[1]}
+
+        # Set up lengthscale priors and prior function
+        if self.lengthscale_prior_spec == 'DSLP':
+            self.lengthscale_prior_dist = dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(self.ndim), scale=sqrt3)
+            self.prior_func = self._standard_prior_logprob
+        elif self.lengthscale_prior_spec == 'SAAS':
+            self.lengthscale_prior_dist = None
+            self.prior_func = self._saas_prior_logprob  
+        else:
+            self.lengthscale_prior_dist = make_distribution(self.lengthscale_prior_spec)
+            self.prior_func = self._standard_prior_logprob
+
+    def _setup_optimization_parameters(self):
+        """Setup parameter names and bounds for optimization."""
+        # Build parameter names and bounds based on what's being optimized
+        self.param_names = ['lengthscales']
+        self.hyperparam_bounds = [self.lengthscale_bounds] * self.ndim
+        
+        if not self.fixed_kernel_variance:
+            self.param_names.append('kernel_variance')
+            self.hyperparam_bounds.append(self.kernel_variance_bounds)
+            
+        if self.lengthscale_prior_spec == 'SAAS':
+            self.param_names.append('tausq')
+            self.hyperparam_bounds.append(self.tausq_bounds)
+
+        self.hyperparam_bounds = jnp.log10(jnp.array(self.hyperparam_bounds).T)
+        self.num_hyperparams = self.hyperparam_bounds.shape[1]
+        log.debug(f" Hyperparameter bounds =  {self.hyperparam_bounds}")
+
+    def _standard_prior_logprob(self, lengthscales, kernel_variance, tausq=None):
+        """Standard prior log probability for DSLP and custom priors."""
+        logprior = self.kernel_variance_prior_dist.log_prob(kernel_variance)
+        if self.lengthscale_prior_dist is not None:
+            logprior += self.lengthscale_prior_dist.log_prob(lengthscales).sum()
+        return logprior
+    
+    def _saas_prior_logprob(self, lengthscales, kernel_variance, tausq):
+        """SAAS prior log probability."""
+        return saas_prior_logprob(lengthscales, kernel_variance, tausq)
+    
+    def _parse_hyperparams(self, log10_params):
+        """Parse log10 parameters into lengthscales, kernel_variance, and optionally tausq."""
+        hyperparams = 10**log10_params
+        lengthscales = hyperparams[:self.ndim]
+        
+        if self.fixed_kernel_variance:
+            kernel_variance = self.kernel_variance  # Use fixed value
+            if 'tausq' in self.param_names:
+                tausq = hyperparams[self.ndim] if len(hyperparams) > self.ndim else self.tausq
+            else:
+                tausq = self.tausq
+        else:
+            kernel_variance = hyperparams[self.ndim]
+            tausq = hyperparams[self.ndim + 1] if len(hyperparams) > self.ndim + 1 else self.tausq
+            
+        return lengthscales, kernel_variance, tausq
+
+    def neg_mll(self, log10_params):
         """
         Computes the negative log marginal likelihood for the GP with given hyperparameters.
         """
-        hyperparams = 10**log10_params
-        lengthscales = hyperparams[0:-1]
-        kernel_variance = hyperparams[-1]
+        lengthscales, kernel_variance, tausq = self._parse_hyperparams(log10_params)
+        
+        # Compute kernel matrix and MLL
         K = self.kernel(self.train_x, self.train_x, lengthscales, kernel_variance, noise=self.noise, include_noise=True)
-        mll = gp_mll(K,self.train_y,self.train_y.shape[0])        
-        mll += self.kernel_variance_prior_dist.log_prob(kernel_variance)
-        mll += self.lengthscale_prior_dist.log_prob(lengthscales).sum()
+        mll = gp_mll(K, self.train_y, self.train_y.shape[0])
+        
+        # Add prior
+        mll += self.prior_func(lengthscales, kernel_variance, tausq)
+        
         return -mll
 
-    def fit(self, maxiter=200,n_restarts=4):
+    def fit(self, maxiter=500, n_restarts=4):
         """ 
         Fits the GP using maximum likelihood hyperparameters with the chosen optimizer.
 
@@ -229,19 +357,34 @@ class GP:
         n_restarts: int
             The number of restarts for the optimizer. Default is 4.
         """
-        init_params = jnp.log10(jnp.concatenate([self.lengthscales, jnp.array([self.kernel_variance])]))
+        # Prepare initial parameters based on current hyperparameters
+        init_params = jnp.array(self.lengthscales)
+        if not self.fixed_kernel_variance:
+            init_params = jnp.concatenate([init_params, jnp.array([self.kernel_variance])])
+        if 'tausq' in self.param_names:
+            init_params = jnp.concatenate([init_params, jnp.array([self.tausq])])
+            
+        if self.fixed_kernel_variance and 'tausq' in self.param_names:
+            log.info(f"Fitting GP with SAAS priors and fixed kernel_variance: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), tausq = {self.tausq}")
+        elif self.fixed_kernel_variance:
+            log.info(f"Fitting GP with fixed kernel_variance: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed)")
+        elif 'tausq' in self.param_names:
+            log.info(f"Fitting GP with SAAS priors: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}")
+        else:
+            log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
+
+        init_params = jnp.log10(init_params)
         init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
-        if n_restarts>1:
-            addn_init_params = init_params_u + 0.25*np.random.normal(size=(n_restarts-1, init_params.shape[0]))
+        if n_restarts > 1:
+            addn_init_params = init_params_u + 0.25 * np.random.normal(size=(n_restarts-1, init_params.shape[0]))
             init_params_u = np.vstack([init_params_u, addn_init_params])
         x0 = jnp.clip(init_params_u, 0.0, 1.0)
-        log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
 
         optimizer_kwargs = self.optimizer_kwargs.copy()
 
         best_params, best_f = self.mll_optimize(
             fun=self.neg_mll,
-            ndim=self.ndim + 1,
+            num_params=self.num_hyperparams,
             bounds=self.hyperparam_bounds,
             x0=x0,
             maxiter=maxiter,
@@ -249,10 +392,21 @@ class GP:
             optimizer_kwargs=optimizer_kwargs
         )
 
-        hyperparams = 10 ** best_params
-        self.lengthscales = hyperparams[:-1]
-        self.kernel_variance = hyperparams[-1]
-        log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, final MLL = {-best_f}")
+        # Update hyperparameters
+        lengthscales, kernel_variance, tausq = self._parse_hyperparams(best_params)
+        self.lengthscales = lengthscales
+        if not self.fixed_kernel_variance:
+            self.kernel_variance = kernel_variance
+        self.tausq = tausq
+        
+        if self.fixed_kernel_variance and 'tausq' in self.param_names:
+            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), tausq = {self.tausq}, final MLL = {-best_f}")
+        elif self.fixed_kernel_variance:
+            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), final MLL = {-best_f}")
+        elif 'tausq' in self.param_names:
+            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}, final MLL = {-best_f}")
+        else:
+            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, final MLL = {-best_f}")
 
         K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
         self.cholesky = jnp.linalg.cholesky(K)
@@ -301,7 +455,7 @@ class GP:
         x = jnp.atleast_2d(x)
         return jax.vmap(self.predict_single, in_axes=0,out_axes=(0,0))(x)
 
-    def update(self,new_x,new_y,refit=True,maxiter=200,n_restarts=4):
+    def update(self,new_x,new_y,refit=True,maxiter=400,n_restarts=4):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 
@@ -309,79 +463,246 @@ class GP:
         ---------        
         refit: bool
             Whether to refit the GP hyperparameters. Default is True.
-        lr: float
-            The learning rate for the optax optimizer. Default is 1e-2.
         maxiter: int
-            The maximum number of iterations for the optax optimizer. Default is 250.
+            The maximum number of iterations for the optax optimizer. Default is 200.
         n_restarts: int
-            The number of restarts for the optax optimizer. Default is 2.
-
-        Returns
-        -------
-        repeat: bool
-            Whether the point new_x, new_y already exists in the training set.
-
+            The number of restarts for the optax optimizer. Default is 4.
         """
         new_x = jnp.atleast_2d(new_x)
         new_y = jnp.atleast_2d(new_y)
 
         duplicate = False
+        new_pts_to_add = []
+        new_vals_to_add = []
+        
+        # Check for duplicates and collect new points
         for i in range(new_x.shape[0]):
-            if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x[i], atol=1e-6,rtol=1e-4), axis=1)):
+            if jnp.any(jnp.all(jnp.isclose(self.train_x, new_x[i], atol=1e-6, rtol=1e-4), axis=1)):
                 log.debug(f"Point {new_x[i]} already exists in the training set, not updating")
-                duplicate = True
             else:
-                self.add(new_x[i],new_y[i])
+                new_pts_to_add.append(new_x[i])
+                new_vals_to_add.append(new_y[i])
+
+        # Add new points if any
+        if new_pts_to_add:
+            new_pts_to_add = jnp.array(new_pts_to_add)
+            new_vals_to_add = jnp.array(new_vals_to_add)
+            
+            # Add to training data
+            self.train_x = jnp.vstack([self.train_x, new_pts_to_add])
+            train_y_original = jnp.vstack([self.train_y * self.y_std + self.y_mean, new_vals_to_add])
+            
+            self.y_mean = jnp.mean(train_y_original)
+            self.y_std = jnp.std(train_y_original)
+            
+            if self.y_std == 0:
+                log.warning("Training targets have zero variance. Setting std to 1.0 to avoid division by zero.")
+                self.y_std = 1.0
+            
+            self.train_y = (train_y_original - self.y_mean) / self.y_std
+        
         if refit:
             self.fit(maxiter=maxiter,n_restarts=n_restarts)
         else:
             K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
             self.cholesky = jnp.linalg.cholesky(K)
             self.alphas = cho_solve((self.cholesky, True), self.train_y)
-        return duplicate
 
-    def add(self,new_x,new_y):
+    def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
-        Updates the GP with new training points.
+        Computes the variance of the GP at the mc_points assuming a single point new_x is added to the training set
         """
+
         new_x = jnp.atleast_2d(new_x)
-        new_y = jnp.atleast_2d(new_y)
-        self.train_x = jnp.concatenate([self.train_x,new_x])
-        new_y_scaled = (new_y - self.y_mean) / self.y_std
-        self.train_y = jnp.concatenate([self.train_y, new_y_scaled])
-        return False
+        # new_train_x = jnp.concatenate([self.train_x,new_x])
+        k = self.kernel(self.train_x, new_x,self.lengthscales,self.kernel_variance,
+                        noise=self.noise,include_noise=False).flatten()           # shape (n,)
+        k_self = kernel_diag(new_x,self.kernel_variance,self.noise,include_noise=True)[0]  # scalar
+        k11_cho = fast_update_cholesky(self.cholesky,k,k_self)
 
-    def __getstate__(self):
-        """
-        Custom getstate method to pickle the GP object.
-        """
-        state = self.__dict__.copy()
-        # Remove unpicklable attributes
-        state.pop("cholesky", None)
-        state.pop("alphas", None)
-        # Remove function references that can't be pickled
-        state.pop("kernel", None)
-        state.pop("mll_optimize", None)
-        return state
+        # Compute only the extra row for new_x
+        k_new_mc = self.kernel(
+            new_x, mc_points,
+            self.lengthscales, self.kernel_variance,
+        noise=self.noise, include_noise=False)  # shape (1, n_mc)
+        k12 = jnp.vstack([k_train_mc,k_new_mc])
+        k22 = kernel_diag(mc_points,self.kernel_variance,self.noise,include_noise=True) # (N_mc,)
+        vv = solve_triangular(k11_cho, k12, lower=True) # shape (N_train,N_mc)
+        var = k22 - jnp.sum(vv*vv,axis=0) 
+        return var * self.y_std**2 # return to physical scale for better interpretability
 
-    def __setstate__(self, state):
+    def get_random_point(self,rng=None):
         """
-        Custom setstate method to unpickle the GP object.
+        Returns a random point in the unit cube.
         """
-        self.__dict__.update(state)
-        
-        # Recreate function references that were removed during pickling
-        self.kernel = rbf_kernel if self.kernel_name == "rbf" else matern_kernel
-        
-        if self.optimizer_method == "scipy":
-            self.mll_optimize = optimize_scipy
+        rng = rng if rng is not None else get_numpy_rng()
+        pt = rng.uniform(0, 1, size=self.train_x.shape[1])
+        return pt
+
+    def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,thinning=8,
+                       temp=1.,num_chains=2, np_rng=None, rng_key=None):
+
+        """
+        Obtain samples from the posterior represented by the GP mean as the logprob.
+        Optionally restarts MCMC if all logp values are the same or if HMC fails.
+        """        
+
+        rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
+        prob = rng_mcmc.uniform(0, 1)
+        high_temp = rng_mcmc.uniform(1., 2.) ** 2
+        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        log.info(f"Running MCMC chains with temperature {temp:.4f}")
+
+        def model():
+            x = numpyro.sample('x', dist.Uniform(
+                low=jnp.zeros(self.train_x.shape[1]),
+                high=jnp.ones(self.train_x.shape[1])
+            ))
+
+            mean = self.predict_mean_single(x)
+            numpyro.factor('y', mean/temp)
+            numpyro.deterministic('logp', mean)
+
+        @jax.jit
+        def run_single_chain(rng_key):
+                kernel = NUTS(model, dense_mass=False, max_tree_depth=5,)
+                mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
+                        num_chains=1, progress_bar=False, thinning=thinning)
+                mcmc.run(rng_key)
+                samples_x = mcmc.get_samples()['x']
+                logps = mcmc.get_samples()['logp']
+                return samples_x,logps
+
+
+        num_devices = jax.device_count()
+        # num_parallel_chains = min(num_devices,num_chains)
+
+        rng_key = rng_key if rng_key is not None else get_new_jax_key()
+        rng_keys = jax.random.split(rng_key, num_chains)
+
+        log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
+
+        if (num_devices >= num_chains) and num_chains > 1:
+            # if devices present run with pmap
+            pmapped = jax.pmap(run_single_chain, in_axes=(0,),out_axes=(0,0))
+            samples_x, logps = pmapped(rng_keys)
+            # reshape to get proper shapes
+            samples_x = jnp.concatenate(samples_x, axis=0)
+            logps = jnp.reshape(logps, (samples_x.shape[0],))
+            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
         else:
-            self.mll_optimize = optimize_optax
-        
-        # Recompute cholesky and alphas
-        self.cholesky = jnp.linalg.cholesky(self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True))
-        self.alphas = cho_solve((self.cholesky, True), self.train_y)
+            # run sequentially
+            samples_x = []
+            logps = []
+            for i in range(num_chains):
+                samples_x_i, logps_i = run_single_chain(rng_keys[i])
+                samples_x.append(samples_x_i)
+                logps.append(logps_i)
 
+            samples_x = jnp.concatenate(samples_x)
+            logps = jnp.concatenate(logps)
+
+        samples_dict = {
+            'x': samples_x,
+            'logp': logps,
+            'best': samples_x[jnp.argmax(logps)],
+            'method': "MCMC"
+        }
+
+        return samples_dict
+
+    def state_dict(self):
+        """
+        Returns a dictionary containing the complete state of the GP.
+        This can be used for saving, loading, or copying the GP.
+        
+        Returns
+        -------
+        state: dict
+            Dictionary containing all necessary information to reconstruct the GP
+        """
+        state = {
+            # Training data (original, unstandardized)
+            'train_x': np.array(self.train_x),
+            'train_y': np.array(self.train_y * self.y_std + self.y_mean),  # unstandardize
+            
+            # Hyperparameters
+            'lengthscales': np.array(self.lengthscales),
+            'kernel_variance': float(self.kernel_variance),
+            'noise': float(self.noise),
+            'tausq': float(self.tausq),
+            
+            # Standardization parameters
+            'y_mean': float(self.y_mean),
+            'y_std': float(self.y_std),
+            
+            # Model configuration
+            'kernel_name': self.kernel_name,
+            'lengthscale_prior_spec': self.lengthscale_prior_spec,
+            'kernel_variance_prior_spec': self.kernel_variance_prior_spec,
+            'fixed_kernel_variance': self.fixed_kernel_variance,
+            'optimizer_method': self.optimizer_method,
+            'optimizer_kwargs': self.optimizer_kwargs,
+            
+            # Bounds
+            'lengthscale_bounds': self.lengthscale_bounds,
+            'kernel_variance_bounds': self.kernel_variance_bounds,
+            'tausq_bounds': self.tausq_bounds,
+            
+            # Computed state
+            'cholesky': np.array(self.cholesky) if hasattr(self, 'cholesky') else None,
+            'alphas': np.array(self.alphas) if hasattr(self, 'alphas') else None,
+            
+            # Dimensions
+            'ndim': self.ndim,
+            
+            # Class identifier
+            'gp_class': 'GP'
+        }
+        
+        return state
+    
+    @classmethod
+    def from_state_dict(cls, state):
+        """
+        Creates a GP instance from a state dictionary.
+        
+        Arguments
+        ---------
+        state: dict
+            State dictionary returned by state_dict()
+            
+        Returns
+        -------
+        gp: GP
+            The reconstructed GP object
+        """
+        # Create GP instance
+        gp = cls(
+            train_x=state['train_x'],
+            train_y=state['train_y'],
+            noise=state['noise'],
+            kernel=state['kernel_name'],
+            optimizer=state['optimizer_method'],
+            optimizer_kwargs=state['optimizer_kwargs'],
+            lengthscales=state['lengthscales'],
+            kernel_variance=state['kernel_variance'],
+            lengthscale_bounds=state['lengthscale_bounds'],
+            kernel_variance_bounds=state['kernel_variance_bounds'],
+            kernel_variance_prior=state.get('kernel_variance_prior_spec'),
+            lengthscale_prior=state.get('lengthscale_prior_spec'),
+            tausq=state.get('tausq', 1.0),
+            tausq_bounds=state.get('tausq_bounds', [-4, 4])
+        )
+        
+        # Restore computed state if available
+        if state['cholesky'] is not None:
+            gp.cholesky = jnp.array(state['cholesky'])
+        if state['alphas'] is not None:
+            gp.alphas = jnp.array(state['alphas'])
+        
+        return gp
+    
     @classmethod
     def load(cls, filename, **kwargs):
         """
@@ -403,122 +724,57 @@ class GP:
             filename += '.npz'
             
         try:
-            data = np.load(filename)
+            data = np.load(filename, allow_pickle=True)
         except FileNotFoundError:
             raise FileNotFoundError(f"Could not find file {filename}")
         
-        init_kwargs = {
-            'train_x': jnp.array(data['train_x']),
-            'train_y': jnp.array(data['train_y']),
-            'noise': float(data['noise']),
-            'kernel': str(data['kernel']),
-            'optimizer': str(data['optimizer']),
-            'kernel_variance_bounds': jnp.array(data['kernel_variance_bounds']),
-            'lengthscale_bounds': jnp.array(data['lengthscale_bounds']),
-            'lengthscales': jnp.array(data['lengthscales']),
-            'kernel_variance': float(data['kernel_variance']),
-        }
-        if 'kernel_variance_prior' in data.files and data['kernel_variance_prior'] is not None:
-            init_kwargs['kernel_variance_prior'] = data['kernel_variance_prior'].item()
-        if 'lengthscale_prior' in data.files and data['lengthscale_prior'] is not None:
-            init_kwargs['lengthscale_prior'] = data['lengthscale_prior'].item()
-
-        init_kwargs.update(kwargs)
-        gp = cls(**init_kwargs)
+        # Convert arrays back to the expected format
+        state = {}
+        for key in data.files:
+            value = data[key]
+            if isinstance(value, np.ndarray) and value.shape == ():
+                # Handle scalar arrays
+                state[key] = value.item()
+            else:
+                state[key] = value
         
-        if 'cholesky' in data.files:
-            gp.cholesky = jnp.array(data['cholesky'])
-            gp.alphas = cho_solve((gp.cholesky, True), gp.train_y)
-
+        # Apply any override kwargs
+        state.update(kwargs)
+        
+        # Use from_state_dict for loading
+        gp = cls.from_state_dict(state)
+        
         log.info(f"Loaded GP from {filename} with {gp.train_x.shape[0]} training points")
         return gp
 
-    def save(self,outfile='gp'):
+    def save(self, filename='gp'):
         """
-        Saves the GP to a file
-
+        Save the GP state to a file using state_dict.
+        
         Arguments
         ---------
-        outfile: str
-            The name of the file to save the GP to. Default is 'gp'.
+        filename: str
+            The filename to save to (with or without .npz extension). Default is 'gp'.
         """
-        save_dict = {
-            'train_x': self.train_x,
-            'train_y': self.train_y * self.y_std + self.y_mean, # unstandardize
-            'noise': self.noise,
-            'kernel': self.kernel_name,
-            'optimizer': self.optimizer_method,
-            'kernel_variance_bounds': self.kernel_variance_bounds,
-            'lengthscale_bounds': self.lengthscale_bounds,
-            'lengthscales': self.lengthscales,
-            'kernel_variance': self.kernel_variance,
-            'y_mean': self.y_mean,
-            'y_std': self.y_std,
-            'kernel_variance_prior': self.kernel_variance_prior_spec,
-            'lengthscale_prior': self.lengthscale_prior_spec,
-        }
-        save_dict['cholesky'] = self.cholesky
-        save_dict['alphas'] = self.alphas
-
-        np.savez(f'{outfile}.npz', **save_dict)
-        log.info(f"Saved GP to {outfile}.npz")
-
-    def fantasy_var(self,new_x,mc_points,k_train_mc):
-        """
-        Computes the variance of the GP at the mc_points assuming a single point new_x is added to the training set
-        """
-
-        new_x = jnp.atleast_2d(new_x)
-        # new_train_x = jnp.concatenate([self.train_x,new_x])
-        k = self.kernel(self.train_x, new_x,self.lengthscales,self.kernel_variance,
-                        noise=self.noise,include_noise=False).flatten()           # shape (n,)
-        k_self = kernel_diag(new_x,self.kernel_variance,self.noise,include_noise=True)[0]  # scalar
-        k11_cho = fast_update_cholesky(self.cholesky,k,k_self)
-
-        # Compute only the extra row for new_x
-        k_new_mc = self.kernel(
-            new_x, mc_points,
-            self.lengthscales, self.kernel_variance,
-        noise=self.noise, include_noise=False)  # shape (1, n_mc)
-        k12 = jnp.vstack([k_train_mc,k_new_mc])
-
-        # k12 = self.kernel(new_train_x,mc_points,self.lengthscales,
-        #                   self.kernel_variance,noise=self.noise,include_noise=False)
-        k22 = kernel_diag(mc_points,self.kernel_variance,self.noise,include_noise=True) # (N_mc,)
-        vv = solve_triangular(k11_cho, k12, lower=True) # shape (N_train,N_mc)
-        var = k22 - jnp.sum(vv*vv,axis=0) 
-        return var * self.y_std**2 # return to physical scale for better interpretability
+        if not filename.endswith('.npz'):
+            filename += '.npz'
         
-    def get_phys_points(self,x_bounds):
-        """
-        Returns the physical points
-        """
-        x = scale_from_unit(self.train_x,x_bounds)
-        y = self.train_y*self.y_std + self.y_mean 
-        return x,y
+        state = self.state_dict()
+        np.savez(filename, **state)
+        log.info(f"Saved GP state to {filename}")
+
 
     def copy(self):
         """
-        Returns a copy of the GP
+        Creates a deep copy of the GP using state_dict.
+        
+        Returns
+        -------
+        gp_copy: GP
+            A deep copy of the current GP
         """
-        new_gp = GP(self.train_x, self.train_y, self.noise, self.kernel_name, self.optimizer_method,
-                    self.optimizer_kwargs, self.kernel_variance_bounds, self.lengthscale_bounds,
-                    self.lengthscales, self.kernel_variance,
-                    self.kernel_variance_prior_spec, self.lengthscale_prior_spec)
-        new_gp.cholesky = self.cholesky
-        new_gp.alphas = self.alphas
-
-        return new_gp
-
-    @property
-    def hyperparams(self):
-        """
-        Returns the current hyperparameters of the GP.
-        """
-        return {
-            "lengthscales": self.lengthscales,
-            "kernel_variance": self.kernel_variance
-        }
+        state = self.state_dict()
+        return self.__class__.from_state_dict(state)
     
     @property
     def npoints(self):

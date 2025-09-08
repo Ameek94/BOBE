@@ -10,6 +10,7 @@ jax.config.update("jax_enable_x64", True)
 from .gp import GP
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
+from .utils.core_utils import is_cluster_environment
 from scipy.special import logsumexp
 log = get_logger("ns")
 
@@ -83,7 +84,7 @@ def nested_sampling_Dy(gp: GP
                        ,logz_std: bool = True
                        ,maxcall: Optional[int] = None
                         ,boost_maxcall: Optional[int] = 1
-                        ,print_progress : bool = True
+                        ,print_progress : Optional[bool] = True
                         ,equal_weights: bool = False
                         ,sample_method='rwalk',
                         rng=None,
@@ -107,8 +108,15 @@ def nested_sampling_Dy(gp: GP
         Maximum number of function calls
     boost_maxcall : int
         Boost the maximum number of function calls
-    progress : bool
-        Print progress of the nested sampling run
+    print_progress : bool, optional
+        Print progress of the nested sampling run. If None, automatically disables 
+        progress printing in cluster environments and enables it otherwise.
+    equal_weights : bool
+        Resample to obtain equal weights
+    sample_method : str
+        Sampling method for dynesty
+    rng : random number generator
+        Random number generator
 
     Returns
     -------
@@ -116,8 +124,13 @@ def nested_sampling_Dy(gp: GP
         Equally weighted samples from the nested sampler
     logz_dict : dict
         Dictionary containing the mean, upper and lower bounds on logZ and the logZ error from the nested sampler
-    """ 
+    success : bool
+        Whether the nested sampling run was successful
+    """
 
+    # Auto-detect cluster environment if print_progress not explicitly set
+    print_progress = not is_cluster_environment()
+    
     if maxcall is None:
         if ndim<=4:
             maxcall = int(5000*ndim*boost_maxcall) # type: ignore
@@ -145,15 +158,16 @@ def nested_sampling_Dy(gp: GP
         sampler = StaticNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
                                       sample=sample_method,nlive=nlive,rstate=rng)
         sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
-        res = sampler.results  # type: ignore # grab our results
-        logl = res['logl']
-        # add check for all same logl values in case of initial plateau
-        if np.all(logl == logl[0]):
-            success = False
-            print("All logl values are the same, this may indicate a problem with the model or the data. Retrying with the dynamic nested sampler.")
-            sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
+    res = sampler.results  # type: ignore # grab our results
+    logl = res['logl']
+    # add check for all same logl values in case of initial plateau
+    if np.all(logl == logl[0]):
+        success = False
+        nlive = 2*nlive
+        log.warning("All initial logl values are the same. Retrying with the dynamic nested sampler and increased nlive.")
+        sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
                                        sample=sample_method,nlive=nlive)
-            sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)     
+        sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)     
             # need a better method to guarantee that at least one finite logl present.
         
     res = sampler.results
@@ -184,7 +198,7 @@ def nested_sampling_Dy(gp: GP
     logz_dict['upper'] = upper[-1]
     logz_dict['lower'] = lower[-1]
     logz_dict['var'] = var_logz
-    logz_dict['std'] = np.sqrt(var_logz) # 2 sigma
+    logz_dict['std'] = 2*np.sqrt(var_logz) # 2 sigma
     samples_dict = {}
     best_pt = samples_x[np.argmax(logl)]
     samples_dict['best'] = best_pt

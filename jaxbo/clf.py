@@ -22,10 +22,180 @@ except ImportError:
 
 
 # -----------------------------------------------------------------------------
+# Standalone training and prediction functions for classifiers
+# -----------------------------------------------------------------------------
+
+def train_svm_classifier(X, Y, settings = {}, init_params=None, **kwargs):
+    """Train SVM classifier and return parameters, metrics, and predict function."""
+    gamma = settings.get('gamma', 'scale')
+    C = settings.get('C', 1e7)
+    kernel = settings.get('kernel', 'rbf')
+    
+    clf = SVC(kernel=kernel, gamma=gamma, C=C)
+    clf.fit(X, Y) 
+    support_vectors = clf.support_vectors_
+    dual_coef = clf.dual_coef_[0]  # convert to 1D array
+    intercept = float(clf.intercept_[0])
+    gamma_eff = float(clf._gamma) # note: this is the effective gamma value used by scikit-learn
+
+    # convert to jax arrays
+    support_vectors = jnp.array(support_vectors)
+    dual_coef = jnp.array(dual_coef)
+    metrics = {
+        'n_support_vectors': len(support_vectors),
+        'gamma': f"{gamma_eff:.2e}",
+        'C': f"{C:.2e}",
+        'intercept': f"{intercept:.2e}",
+    }
+    params = {
+        'support_vectors': support_vectors,
+        'dual_coef': dual_coef,
+        'intercept': intercept,
+        'gamma_eff': gamma_eff
+    }
+    
+    # Create predict function
+    predict_fn = jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, 
+                                dual_coef=dual_coef, intercept=intercept, gamma=gamma_eff))
+    
+    return params, metrics, predict_fn
+
+def get_svm_predict_proba_fn(params):
+    """Get prediction function for SVM classifier from parameters (for loading from file)."""
+    support_vectors = params['support_vectors']
+    dual_coef = params['dual_coef']
+    intercept = params['intercept']
+    gamma = params['gamma_eff']
+    return jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, 
+                          dual_coef=dual_coef, intercept=intercept, gamma=gamma))
+
+def train_nn_classifier(X, Y, settings = {}, init_params=None, **kwargs):
+    """Train neural network classifier and return parameters, metrics, and predict function."""
+    # Create model with settings
+    label_size = X.shape[0]
+    if label_size < 500:
+        settings.update({'hidden_dims': [32, 32]})
+        settings.update({'batch_size': 64})
+    else:
+        settings.update({'hidden_dims': [64, 64]})
+        settings.update({'batch_size': 128})
+    model = MLPClassifier(**settings)
+    
+    # Train with multiple restarts
+    params, metrics = train_nn_multiple_restarts(
+        model=model,
+        x=X, y=Y,
+        init_params=init_params
+    )
+    
+    # Create predict function
+    def predict_proba_fn(x):
+        logits = model.apply(params, x, train=False)
+        return jax.nn.sigmoid(logits.squeeze(-1))
+    predict_fn = jax.jit(predict_proba_fn)
+    
+    return params, metrics, predict_fn
+
+def get_nn_predict_proba_fn(params, settings = {}, **kwargs):
+    """Get prediction function for NN classifier from parameters (for loading from file)."""
+    # Recreate model with same settings to get the apply function
+    model = MLPClassifier(**settings)
+    
+    def predict_proba_fn(x):
+        logits = model.apply(params, x, train=False)
+        return jax.nn.sigmoid(logits.squeeze(-1))
+    return jax.jit(predict_proba_fn)
+
+def train_ellipsoid_classifier(X, Y, settings = {}, init_params=None, **kwargs):
+    """Train ellipsoid classifier and return parameters, metrics, and predict function."""
+    d = X.shape[1]
+    mu = kwargs.get('best_pt', 0.5*jnp.ones(d))
+    
+    # Create model with settings
+    model = EllipsoidClassifier(d=d, mu=mu, **settings)
+    
+    # Train with multiple restarts
+    params, metrics = train_ellipsoid_multiple_restarts(
+        model=model,
+        x=X, y=Y,
+        init_params=init_params,
+    )
+    
+    def predict_proba_fn(x):
+        logits = model.apply(params, x, train=False)
+        return jax.nn.sigmoid(logits.squeeze())
+    predict_fn = jax.jit(predict_proba_fn)
+    
+    return params, metrics, predict_fn
+
+def get_ellipsoid_predict_proba_fn(params, settings, d, **kwargs):
+    """Get prediction function for ellipsoid classifier from parameters (for loading from file)."""
+    mu = kwargs.get('best_pt', 0.5*jnp.ones(d))
+    model = EllipsoidClassifier(d=d, mu=mu, **settings)
+    
+    def predict_proba_fn(x):
+        logits = model.apply(params, x, train=False)
+        return jax.nn.sigmoid(logits.squeeze())
+    return jax.jit(predict_proba_fn)
+
+# Dictionary mapping classifier types to their functions
+CLASSIFIER_REGISTRY = {
+    'svm': {
+        'train_fn': train_svm_classifier,
+        'predict_fn': get_svm_predict_proba_fn,
+    },
+    'nn': {
+        'train_fn': train_nn_classifier,
+        'predict_fn': get_nn_predict_proba_fn,
+    },
+    'ellipsoid': {
+        'train_fn': train_ellipsoid_classifier,
+        'predict_fn': get_ellipsoid_predict_proba_fn,
+    }
+}
+
+# -----------------------------------------------------------------------------
 # Scikit-learn SVM Classifier using JAX for prediction.
 # -----------------------------------------------------------------------------
 
-@jax.jit
+class SVMClassifier:
+
+    def __init__(self, gamma: str = "scale", C: float = 1e7, kernel: str = 'rbf'):
+        self.gamma = gamma
+        self.C = C
+        self.kernel = kernel
+
+    def train(self,X,Y,init_params=None):
+        clf = SVC(kernel=self.kernel, gamma=self.gamma, C=self.C)
+        clf.fit(X, Y) 
+        support_vectors = clf.support_vectors_
+        dual_coef = clf.dual_coef_[0]  # convert to 1D array
+        intercept = float(clf.intercept_[0])
+        gamma_eff = float(clf._gamma) # note: this is the effective gamma value used by scikit-learn
+    
+        # convert to jax arrays
+        support_vectors = jnp.array(support_vectors)
+        dual_coef = jnp.array(dual_coef)
+        metrics = {
+            'n_support_vectors': len(support_vectors),
+            'gamma': f"{gamma_eff:.2e}",
+            'C': f"{self.C:.2e}",
+            'intercept': f"{intercept:.2e}",}
+        params = {
+            'support_vectors': support_vectors,
+            'dual_coef': dual_coef,
+            'intercept': intercept,
+            'gamma_eff': gamma_eff
+        }
+        return params, metrics       
+
+    def get_predict_proba_fn(self,params):
+        support_vectors = params['support_vectors']
+        dual_coef = params['dual_coef']
+        intercept = params['intercept']
+        gamma = params['gamma_eff']
+        return jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, dual_coef=dual_coef, intercept=intercept, gamma=gamma))
+
 def svm_predict(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: jnp.ndarray, intercept: float, gamma: float):
     """
     Compute the decision function for SVM with RBF kernel.
@@ -53,52 +223,9 @@ def svm_predict_proba(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: j
     decision = svm_predict(x, support_vectors, dual_coef, intercept, gamma)
     return jnp.where(decision >= 0, 1.0, 0.0)  # Binary classification: 1 if decision >= 0, else 0
 
-def svm_predict_batch(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: jnp.ndarray, intercept: float, gamma: float, batch_size: int = 200):
-    """
-    Compute the decision function for SVM with RBF kernel for a batch of inputs.    
-    """
-    batched_predict = lambda x: svm_predict(x, support_vectors, dual_coef, intercept, gamma)
-    return jax.lax.map(batched_predict, x, batch_size=batch_size)
-
-def train_svm(x: np.ndarray, y: np.ndarray, svm_settings: Dict[str, Any] = {}, gamma: str = "scale", C: float = 1e7, init_params: Optional[Dict[str, Any]] = None, **kwargs):
-    """
-    Train the SVM on the data.
-    """
-
-    gamma = svm_settings.get('gamma', "scale")
-    C = svm_settings.get('C', 1e7)
-    kernel = svm_settings.get('kernel', 'rbf')
-
-    # Currently missing method to handle case where data has only 1 label
-
-    clf = SVC(kernel=kernel, gamma=gamma, C=C)
-    clf.fit(x, y) 
-    support_vectors = clf.support_vectors_
-    dual_coef = clf.dual_coef_[0]  # convert to 1D array
-    intercept = float(clf.intercept_[0])
-    gamma_eff = float(clf._gamma) # note: this is the effective gamma value used by scikit-learn
-    
-    # convert to jax arrays
-    support_vectors = jnp.array(support_vectors)
-    dual_coef = jnp.array(dual_coef)
-    metrics = {
-        'n_support_vectors': len(support_vectors),
-        'gamma': f"{gamma_eff:.2e}",
-        'C': f"{C:.2e}",
-        'intercept': f"{intercept:.2e}",
-    }
-    predict_fn = jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, dual_coef=dual_coef, intercept=intercept, gamma=gamma_eff))
-    params = {
-        'support_vectors': support_vectors,
-        'dual_coef': dual_coef,
-        'intercept': intercept,
-        'gamma_eff': gamma_eff
-    }
-    return predict_fn, params, metrics
-
 
 # -----------------------------------------------------------------------------
-# Neural Network Classifier with train/validation split
+# Neural Network Classifiers with train/validation split
 # -----------------------------------------------------------------------------
 
 # Common training utilities
@@ -120,12 +247,12 @@ def train_with_restarts(
     split_seed: int = 42,
     init_params = None,  # Add this parameter
     **train_kwargs
-) -> Tuple[Callable, Dict, Dict]:
+) -> Tuple[Dict, Dict]:
     """
     Train model with multiple restarts using consistent train/val split.
     
     Args:
-        train_fn: Training function that returns (predict_fn, params, metrics)
+        train_fn: Training function that returns (params, metrics)
         x: (N, d) features
         y: (N,) labels
         n_restarts: number of random restarts
@@ -140,7 +267,6 @@ def train_with_restarts(
                                                                split_seed)
     
     best_val_loss = jnp.inf
-    best_predict_fn = None
     best_params = None
     best_metrics = {}
 
@@ -163,7 +289,7 @@ def train_with_restarts(
             log.debug(f"[Restart {i+1}/{n_restarts}] Using random initialization")
 
         # Pass the pre-split data to avoid re-splitting
-        predict_fn, params, metrics = train_fn(
+        params, metrics = train_fn(
             x_train=x_train, y_train=y_train,
             x_val=x_val, y_val=y_val,
             seed=current_seed,
@@ -175,19 +301,27 @@ def train_with_restarts(
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_predict_fn = predict_fn
             best_params = params
             best_metrics = metrics
             log.debug(f"[Restart {i+1}/{n_restarts}] New best val_loss: {val_loss:.4e}")
 
     log.debug(f"[Training] Best model selected with val_loss = {best_val_loss:.4e}")
-    return best_predict_fn, best_params, best_metrics
+    return best_params, best_metrics
 
 
 # Neural Network Classifier
-class FeasibilityMLP(nn.Module):
-    hidden_dims: list
-    dropout_rate: float
+class MLPClassifier(nn.Module):
+    hidden_dims: list = (64, 64)
+    dropout_rate: float = 0.1
+    lr: float = 1e-3
+    weight_decay: float = 1e-4
+    n_epochs: int = 1000
+    batch_size: int = 128
+    early_stop_patience: int = 50
+    n_restarts: int = 4
+    val_frac: float = 0.2
+    seed_offset: int = 0
+    split_seed: int = 42
 
     @nn.compact
     def __call__(self, x, train: bool = False):
@@ -198,23 +332,30 @@ class FeasibilityMLP(nn.Module):
         x = nn.Dense(1)(x)
         return x
 
+    def train(self, X, Y, init_params=None, **kwargs):
+        params, metrics = train_nn_multiple_restarts(
+            model=self,
+            x=X, y=Y,
+            init_params=init_params
+        )
+        return params, metrics
+
+    def get_predict_proba_fn(self, params):
+        def predict_proba_fn(x):
+            logits = self.apply(params, x, train=False)
+            return jax.nn.sigmoid(logits.squeeze(-1))
+        return jax.jit(predict_proba_fn)
+
 def train_nn(
+    model: MLPClassifier,
     x_train: jnp.ndarray, y_train: jnp.ndarray,
     x_val: jnp.ndarray, y_val: jnp.ndarray,
-    hidden_dims=(64,64),
-    dropout_rate=0.1,
-    lr=1e-3,
-    weight_decay=1e-4,
-    n_epochs=500,
-    batch_size=128,
-    early_stop_patience=50,
     seed=0,
     init_params=None,  # Add this parameter
     **kwargs
 ):
     """Simplified NN training with pre-split data"""
     N, d = x_train.shape
-    model = FeasibilityMLP(hidden_dims=list(hidden_dims), dropout_rate=dropout_rate)
     
     # Handle initialization
     if init_params is not None:
@@ -223,7 +364,7 @@ def train_nn(
         key = jax.random.PRNGKey(seed)
         params = model.init(key, jnp.ones((1, d)), train=True)
 
-    optimizer = optax.adamw(lr, weight_decay=weight_decay)
+    optimizer = optax.adamw(model.lr, weight_decay=model.weight_decay)
     opt_state = optimizer.init(params)
 
     @jax.jit
@@ -245,15 +386,15 @@ def train_nn(
     best_params = params
     best_val_loss = jnp.inf
     x_np, y_np = np.array(x_train), np.array(y_train)
-    steps = max(1, x_train.shape[0] // batch_size)
+    steps = max(1, x_train.shape[0] // model.batch_size)
 
     rng_opt = np.random.default_rng(seed)
     key = jax.random.PRNGKey(seed)
 
-    for epoch in range(n_epochs):
+    for epoch in range(model.n_epochs):
         perm_train = rng_opt.permutation(x_train.shape[0])
         for i in range(steps):
-            idx = perm_train[i*batch_size:(i+1)*batch_size]
+            idx = perm_train[i*model.batch_size:(i+1)*model.batch_size]
             bx = jnp.array(x_np[idx])
             by = jnp.array(y_np[idx])
             key, subkey = jax.random.split(key)
@@ -263,53 +404,45 @@ def train_nn(
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_params = params
-            patience = early_stop_patience
+            patience = model.early_stop_patience
         else:
             patience -= 1
             if patience <= 0:
                 log.debug(f"[NN] early stopping at epoch {epoch}")
                 break
 
-    apply_fn = lambda xx: model.apply(best_params, xx, train=False)
     metrics = {
         'train_loss': f"{float(loss_fn(best_params, x_train, y_train, key)):.2e}",
         'val_loss': f"{float(best_val_loss):.2e}",
         'epochs': epoch + 1,
     }
 
-    predict_fn = jax.jit(lambda x: jax.nn.sigmoid(apply_fn(x).squeeze(-1)))
-    return predict_fn, best_params, metrics
+    return best_params, metrics
 
-def train_nn_multiple_restarts(x: jnp.ndarray, y: jnp.ndarray, **kwargs):
+def train_nn_multiple_restarts(model: MLPClassifier, x: jnp.ndarray, y: jnp.ndarray, **kwargs):
     """Wrapper for NN training with restarts"""
-    return train_with_restarts(train_nn, x, y, **kwargs)
+    train_kwargs = {
+        'val_frac': model.val_frac,
+    }
+    return train_with_restarts(partial(train_nn, model), x, y, 
+                               n_restarts=model.n_restarts, 
+                               seed_offset=model.seed_offset, 
+                               split_seed=model.split_seed, **train_kwargs)
 
-# Prediction functions
-
-def nn_predict(x: jnp.ndarray, apply_fn):
-    """
-    Single-point prediction: returns logit.
-    """
-    logit = apply_fn(x[None, :]).squeeze()
-    return logit
-
-def nn_predict_batch(x: jnp.ndarray, apply_fn):
-    """
-    Batch prediction: returns logits for all x.
-    """
-    return apply_fn(x).squeeze(-1)
-
-def nn_predict_proba(x: jnp.ndarray, apply_fn):
-    return jax.nn.sigmoid(nn_predict(x, apply_fn))
-
-def nn_predict_proba_batch(x: jnp.ndarray, apply_fn):
-    return jax.nn.sigmoid(nn_predict_batch(x, apply_fn))
-
-# Ellipsoid Classifier with center at best fit point 
+# Ellipsoid Classifier with center at best fit point
 class EllipsoidClassifier(nn.Module):
     d: int
     mu: jnp.ndarray
     init_scale: float = 1.0
+    lr: float = 1e-2
+    weight_decay: float = 1e-4
+    n_epochs: int = 1000
+    batch_size: int = 64
+    patience: int = 50
+    n_restarts: int = 2
+    val_frac: float = 0.2
+    seed_offset: int = 0
+    split_seed: int = 42
 
     def setup(self):
         tril = self.d * (self.d + 1) // 2
@@ -333,22 +466,30 @@ class EllipsoidClassifier(nn.Module):
         logit = -self.alpha * md2 + self.beta
         return logit
 
+    def train(self, X, Y, init_params=None, **kwargs):
+        self.mu = kwargs.get('best_pt', self.mu)
+        params, metrics = train_ellipsoid_multiple_restarts(
+            model=self,
+            x=X, y=Y,
+            init_params=init_params,
+        )
+        return params, metrics
+
+    def get_predict_proba_fn(self, params):
+        def predict_proba_fn(x):
+            logits = self.apply(params, x, train=False)
+            return jax.nn.sigmoid(logits.squeeze())
+        return jax.jit(predict_proba_fn)
+
 def train_ellipsoid(
+    model: EllipsoidClassifier,
     x_train: jnp.ndarray, y_train: jnp.ndarray,
     x_val: jnp.ndarray, y_val: jnp.ndarray,
-    lr: float = 1e-2,
-    weight_decay: float = 1e-4,
-    n_epochs: int = 500,
-    batch_size: int = 32,
     seed: int = 0,
-    patience: int = 50,
     init_params=None,  # Add this parameter
     **kwargs
 ):
     """Simplified ellipsoid training with pre-split data"""
-    mu = kwargs.get('best_pt', 0.5 * jnp.ones(x_train.shape[1]))
-    model = EllipsoidClassifier(d=x_train.shape[1], mu=mu)
-    
     # Handle initialization
     if init_params is not None:
         params = init_params
@@ -357,7 +498,7 @@ def train_ellipsoid(
         params = model.init(key, x_train)
     
         
-    optimizer = optax.adamw(lr, weight_decay=weight_decay)
+    optimizer = optax.adamw(model.lr, weight_decay=model.weight_decay)
     opt_state = optimizer.init(params)
 
     @jax.jit
@@ -374,15 +515,15 @@ def train_ellipsoid(
     best_params = params
     best_val_loss = jnp.inf
     x_np, y_np = np.array(x_train), np.array(y_train)
-    steps = max(1, x_train.shape[0] // batch_size)
+    steps = max(1, x_train.shape[0] // model.batch_size)
     patience_counter = 0
     
     rng = np.random.RandomState(seed)
 
-    for epoch in range(n_epochs):
+    for epoch in range(model.n_epochs):
         perm_train = rng.permutation(x_train.shape[0])
         for i in range(steps):
-            idx = perm_train[i*batch_size:(i+1)*batch_size]
+            idx = perm_train[i*model.batch_size:(i+1)*model.batch_size]
             bx = jnp.array(x_np[idx])
             by = jnp.array(y_np[idx])
             params, opt_state = train_step(params, opt_state, bx, by)
@@ -395,7 +536,7 @@ def train_ellipsoid(
             patience_counter = 0
         else:
             patience_counter += 1
-            if patience_counter > patience:
+            if patience_counter > model.patience:
                 log.debug(f"Early stopping at epoch {epoch}")
                 break
 
@@ -406,19 +547,14 @@ def train_ellipsoid(
         'epochs': epoch + 1,
     }
 
-    apply_fn = lambda p, xx: model.apply(p, xx, train=False)
-    predict_fn = jax.jit(lambda x: jax.nn.sigmoid(apply_fn(best_params, x).squeeze()))
-    return predict_fn, best_params, metrics
+    return best_params, metrics
 
-def train_ellipsoid_multiple_restarts(x: jnp.ndarray, y: jnp.ndarray, **kwargs):
+def train_ellipsoid_multiple_restarts(model: EllipsoidClassifier, x: jnp.ndarray, y: jnp.ndarray, **kwargs):
     """Wrapper for ellipsoid training with restarts"""
-    return train_with_restarts(train_ellipsoid, x, y, **kwargs)
-
-def ellipsoid_predict(x: jnp.ndarray, params: Dict, apply_fn: Callable) -> jnp.ndarray:
-    """Predict logits for single or batch input"""
-    return apply_fn(params, x if x.ndim > 1 else x[None, :]).squeeze()
-
-def ellipsoid_predict_proba(x: jnp.ndarray, params: Dict, apply_fn: Callable) -> jnp.ndarray:
-    """Predict probabilities for single or batch input"""
-    logits = ellipsoid_predict(x, params, apply_fn)
-    return jax.nn.sigmoid(logits)
+    train_kwargs = {
+        'val_frac': model.val_frac,
+    }
+    return train_with_restarts(partial(train_ellipsoid, model), x, y, 
+                               n_restarts=model.n_restarts, 
+                               seed_offset=model.seed_offset, 
+                               split_seed=model.split_seed, **train_kwargs)

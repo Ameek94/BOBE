@@ -1,120 +1,351 @@
+
+
 <!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-<html lang="[en]" data-content_root="./">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JaxBo: Bayesian Optimization for Bayesian Evidence &mdash; JaxBo 0.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/custom.css?v=30d0d2dd" />
 
-    <title>JaxBo documentation &#8212; JaxBo 0.1.0 documentation</title>
-    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d1102ebc" />
-    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
-    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
-    <script src="_static/documentation_options.js?v=13309f08"></script>
-    <script src="_static/doctools.js?v=9bcbadda"></script>
-    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=01f34227"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script async="async" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="jaxbo" href="modules.html" />
-   
-  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
-  
+    <link rel="next" title="Installation Guide" href="installation.html" /> 
+</head>
 
-  
-  
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
 
-  </head><body>
-  
-
-    <div class="document">
-      <div class="documentwrapper">
-        <div class="bodywrapper">
           
-
-          <div class="body" role="main">
-            
-  <section id="jaxbo-documentation">
-<h1>JaxBo documentation<a class="headerlink" href="#jaxbo-documentation" title="Link to this heading">¶</a></h1>
-<div class="toctree-wrapper compound">
+          
+          <a href="#" class="icon icon-home">
+            JaxBo
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="modules.html">jaxbo</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="jaxbo.html">jaxbo package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples/index.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/core.html">Core API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/gp_models.html">Gaussian Process Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/acquisition.html">Acquisition Functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/likelihood.html">Likelihood Interfaces</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/utils.html">Utilities</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Developer Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing to JaxBo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="development.html">Development Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="bibliography.html">Bibliography</a></li>
+<li class="toctree-l1"><a class="reference internal" href="glossary.html">Glossary</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="#">JaxBo</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="#" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">JaxBo: Bayesian Optimization for Bayesian Evidence</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/Ameek94/JaxBo/blob/main/docs/source/index.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="jaxbo-bayesian-optimization-for-bayesian-evidence">
+<h1>JaxBo: Bayesian Optimization for Bayesian Evidence<a class="headerlink" href="#jaxbo-bayesian-optimization-for-bayesian-evidence" title="Link to this heading"></a></h1>
+<a class="reference external image-reference" href="https://www.python.org/downloads/"><img alt="Python Version" src="https://img.shields.io/badge/python-3.10+-blue.svg" />
+</a>
+<a class="reference external image-reference" href="https://github.com/Ameek94/JaxBo/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg" />
+</a>
+<p><strong>JaxBo</strong> is a high-performance Bayesian Optimization package designed specifically for cosmology applications,
+built on top of JAX for automatic differentiation and GPU acceleration. It provides tools for efficiently
+estimating Bayesian evidence using advanced Gaussian Process models and acquisition functions.</p>
+<section id="key-features">
+<h2>Key Features<a class="headerlink" href="#key-features" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>🚀 <strong>JAX-powered</strong>: Built on JAX for automatic differentiation and GPU/TPU acceleration</p></li>
+<li><p>🎯 <strong>Cosmology-focused</strong>: Designed specifically for cosmological parameter estimation</p></li>
+<li><p>🔬 <strong>Advanced GP Models</strong>: Support for Deep Sigmoidal Location Process (DSLP) and Sparse Axis-Aligned Subspace (SAAS) Gaussian Processes</p></li>
+<li><p>📊 <strong>Multiple Acquisition Functions</strong>: Including Weighted Integrated Posterior Variance (WIPV) and Expected Improvement (EI)</p></li>
+<li><p>🔗 <strong>Cobaya Integration</strong>: Seamless integration with the Cobaya cosmological parameter estimation package</p></li>
+<li><p>📈 <strong>Comprehensive Analysis</strong>: Built-in tools for convergence analysis, plotting, and result visualization</p></li>
+<li><p>⚡ <strong>Parallel Computing</strong>: MPI support for distributed computing</p></li>
+</ul>
+</section>
+<section id="quick-start">
+<h2>Quick Start<a class="headerlink" href="#quick-start" title="Link to this heading"></a></h2>
+<section id="installation">
+<h3>Installation<a class="headerlink" href="#installation" title="Link to this heading"></a></h3>
+<p>Install JaxBo from the package directory:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>.
+</pre></div>
+</div>
+<p>For development installation:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+</section>
+<section id="basic-usage">
+<h3>Basic Usage<a class="headerlink" href="#basic-usage" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">jaxbo</span><span class="w"> </span><span class="kn">import</span> <span class="n">BOBE</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jaxbo.likelihood</span><span class="w"> </span><span class="kn">import</span> <span class="n">CobayaLikelihood</span>
+
+<span class="c1"># Define your likelihood</span>
+<span class="n">likelihood</span> <span class="o">=</span> <span class="n">CobayaLikelihood</span><span class="p">(</span><span class="n">info_dict</span><span class="p">)</span>
+
+<span class="c1"># Create BOBE instance</span>
+<span class="n">bobe</span> <span class="o">=</span> <span class="n">BOBE</span><span class="p">(</span>
+    <span class="n">loglikelihood</span><span class="o">=</span><span class="n">likelihood</span><span class="p">,</span>
+    <span class="n">max_eval_budget</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span>
+    <span class="n">acquisition_func</span><span class="o">=</span><span class="s2">&quot;wipv&quot;</span>
+<span class="p">)</span>
+
+<span class="c1"># Run optimization</span>
+<span class="n">results</span> <span class="o">=</span> <span class="n">bobe</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="package-structure">
+<h2>Package Structure<a class="headerlink" href="#package-structure" title="Link to this heading"></a></h2>
+<p>The JaxBo package is organized into several main modules:</p>
+<ul class="simple">
+<li><p><strong>bo.py</strong>: Core Bayesian Optimization implementation (BOBE class)</p></li>
+<li><p><strong>gp.py</strong>: Gaussian Process models including DSLP and SAAS variants</p></li>
+<li><p><strong>clf_gp.py</strong>: Gaussian Processes with classification for constraint handling</p></li>
+<li><p><strong>acquisition.py</strong>: Acquisition functions (WIPV, EI, LogEI)</p></li>
+<li><p><strong>likelihood.py</strong>: Likelihood interfaces including Cobaya integration</p></li>
+<li><p><strong>nested_sampler.py</strong>: Nested sampling utilities</p></li>
+<li><p><strong>utils/</strong>: Utility modules for results, plotting, convergence analysis, and more</p></li>
+</ul>
+</section>
+<section id="documentation-contents">
+<h2>Documentation Contents<a class="headerlink" href="#documentation-contents" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#installation-methods">Installation Methods</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#virtual-environment-setup">Virtual Environment Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#gpu-support">GPU Support</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#verification">Verification</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#getting-help">Getting Help</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#basic-concepts">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#simple-example">Simple Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#cosmology-example-with-cobaya">Cosmology Example with Cobaya</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#configuration-options">Configuration Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#working-with-results">Working with Results</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#parallel-computing">Parallel Computing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/index.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/basic_usage.html">Basic Usage Tutorial</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples/index.html">Examples</a><ul class="simple">
 </ul>
 </li>
 </ul>
 </div>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/core.html">Core API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/core.html#bobe-class">BOBE Class</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/core.html#boberesults-class">BOBEResults Class</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/core.html#module-jaxbo.optim">Optimization Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/core.html#run-module">Run Module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/gp_models.html">Gaussian Process Models</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/gp_models.html#base-gp-class">Base GP Class</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/gp_models.html#deep-sigmoidal-location-process-dslp">Deep Sigmoidal Location Process (DSLP)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/gp_models.html#sparse-axis-aligned-subspace-saas-gp">Sparse Axis-Aligned Subspace (SAAS) GP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/gp_models.html#gaussian-process-with-classifier">Gaussian Process with Classifier</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/gp_models.html#module-jaxbo.clf">Classifier Module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/gp_models.html#utility-functions">Utility Functions</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/acquisition.html">Acquisition Functions</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/acquisition.html#base-acquisition-function">Base Acquisition Function</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/acquisition.html#weighted-integrated-posterior-variance-wipv">Weighted Integrated Posterior Variance (WIPV)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/acquisition.html#expected-improvement-ei">Expected Improvement (EI)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/acquisition.html#log-expected-improvement-logei">Log Expected Improvement (LogEI)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/acquisition.html#utility-functions">Utility Functions</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/likelihood.html">Likelihood Interfaces</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/likelihood.html#base-likelihood">Base Likelihood</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/likelihood.html#external-likelihood">External Likelihood</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/likelihood.html#cobaya-likelihood">Cobaya Likelihood</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/likelihood.html#nested-sampling">Nested Sampling</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/utils.html">Utilities</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#module-jaxbo.utils.results">Results Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#module-jaxbo.utils.core_utils">Core Utilities</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#module-jaxbo.utils.seed_utils">Seed Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#module-jaxbo.utils.logging_utils">Logging Utilities</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#module-jaxbo.utils.convergence">Convergence Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#module-jaxbo.utils.summary_plots">Plotting and Visualization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#module-jaxbo.utils.timing">Timing Utilities</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#module-jaxbo.utils.pool">Parallel Computing</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Developer Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing to JaxBo</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#development-setup">Development Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#code-style">Code Style</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#testing">Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#documentation">Documentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#submitting-changes">Submitting Changes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#pull-request-guidelines">Pull Request Guidelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#types-of-contributions">Types of Contributions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#getting-help">Getting Help</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="development.html">Development Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="development.html#architecture-overview">Architecture Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="development.html#adding-new-features">Adding New Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="development.html#jax-integration">JAX Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="development.html#performance-optimization">Performance Optimization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="development.html#testing-guidelines">Testing Guidelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="development.html#documentation-standards">Documentation Standards</a></li>
+<li class="toctree-l2"><a class="reference internal" href="development.html#release-process">Release Process</a></li>
+<li class="toctree-l2"><a class="reference internal" href="development.html#debugging-tips">Debugging Tips</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="changelog.html#unreleased">[Unreleased]</a></li>
+<li class="toctree-l2"><a class="reference internal" href="changelog.html#xx-xx">[0.1.0] - 2025-XX-XX</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="bibliography.html">Bibliography</a></li>
+<li class="toctree-l1"><a class="reference internal" href="glossary.html">Glossary</a></li>
+</ul>
+</div>
+</section>
 </section>
 <section id="indices-and-tables">
-<h1>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Link to this heading">¶</a></h1>
+<h1>Indices and Tables<a class="headerlink" href="#indices-and-tables" title="Link to this heading"></a></h1>
 <ul class="simple">
+<li><p><a class="reference internal" href="genindex.html"><span class="std std-ref">Index</span></a></p></li>
 <li><p><a class="reference internal" href="py-modindex.html"><span class="std std-ref">Module Index</span></a></p></li>
 <li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
 </ul>
 </section>
-
-
-          </div>
-          
-        </div>
-      </div>
-      <div class="sphinxsidebar" role="navigation" aria-label="Main">
-        <div class="sphinxsidebarwrapper">
-<h1 class="logo"><a href="#">JaxBo</a></h1>
-
-
-
-
-
-
-
-
-
-<search id="searchbox" style="display: none" role="search">
-    <div class="searchformwrapper">
-    <form class="search" action="search.html" method="get">
-      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
-      <input type="submit" value="Go" />
-    </form>
-    </div>
-</search>
-<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="modules.html">jaxbo</a></li>
-</ul>
-
-<div class="relations">
-<h3>Related Topics</h3>
-<ul>
-  <li><a href="#">Documentation overview</a><ul>
-      <li>Next: <a href="modules.html" title="next chapter">jaxbo</a></li>
-  </ul></li>
-</ul>
+<section id="citation">
+<h1>Citation<a class="headerlink" href="#citation" title="Link to this heading"></a></h1>
+<p>If you use JaxBo in your research, please cite:</p>
+<div class="highlight-bibtex notranslate"><div class="highlight"><pre><span></span><span class="nc">@software</span><span class="p">{</span><span class="nl">jaxbo2025</span><span class="p">,</span>
+<span class="w">  </span><span class="na">title</span><span class="p">=</span><span class="s">{JaxBo: Bayesian Optimization for Bayesian Evidence using JAX}</span><span class="p">,</span>
+<span class="w">  </span><span class="na">author</span><span class="p">=</span><span class="s">{Malhotra, Ameek and Cohen, Nathan and Hamann, Jan}</span><span class="p">,</span>
+<span class="w">  </span><span class="na">year</span><span class="p">=</span><span class="s">{2025}</span><span class="p">,</span>
+<span class="w">  </span><span class="na">url</span><span class="p">=</span><span class="s">{https://github.com/Ameek94/JaxBo}</span>
+<span class="p">}</span>
+</pre></div>
 </div>
+</section>
+<section id="license">
+<h1>License<a class="headerlink" href="#license" title="Link to this heading"></a></h1>
+<p>JaxBo is released under the MIT License. See the LICENSE file for details.</p>
+</section>
+<section id="contact">
+<h1>Contact<a class="headerlink" href="#contact" title="Link to this heading"></a></h1>
+<ul class="simple">
+<li><p><strong>Ameek Malhotra</strong>: <a class="reference external" href="mailto:ameekmalhotra&#37;&#52;&#48;gmail&#46;com">ameekmalhotra<span>&#64;</span>gmail<span>&#46;</span>com</a></p></li>
+<li><p><strong>Nathan Cohen</strong>: <a class="reference external" href="mailto:nathan&#46;cohen&#37;&#52;&#48;unsw&#46;edu&#46;au">nathan<span>&#46;</span>cohen<span>&#64;</span>unsw<span>&#46;</span>edu<span>&#46;</span>au</a></p></li>
+<li><p><strong>Jan Hamann</strong></p></li>
+</ul>
+<p>For bug reports and feature requests, please use the <a class="reference external" href="https://github.com/Ameek94/JaxBo/issues">GitHub Issues</a> page.</p>
+</section>
 
 
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="installation.html" class="btn btn-neutral float-right" title="Installation Guide" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
 
+  <hr/>
 
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Ameek Malhotra, Nathan Cohen and Jan Hamann.</p>
+  </div>
 
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
 
-
-
+</footer>
         </div>
       </div>
-      <div class="clearer"></div>
-    </div>
-    <div class="footer">
-      &#169;2025, Ameek Malhotra, Nathan Cohen and Jan Hamann.
-      
-      |
-      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
-      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
-      
-      |
-      <a href="_sources/index.rst.txt"
-          rel="nofollow">Page source</a>
-    </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
 
-    
-
-    
-  </body>
+</body>
 </html>

@@ -13,7 +13,7 @@ likelihood:
   planck_2018_lowl.EE: null
   planck_NPIPE_highl_CamSpec.TTTEEE: null
   planck_2018_lensing.native: null
-  bao.desi_2024_bao_all: null
+  bao.desi_dr2.desi_bao_all: null
 params:
  # Baseline cosmological parameters
   w: -1.
@@ -24,7 +24,7 @@ params:
      loc: 0.0026
      scale: 0.0001   
    prior:
-     min: -0.005
+     min: -0.01
      max: 0.01
    proposal: 0.0001   
   omch2:
@@ -204,4 +204,4 @@ sampler:
    covmat: auto
    Rminus1_stop: 0.01
    Rminus1_cl_stop: 0.2   
-output: chains/Planck_DESI_LCDM_MCMC_Omk
+output: chains/Planck_DESIDR2_LCDM_Omk_MCMC

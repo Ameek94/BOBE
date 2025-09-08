@@ -304,7 +304,8 @@ class BOBEResults:
             self.final_samples = np.array(existing_results['samples'])
             self.final_weights = np.array(existing_results['weights'])
             self.final_loglikes = np.array(existing_results['logl'])
-            self.final_logz_dict = existing_results.get('logz_bounds', {})
+            # Try new naming first, fall back to old naming for backward compatibility
+            self.final_logz_dict = existing_results.get('final_logz_dict', existing_results.get('logz_bounds', {}))
             self.converged = existing_results.get('converged', False)
             self.termination_reason = existing_results.get('termination_reason', "Resumed run")
 
@@ -597,13 +598,9 @@ class BOBEResults:
             
             # === EVIDENCE INFORMATION ===
             'logz': self.final_logz_dict.get('mean', np.nan),
-            'logzerr': self.final_logz_dict.get('upper', 0) - self.final_logz_dict.get('lower', 0),
+            'logzerr': self.final_logz_dict.get('std', self.final_logz_dict.get('upper', 0) - self.final_logz_dict.get('lower', 0)),
             'dlogz_sampler': float(self.final_logz_dict.get('dlogz_sampler', np.nan)),
-            'logz_bounds': {
-                'lower': self.final_logz_dict.get('lower', np.nan),
-                'upper': self.final_logz_dict.get('upper', np.nan),
-                'mean': self.final_logz_dict.get('mean', np.nan)
-            },
+            'final_logz_dict': self.final_logz_dict.copy(),  # Preserve full logz_dict including std
             'logz_history': self.logz_evolution,
             
             # === PARAMETER INFORMATION ===
@@ -758,7 +755,7 @@ class BOBEResults:
         stats = {
             "evidence": {
                 "logz": float(self.final_logz_dict.get('mean', np.nan)),
-                "logz_err": float(self.final_logz_dict.get('upper', 0) - self.final_logz_dict.get('lower', 0)),
+                "logz_err": float(self.final_logz_dict.get('std', self.final_logz_dict.get('upper', 0) - self.final_logz_dict.get('lower', 0))),
                 "logz_lower": float(self.final_logz_dict.get('lower', np.nan)),
                 "logz_upper": float(self.final_logz_dict.get('upper', np.nan)),
                 "dlogz_sampler": float(self.final_logz_dict.get('dlogz_sampler', np.nan))
@@ -841,7 +838,7 @@ class BOBEResults:
         log.info(f"Saved intermediate results to {intermediate_file}")
 
         if gp is not None and filename is None:  # Only save GP if using default naming
-            gp.save(outfile=f"{self.output_file}_gp")
+            gp.save(filename=f"{self.output_file}_gp")
     
     def get_getdist_samples(self) -> Optional['MCSamples']:
         """
@@ -910,7 +907,8 @@ class BOBEResults:
             results.final_samples = results_dict['samples']
             results.final_weights = results_dict['weights']
             results.final_loglikes = results_dict['logl']
-            results.final_logz_dict = results_dict['logz_bounds']
+            # Try new naming first, fall back to old naming for backward compatibility
+            results.final_logz_dict = results_dict.get('final_logz_dict', results_dict.get('logz_bounds', {}))
             results.converged = results_dict['converged']
             results.termination_reason = results_dict['termination_reason']
             
