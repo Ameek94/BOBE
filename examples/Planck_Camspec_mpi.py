@@ -33,7 +33,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}_uniform'
+    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}_uniform_8chains'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -52,7 +52,7 @@ def main():
         
         # Iteration and budget settings
         n_log_ei_iters=n_log_ei_iters,
-        n_cobaya_init=4,
+        n_cobaya_init=16,
         n_sobol_init=32,
         min_evals=750,
         max_evals=2500,
@@ -68,14 +68,14 @@ def main():
         
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=6000,
+        num_hmc_samples=8000,
         mc_points_size=512,
         
         # GP settings
         gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None},
 
         # resume
-        resume=True,
+        resume=False,
         resume_file=f'{likelihood_name}',
         
         # Classifier settings
@@ -86,6 +86,7 @@ def main():
         minus_inf=-1e5,
         logz_threshold=0.01,
         do_final_ns=True, 
+        convergence_n_iters=2,
     )
 
     end = time.time()

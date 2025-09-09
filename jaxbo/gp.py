@@ -4,12 +4,14 @@ from typing import Any,List
 import jax.numpy as jnp
 import numpy as np
 import jax
+from jax import jit
 from jax.scipy.linalg import cho_solve, solve_triangular
 from scipy import optimize
 from .utils.core_utils import scale_to_unit, scale_from_unit
 jax.config.update("jax_enable_x64", True)
 import numpyro
 from numpyro.infer import MCMC, NUTS
+from numpyro.infer.util import init_to_value
 from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
@@ -147,7 +149,7 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
 
 class GP:
     
-    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
+    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_kwargs={'method': 'L-BFGS-B'},
                  kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,10],lengthscales=None,kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4]):
         """
@@ -162,11 +164,11 @@ class GP:
         noise : float, optional
             Noise parameter added to the diagonal of the kernel. Defaults to 1e-8.
         kernel : str, optional
-            Kernel to use, either "rbf" or "matern". Defaults to "rbf".
+            Kernel to use. Only "rbf" is supported in this implementation. Defaults to "rbf".
         optimizer : str, optional
-            Optimizer to use for hyperparameter tuning. Defaults to "optax".
+            Optimizer to use for hyperparameter tuning. Defaults to "scipy".
         optimizer_kwargs : dict, optional
-            Keyword arguments for the optimizer. Defaults to {'lr': 1e-3, 'name': 'adam'}.
+            Keyword arguments for the optimizer. Defaults to {'method': 'L-BFGS-B'}.
         kernel_variance_bounds : list, optional
             Bounds for the kernel variance (in log10 space). Defaults to [-4, 8].
         lengthscale_bounds : list, optional
@@ -196,9 +198,9 @@ class GP:
         self._setup_training_data(train_x, train_y)
         # print(f"shapes train_x: {self.train_x.shape}, train_y: {self.train_y.shape}")
 
-        # Setup kernel and initial hyperparameters
-        self.kernel_name = kernel if kernel == "rbf" else "matern"
-        self.kernel = rbf_kernel if kernel == "rbf" else matern_kernel
+        # Setup kernel and initial hyperparameters (RBF only)
+        self.kernel_name = "rbf"
+        self.kernel = rbf_kernel
         self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
         self.kernel_variance = kernel_variance if kernel_variance is not None else 1.0
         self.noise = noise
@@ -207,6 +209,9 @@ class GP:
         K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
         self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
+
+        # Create JIT-compiled prediction methods
+        self._update_jit_functions()
 
         # Setup optimizer
         self.optimizer_method = optimizer
@@ -304,6 +309,95 @@ class GP:
         self.num_hyperparams = self.hyperparam_bounds.shape[1]
         log.debug(f" Hyperparameter bounds =  {self.hyperparam_bounds}")
 
+    def _predict_mean_single(self, x):
+        """Implementation of single point mean prediction for RBF kernel."""
+        x = jnp.atleast_2d(x)
+        # Optimized RBF kernel computation
+        inv_ls = 1.0 / self.lengthscales
+        train_x_scaled = self.train_x * inv_ls
+        x_scaled = x * inv_ls
+        
+        D = (
+            jnp.sum(train_x_scaled ** 2, axis=1)[:, None]
+            + jnp.sum(x_scaled ** 2, axis=1)[None, :]
+            - 2 * train_x_scaled @ x_scaled.T
+        )
+        k12 = self.kernel_variance * jnp.exp(-0.5 * D)  # (n_train, n_test)
+        mean_std = jnp.dot(k12.T, self.alphas).squeeze(-1)
+        mean = mean_std * self.y_std + self.y_mean
+        return mean.squeeze()
+
+    def _predict_var_single(self, x):
+        """Implementation of single point variance prediction for RBF kernel."""
+        x = jnp.atleast_2d(x)
+        # Optimized RBF kernel computation
+        inv_ls = 1.0 / self.lengthscales
+        train_x_scaled = self.train_x * inv_ls
+        x_scaled = x * inv_ls
+        
+        D = (
+            jnp.sum(train_x_scaled ** 2, axis=1)[:, None]
+            + jnp.sum(x_scaled ** 2, axis=1)[None, :]
+            - 2 * train_x_scaled @ x_scaled.T
+        )
+        k12 = self.kernel_variance * jnp.exp(-0.5 * D)  # (n_train, n_test)
+        
+        V = solve_triangular(self.cholesky, k12, lower=True)
+        k22 = self.kernel_variance * jnp.ones(x.shape[0])
+        var_std = k22 - jnp.sum(V ** 2, axis=0)
+        var_std = jnp.maximum(var_std, safe_noise_floor)
+        
+        var = var_std * (self.y_std ** 2)
+        return var.squeeze()
+
+    def _predict_single(self, x):
+        """Implementation of single point prediction (mean and variance) - returns standardized values."""
+        x = jnp.atleast_2d(x)
+        # Optimized RBF kernel computation
+        inv_ls = 1.0 / self.lengthscales
+        train_x_scaled = self.train_x * inv_ls
+        x_scaled = x * inv_ls
+        
+        D = (
+            jnp.sum(train_x_scaled ** 2, axis=1)[:, None]
+            + jnp.sum(x_scaled ** 2, axis=1)[None, :]
+            - 2 * train_x_scaled @ x_scaled.T
+        )
+        k12 = self.kernel_variance * jnp.exp(-0.5 * D)  # (n_train, n_test)
+        
+        mean_std = jnp.dot(k12.T, self.alphas).squeeze(-1)  # Keep standardized for EI
+        V = solve_triangular(self.cholesky, k12, lower=True)
+        k22 = self.kernel_variance * jnp.ones(x.shape[0])
+        var_std = k22 - jnp.sum(V ** 2, axis=0)
+        var_std = jnp.maximum(var_std, safe_noise_floor)
+        
+        return mean_std.squeeze(), var_std.squeeze()
+
+    def _update_jit_functions(self):
+        """Create JIT-compiled prediction functions with current GP state."""
+        # Create JIT-compiled versions of the implementation functions
+        self.predict_mean_single = jax.jit(self._predict_mean_single)
+        self.predict_var_single = jax.jit(self._predict_var_single)
+        self.predict_single = jax.jit(self._predict_single)
+        
+        # Create batched versions using vmap
+        self.predict_mean_batched = jax.jit(jax.vmap(self._predict_mean_single, in_axes=0))
+        self.predict_var_batched = jax.jit(jax.vmap(self._predict_var_single, in_axes=0))
+        self.predict_batched = jax.jit(jax.vmap(self._predict_single, in_axes=0))
+
+        # Warm up JIT compilation with a dummy point
+        dummy_x = jnp.zeros(self.ndim)
+        dummy_batch = jnp.zeros((2, self.ndim))
+        
+        _ = self.predict_mean_single(dummy_x)
+        _ = self.predict_var_single(dummy_x)
+        _ = self.predict_single(dummy_x)
+        _ = self.predict_mean_batched(dummy_batch)
+        _ = self.predict_var_batched(dummy_batch)
+        _ = self.predict_batched(dummy_batch)
+        
+        log.debug("JIT-compiled prediction functions updated and warmed up")
+
     def _standard_prior_logprob(self, lengthscales, kernel_variance, tausq=None):
         """Standard prior log probability for DSLP and custom priors."""
         logprior = self.kernel_variance_prior_dist.log_prob(kernel_variance)
@@ -338,8 +432,11 @@ class GP:
         """
         lengthscales, kernel_variance, tausq = self._parse_hyperparams(log10_params)
         
-        # Compute kernel matrix and MLL
-        K = self.kernel(self.train_x, self.train_x, lengthscales, kernel_variance, noise=self.noise, include_noise=True)
+        # Use original kernel computation
+        K = self.kernel(
+            self.train_x, self.train_x, lengthscales, kernel_variance, 
+            noise=self.noise, include_noise=True
+        )
         mll = gp_mll(K, self.train_y, self.train_y.shape[0])
         
         # Add prior
@@ -347,14 +444,14 @@ class GP:
         
         return -mll
 
-    def fit(self, maxiter=500, n_restarts=4):
+    def fit(self, maxiter=1000, n_restarts=4):
         """ 
         Fits the GP using maximum likelihood hyperparameters with the chosen optimizer.
 
         Arguments
         ---------
         maxiter: int
-            The maximum number of iterations for the optimizer. Default is 200.
+            The maximum number of iterations for the optimizer. Default is 1000.
         n_restarts: int
             The number of restarts for the optimizer. Default is 4.
         """
@@ -409,54 +506,9 @@ class GP:
         else:
             log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, final MLL = {-best_f}")
 
-        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-        self.cholesky = jnp.linalg.cholesky(K)
-        self.alphas = cho_solve((self.cholesky, True), self.train_y)
+        self.recompute_cholesky()
 
-    def predict_mean_single(self,x):
-        """
-        Single point prediction of mean
-        """
-        x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False) # shape (N,1)
-        mean = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean 
-        return mean 
-    
-    def predict_var_single(self,x):
-        x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False) # shape (N,1)
-        vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
-        k22 = kernel_diag(x,self.kernel_variance,self.noise,include_noise=True) # shape (1,) for x (1,ndim)
-        var = k22 - jnp.sum(vv*vv,axis=0) 
-        var = jnp.clip(var, safe_noise_floor, None)
-        return self.y_std**2 * var.squeeze()
-    
-    def predict_mean_batched(self,x):
-        x = jnp.atleast_2d(x)
-        return jax.vmap(self.predict_mean_single, in_axes=0)(x)
-    
-    def predict_var_batched(self,x):
-        x = jnp.atleast_2d(x)
-        return jax.vmap(self.predict_var_single, in_axes=0)(x)
-
-    def predict_single(self,x):
-        """
-        Predicts the mean and variance of the GP at x but does not unstandardize it. To use with EI and the like.
-        """
-        x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False)
-        k22 = kernel_diag(x,self.kernel_variance,self.noise,include_noise=True)
-        mean = jnp.einsum('ij,ji', k12.T, self.alphas)
-        vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
-        var = k22 - jnp.sum(vv*vv,axis=0) 
-        var = jnp.clip(var, safe_noise_floor, None)
-        return mean, var
-    
-    def predict_batched(self,x):
-        x = jnp.atleast_2d(x)
-        return jax.vmap(self.predict_single, in_axes=0,out_axes=(0,0))(x)
-
-    def update(self,new_x,new_y,refit=True,maxiter=400,n_restarts=4):
+    def update(self,new_x,new_y,refit=True,maxiter=1000,n_restarts=4):
         """
         Updates the GP with new training points and refits the GP if refit is True.
 
@@ -465,14 +517,13 @@ class GP:
         refit: bool
             Whether to refit the GP hyperparameters. Default is True.
         maxiter: int
-            The maximum number of iterations for the optax optimizer. Default is 200.
+            The maximum number of iterations for the optimizer. Default is 1000.
         n_restarts: int
             The number of restarts for the optax optimizer. Default is 4.
         """
         new_x = jnp.atleast_2d(new_x)
-        new_y = jnp.atleast_2d(new_y)
+        new_y = jnp.atleast_2d(new_y).reshape(-1, 1)  # Ensure (n, 1) shape
 
-        duplicate = False
         new_pts_to_add = []
         new_vals_to_add = []
         
@@ -487,12 +538,13 @@ class GP:
         # Add new points if any
         if new_pts_to_add:
             new_pts_to_add = jnp.array(new_pts_to_add)
-            new_vals_to_add = jnp.array(new_vals_to_add)
+            new_vals_to_add = jnp.array(new_vals_to_add).reshape(-1, 1)  # Ensure proper shape
             
             # Add to training data
             self.train_x = jnp.vstack([self.train_x, new_pts_to_add])
             train_y_original = jnp.vstack([self.train_y * self.y_std + self.y_mean, new_vals_to_add])
             
+            # Recompute standardization parameters
             self.y_mean = jnp.mean(train_y_original)
             self.y_std = jnp.std(train_y_original)
             
@@ -506,39 +558,70 @@ class GP:
             self.fit(maxiter=maxiter,n_restarts=n_restarts)
         else:
             self.recompute_cholesky()
-        # print(f"shapes train_x: {self.train_x.shape}, train_y: {self.train_y.shape}")
+
+        # Update JIT-compiled functions with new state
+        self._update_jit_functions()
 
 
     def recompute_cholesky(self):
         """
         Recomputes the Cholesky decomposition and alphas. Useful if hyperparameters are changed manually.
+        Also updates JIT-compiled prediction functions.
         """
         K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
         self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
-
+        
     def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
-        Computes the variance of the GP at the mc_points assuming a single point new_x is added to the training set
+        Fast fantasy variance update: computes posterior variance at mc_points 
+        after adding new_x to the training set, using Cholesky rank-1 update.
+
+        Args:
+            new_x (jnp.ndarray): New point, shape (d,)
+            mc_points (jnp.ndarray): Points to evaluate variance at, shape (M, d)
+            k_train_mc (jnp.ndarray): Precomputed k(train_x, mc_points), shape (N, M)
+
+        Returns:
+            var (jnp.ndarray): Posterior variances at mc_points, shape (M,), scaled
         """
+        # Assume new_x is (d,) — avoid reshaping
+        new_x_2d = jnp.expand_dims(new_x, 0)  # (1, d)
 
-        new_x = jnp.atleast_2d(new_x)
-        # new_train_x = jnp.concatenate([self.train_x,new_x])
-        k = self.kernel(self.train_x, new_x,self.lengthscales,self.kernel_variance,
-                        noise=self.noise,include_noise=False).flatten()           # shape (n,)
-        k_self = kernel_diag(new_x,self.kernel_variance,self.noise,include_noise=True)[0]  # scalar
-        k11_cho = fast_update_cholesky(self.cholesky,k,k_self)
-
-        # Compute only the extra row for new_x
-        k_new_mc = self.kernel(
-            new_x, mc_points,
+        # k(train_x, new_x): (N,)
+        k = self.kernel(
+            self.train_x, new_x_2d,
             self.lengthscales, self.kernel_variance,
-        noise=self.noise, include_noise=False)  # shape (1, n_mc)
-        k12 = jnp.vstack([k_train_mc,k_new_mc])
-        k22 = kernel_diag(mc_points,self.kernel_variance,self.noise,include_noise=True) # (N_mc,)
-        vv = solve_triangular(k11_cho, k12, lower=True) # shape (N_train,N_mc)
-        var = k22 - jnp.sum(vv*vv,axis=0) 
-        return var * self.y_std**2 # return to physical scale for better interpretability
+            noise=self.noise, include_noise=False
+        ).squeeze()  # (N,)
+
+        # k(new_x, new_x) + noise
+        k_self = self.kernel_variance + self.noise
+
+        # Fast Cholesky update: [L   0]
+        #                      [v^T  d]
+        L_fantasy = fast_update_cholesky(self.cholesky, k, k_self)  # (N+1, N+1)
+
+        # k(new_x, mc_points): (1, M)
+        k_new_mc = self.kernel(
+            new_x_2d, mc_points,
+            self.lengthscales, self.kernel_variance,
+            noise=self.noise, include_noise=False
+        )  # (1, M)
+
+        # Build [k_train_mc]
+        #       [k_new_mc ]  -> (N+1, M) without copying
+        k12 = jnp.concatenate([k_train_mc, k_new_mc], axis=0)  # (N+1, M)
+
+        # Solve: L_fantasy @ V = k12  → V = L_fantasy^{-1} @ k12
+        V = solve_triangular(L_fantasy, k12, lower=True)  # (N+1, M)
+
+        # Variance: k(x,x) - ||V||^2
+        k22 = kernel_diag(mc_points, self.kernel_variance, self.noise, include_noise=True)  # (M,)
+        var_std = k22 - jnp.sum(V ** 2, axis=0)  # (M,)
+        var_std = jnp.maximum(var_std, safe_noise_floor)
+
+        return var_std * (self.y_std ** 2)  # scale back to original
 
     def get_random_point(self,rng=None):
         """
@@ -549,7 +632,7 @@ class GP:
         return pt
 
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,thinning=8,
-                       temp=1.,num_chains=2, np_rng=None, rng_key=None):
+                       temp=1.,num_chains=4, np_rng=None, rng_key=None):
 
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
@@ -584,30 +667,67 @@ class GP:
 
 
         num_devices = jax.device_count()
-        # num_parallel_chains = min(num_devices,num_chains)
-
+        
         rng_key = rng_key if rng_key is not None else get_new_jax_key()
         rng_keys = jax.random.split(rng_key, num_chains)
 
         log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
 
-        if (num_devices >= num_chains) and num_chains > 1:
-            # if devices present run with pmap
-            pmapped = jax.pmap(run_single_chain, in_axes=(0,),out_axes=(0,0))
-            samples_x, logps = pmapped(rng_keys)
-            # reshape to get proper shapes
-            samples_x = jnp.concatenate(samples_x, axis=0)
-            logps = jnp.reshape(logps, (samples_x.shape[0],))
-            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
-        else:
-            # run sequentially
+        # Adaptive method selection based on device/chain configuration
+        if num_devices == 1:
+            # Sequential method for single device
+            log.info("Using sequential method (single device)")
             samples_x = []
             logps = []
             for i in range(num_chains):
                 samples_x_i, logps_i = run_single_chain(rng_keys[i])
                 samples_x.append(samples_x_i)
                 logps.append(logps_i)
-
+            samples_x = jnp.concatenate(samples_x)
+            logps = jnp.concatenate(logps)
+            
+        elif num_devices >= num_chains and num_chains > 1:
+            # Direct pmap method when devices >= chains
+            log.info("Using direct pmap method (devices >= chains)")
+            pmapped = jax.pmap(run_single_chain, in_axes=(0,),out_axes=(0,0))
+            samples_x, logps = pmapped(rng_keys)
+            # reshape to get proper shapes
+            samples_x = jnp.concatenate(samples_x, axis=0)
+            logps = jnp.reshape(logps, (samples_x.shape[0],))
+            
+        elif 1 < num_devices < num_chains:
+            # Chunked method when devices < chains (but > 1 device)
+            log.info(f"Using chunked pmap method ({num_devices} devices < {num_chains} chains)")
+            
+            # Process chains in chunks of device count using the existing run_single_chain
+            pmapped_chunked = jax.pmap(run_single_chain, in_axes=(0,), out_axes=(0, 0))
+            
+            all_samples = []
+            all_logps = []
+            
+            for i in range(0, num_chains, num_devices):
+                end_idx = min(i + num_devices, num_chains)
+                chunk_keys = rng_keys[i:end_idx]
+                
+                # Run chunk (pmap handles variable chunk sizes automatically)
+                chunk_samples, chunk_logps = pmapped_chunked(chunk_keys)
+                
+                all_samples.append(chunk_samples)
+                all_logps.append(chunk_logps)
+            
+            # Concatenate all chunks
+            samples_x = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_samples], axis=0)
+            logps = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_logps], axis=0)
+            
+        else:
+            # Fallback to sequential (single chain case)
+            log.info("Using sequential method (fallback)")
+            samples_x = []
+            logps = []
+            for i in range(num_chains):
+                samples_x_i, logps_i = run_single_chain(rng_keys[i])
+                samples_x.append(samples_x_i)
+                logps.append(logps_i)
             samples_x = jnp.concatenate(samples_x)
             logps = jnp.concatenate(logps)
 

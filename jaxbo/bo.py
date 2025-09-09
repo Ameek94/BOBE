@@ -80,7 +80,7 @@ class BOBE:
                  clf_nsigma_threshold=25.0,
                  clf_use_size = 10,
                  clf_update_step=1,
-                 logz_threshold=1.0,
+                 logz_threshold=0.01,
                  convergence_n_iters=1,
                  minus_inf=-1e5,
                  pool: MPI_Pool = None,
@@ -180,7 +180,7 @@ class BOBE:
         self.min_delta_seen = np.inf  # Track minimum delta for checkpoint saving
         self.termination_reason = "Max evaluation budget reached"
 
-        self.optimizer = 'optax'
+        self.optimizer = 'scipy' # default
         
         # Initialize results manager BEFORE any timing operations
         self.results_manager = BOBEResults(
@@ -382,7 +382,6 @@ class BOBE:
                 self.mc_samples = get_mc_samples(self.gp,warmup_steps=self.num_hmc_warmup, num_samples=self.num_hmc_samples, 
                                          thinning=4,method=self.mc_points_method)
                 self.results_manager.end_timing('MCMC Sampling')
-                self.mc_samples['method'] = 'MCMC'                        
 
             acq_str = self.acquisition.name
 
@@ -394,7 +393,7 @@ class BOBE:
             if acq_str == 'WIPV':
                 acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
                 n_restarts = 1
-                maxiter = 50
+                maxiter = 100
                 early_stop_patience = 10
                 n_batch = self.wipv_batch_size # since we only need to update true GP before doing the next MCMC
             else:
@@ -436,10 +435,13 @@ class BOBE:
 
             # GP Training and timing
             self.results_manager.start_timing('GP Training')
-            if self.gp.train_x.shape[0] < 200:
+            if self.gp.train_x.shape[0] < 250:
                 # override refit for small training sets
                 refit = True
-            self.gp.update(new_pts_u, new_vals, refit=refit,n_restarts=4,maxiter=200)
+                n_restarts = 8
+            else:
+                n_restarts = 4
+            self.gp.update(new_pts_u, new_vals, refit=refit,n_restarts=n_restarts,maxiter=500)
             self.results_manager.end_timing('GP Training')
 
             log.info(f"New GP y_mean: {self.gp.y_mean:.4f}, y_std: {self.gp.y_std:.4f}")
@@ -489,16 +491,17 @@ class BOBE:
                 self.results_manager.end_timing('Nested Sampling')
 
                 log.info(f" NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-                # now get equally weighted samples for mc points
-                equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
-                self.mc_samples = {
-                    'x': equal_samples,
-                    'logl': equal_logl,
-                    'weights': np.ones(equal_samples.shape[0]),
-                    'method': 'NS',
-                    'best': ns_samples['best']
-                }
+
                 if ns_success:
+                    # now get equally weighted samples for mc points
+                    equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
+                    self.mc_samples = {
+                        'x': equal_samples,
+                        'logl': equal_logl,
+                        'weights': np.ones(equal_samples.shape[0]),
+                        'method': 'NS',
+                        'best': ns_samples['best']
+                        }
                     self.converged = self.check_convergence(ii, logz_dict, equal_samples, equal_logl)
                     if self.converged:
                         self.termination_reason = "LogZ converged"

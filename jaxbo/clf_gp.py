@@ -3,6 +3,7 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+from jax import jit
 from jax.scipy.linalg import cho_solve, solve_triangular
 import copy
 import numpyro
@@ -11,7 +12,8 @@ import numpyro.distributions as dist
 from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
-from .gp import GP, safe_noise_floor
+from functools import partial
+from .gp import GP, safe_noise_floor, safe_noise_floor
 from .clf import (
     CLASSIFIER_REGISTRY
 )
@@ -27,7 +29,7 @@ class GPwithClassifier(GP):
                  probability_threshold=0.5, minus_inf=-1e5,
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
-                 optimizer="optax", optimizer_kwargs={'lr': 5e-3, 'name': 'adam'},
+                 optimizer="scipy", optimizer_kwargs={'method': 'L-BFGS-B'},
                  kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.01, 10],
                  tausq=None, tausq_bounds=[1e-4, 1e4],
                  kernel_variance_prior=None, lengthscale_prior=None, lengthscales=None, kernel_variance=1.0,
@@ -93,7 +95,12 @@ class GPwithClassifier(GP):
         train_x_gp = self.train_x_clf[mask_gp]
         train_y_gp = self.train_y_clf[mask_gp] 
 
-        # Initialize GP using inheritance
+        # Initialize Classifier attributes before GP initialization
+        self.use_clf = self.clf_data_size >= self.clf_use_size
+        self.clf_model_params = None
+        self._clf_predict_func = None
+
+        # Initialize GP
         gp_init_kwargs = {
             'train_x': train_x_gp,
             'train_y': train_y_gp,
@@ -105,7 +112,7 @@ class GPwithClassifier(GP):
             'lengthscale_bounds': lengthscale_bounds,
             'lengthscales': lengthscales,
             'kernel_variance': kernel_variance,
-            'lengthscale_prior': lengthscale_prior if lengthscale_prior is not None else "DSLP",
+            'lengthscale_prior': lengthscale_prior,
             'kernel_variance_prior': kernel_variance_prior,
             'tausq': tausq,
             'tausq_bounds': tausq_bounds,
@@ -113,11 +120,7 @@ class GPwithClassifier(GP):
                     
         super().__init__(**gp_init_kwargs)
 
-        # Initialize Classifier
-        self.use_clf = self.clf_data_size >= self.clf_use_size
-        self.clf_model_params = None
-        self._clf_predict_func = None
-
+        # Train classifier if conditions are met
         if self.use_clf:
              if train_clf_on_init:
                  self._train_classifier()
@@ -158,44 +161,67 @@ class GPwithClassifier(GP):
 
         log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
         log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
+        
 
-    def fit(self, maxiter=300, n_restarts=4):
-        """Fits the GP hyperparameters."""
-        super().fit(maxiter=maxiter, n_restarts=n_restarts)
-
-    def predict_mean_single(self,x):
-        gp_mean = super().predict_mean_single(x)
+    def _predict_mean_single_clf(self, x):
+        """Single point mean prediction with classifier filtering."""
+        mean = self._predict_mean_single(x)
         if not self.use_clf or self._clf_predict_func is None:
-            return gp_mean
+            return mean
 
-        clf_probs = self._clf_predict_func(x)
-        return jnp.where(clf_probs >= self.probability_threshold, gp_mean, self.minus_inf)
+        clf_probs = self._clf_predict_func(jnp.atleast_2d(x))
+        mean = jnp.where(clf_probs >= self.probability_threshold, mean, self.minus_inf)
+        return mean
 
-    def predict_var_single(self,x):
-        var  = super().predict_var_single(x)
+    def _predict_var_single_clf(self, x):
+        """Single point variance prediction with classifier filtering."""
+        var = self._predict_var_single(x)
         if not self.use_clf or self._clf_predict_func is None:
             return var
 
-        clf_probs = self._clf_predict_func(x)
-        return jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
+        clf_probs = self._clf_predict_func(jnp.atleast_2d(x))
+        var = jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
+        return var
 
-    def predict_mean_batched(self,x):
-        x = jnp.atleast_2d(x)
-        return jax.vmap(self.predict_mean_single)(x)
-
-    def predict_var_batched(self,x):
-        x = jnp.atleast_2d(x)
-        return jax.vmap(self.predict_var_single)(x)
-
-    def predict_single(self,x):
-        mean, var = super().predict_single(x)
+    def _predict_single_clf(self, x):
+        """Single point prediction with classifier filtering - returns standardized values."""
+        mean, var = self._predict_single(x)
         if not self.use_clf or self._clf_predict_func is None:
             return mean, var
 
-        clf_probs = self._clf_predict_func(x)
+        clf_probs = self._clf_predict_func(jnp.atleast_2d(x))
         mean = jnp.where(clf_probs >= self.probability_threshold, mean, self.minus_inf)
         var = jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
         return mean, var
+
+    def _update_jit_functions(self):
+        """Create JIT-compiled prediction functions with current GP state."""
+        # Create JIT-compiled versions of the classifier implementation functions
+        self.predict_mean_single = jax.jit(self._predict_mean_single_clf)
+        self.predict_var_single = jax.jit(self._predict_var_single_clf)
+        self.predict_single = jax.jit(self._predict_single_clf)
+        
+        # Create batched versions using vmap
+        self.predict_mean_batched = jax.jit(jax.vmap(self._predict_mean_single_clf, in_axes=0))
+        self.predict_var_batched = jax.jit(jax.vmap(self._predict_var_single_clf, in_axes=0))
+        self.predict_batched = jax.jit(jax.vmap(self._predict_single_clf, in_axes=0))
+
+        # Warm up JIT compilation with a dummy point
+        dummy_x = jnp.zeros(self.ndim)
+        dummy_batch = jnp.zeros((2, self.ndim))
+        
+        _ = self.predict_mean_single(dummy_x)
+        _ = self.predict_var_single(dummy_x)
+        _ = self.predict_single(dummy_x)
+        _ = self.predict_mean_batched(dummy_batch)
+        _ = self.predict_var_batched(dummy_batch)
+        _ = self.predict_batched(dummy_batch)
+        
+        log.debug("JIT-compiled prediction functions updated and warmed up")
+
+    def fit(self, maxiter=1000, n_restarts=4):
+        """Fits the GP hyperparameters."""
+        super().fit(maxiter=maxiter, n_restarts=n_restarts)
 
     def fantasy_var(self, new_x, mc_points,k_train_mc):
         """
@@ -204,7 +230,7 @@ class GPwithClassifier(GP):
         """
         return super().fantasy_var(new_x, mc_points,k_train_mc)
 
-    def update(self, new_x, new_y, refit=True, maxiter=500, n_restarts=6):
+    def update(self, new_x, new_y, refit=True, maxiter=1000, n_restarts=4):
         """
         Updates the classifier and GP training sets.
         Retrains classifier/GP based on thresholds and steps.
@@ -222,20 +248,11 @@ class GPwithClassifier(GP):
                 new_pts_to_add.append(new_x[i])
                 new_vals_to_add.append(new_y[i])
 
-        new_pts_to_add = jnp.atleast_2d(jnp.array(new_pts_to_add))
-        new_vals_to_add = jnp.atleast_2d(jnp.array(new_vals_to_add)).reshape(-1, 1)
+        new_pts_to_add = jnp.array(new_pts_to_add)
+        new_vals_to_add = jnp.array(new_vals_to_add).reshape(-1, 1)
         self.train_x_clf = jnp.concatenate([self.train_x_clf, new_pts_to_add], axis=0)
         self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
         log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
-
-        # for i in range(new_pts_to_add.shape[0]):
-        #     val = new_vals_to_add[i]
-        #     x = new_pts_to_add[i]
-        #     if val > (self.train_y_clf.max() - self.gp_threshold):
-        #         # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
-        #         super().update(x, val,refit=False)
-        #     else:
-        #         log.info("Point not within GP threshold, not updating GP.")
 
         mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
         self.train_x = self.train_x_clf[mask_gp]
@@ -249,9 +266,10 @@ class GPwithClassifier(GP):
         if refit:
             super().fit(maxiter=maxiter, n_restarts=n_restarts)
         else:
-            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-            self.cholesky = jnp.linalg.cholesky(K)
-            self.alphas = cho_solve((self.cholesky, True), self.train_y)
+            super().recompute_cholesky()
+        # Update JIT functions after data update
+        self._update_jit_functions()
+
 
         # Check if classifier data size has reached the threshold
         if not self.use_clf:
@@ -461,7 +479,7 @@ class GPwithClassifier(GP):
         return gp_clf
         
     def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,thinning=8,
-                      temp=1.,num_chains=6,np_rng=None, rng_key=None):
+                      temp=1.,num_chains=8,np_rng=None, rng_key=None):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
@@ -483,14 +501,14 @@ class GPwithClassifier(GP):
                 high=jnp.ones(self.train_x_clf.shape[1])
             ))
 
-            mean = self.predict_mean_batched(x)
+            mean = self.predict_mean_single(x)
             numpyro.factor('y', mean/temp)
             numpyro.deterministic('logp', mean)
 
         @jax.jit
-        def run_single_chain(rng_key,init_x):
+        def run_single_chain(rng_key, init_x):
                 init_strategy = init_to_value(values={'x': init_x})
-                kernel = NUTS(model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
+                kernel = NUTS(model, dense_mass=True, max_tree_depth=6, init_strategy=init_strategy)
                 mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
                         num_chains=1, progress_bar=False, thinning=thinning)
                 mcmc.run(rng_key)
@@ -500,37 +518,78 @@ class GPwithClassifier(GP):
     
 
         num_devices = jax.device_count()
-        num_chains = min(num_devices,num_chains)
-
+        
         rng_key = rng_key if rng_key is not None else get_new_jax_key()
         rng_keys = jax.random.split(rng_key, num_chains)
         
         if num_chains == 1: 
-            inits = jnp.array([self.get_random_point(rng=np_rng)])
+            inits = jnp.array([self.get_random_point(rng=rng_mcmc)])
         else:
-            inits = jnp.vstack([self.get_random_point(rng=np_rng) for _ in range(num_chains-1)])
-            inits = jnp.vstack([inits, self.train_x_clf[jnp.argmax(self.train_y_clf)]])
+            # Create num_chains-1 random points
+            random_inits = [self.get_random_point(rng=rng_mcmc) for _ in range(num_chains-1)]
+            # Add the best point as the last initialization
+            best_point = self.train_x_clf[jnp.argmax(self.train_y_clf)]
+            all_inits = random_inits + [best_point]
+            inits = jnp.vstack(all_inits)
 
         log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
 
-        if (num_devices >= num_chains) and num_chains > 1:
-            # if devices present run with pmap
-            pmapped = jax.pmap(run_single_chain, in_axes=(0,0),out_axes=(0,0))
-            samples_x, logps = pmapped(rng_keys,inits)
-            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
-            # reshape to get proper shapes
-            samples_x = jnp.concatenate(samples_x, axis=0)
-            logps = jnp.reshape(logps, (samples_x.shape[0],))
-            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
-        else:
-            # if devices not available run sequentially
+        # Adaptive method selection based on device/chain configuration
+        if num_devices == 1:
+            # Sequential method for single device
+            log.info("Using sequential method (single device)")
             samples_x = []
             logps = []
             for i in range(num_chains):
                 samples_x_i, logps_i = run_single_chain(rng_keys[i], inits[i])
                 samples_x.append(samples_x_i)
                 logps.append(logps_i)
-
+            samples_x = jnp.concatenate(samples_x)
+            logps = jnp.concatenate(logps)
+            
+        elif num_devices >= num_chains and num_chains > 1:
+            # Direct pmap method when devices >= chains
+            log.info("Using direct pmap method (devices >= chains)")
+            pmapped = jax.pmap(run_single_chain, in_axes=(0, 0), out_axes=(0, 0))
+            samples_x, logps = pmapped(rng_keys, inits)
+            samples_x = jnp.concatenate(samples_x, axis=0)
+            logps = jnp.concatenate(logps, axis=0)
+            logps = jnp.reshape(logps, (samples_x.shape[0],))
+            
+        elif 1 < num_devices < num_chains:
+            # Chunked method when devices < chains (but > 1 device)
+            log.info(f"Using chunked pmap method ({num_devices} devices < {num_chains} chains)")
+            
+            # Process chains in chunks of device count using the existing run_single_chain
+            pmapped_chunked = jax.pmap(run_single_chain, in_axes=(0, 0), out_axes=(0, 0))
+            
+            all_samples = []
+            all_logps = []
+            
+            for i in range(0, num_chains, num_devices):
+                end_idx = min(i + num_devices, num_chains)
+                chunk_keys = rng_keys[i:end_idx]
+                chunk_inits = inits[i:end_idx]
+                
+                # Run chunk (pmap handles variable chunk sizes automatically)
+                chunk_samples, chunk_logps = pmapped_chunked(chunk_keys, chunk_inits)
+                
+                all_samples.append(chunk_samples)
+                all_logps.append(chunk_logps)
+            
+            # Concatenate all chunks
+            samples_x = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_samples], axis=0)
+            logps = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_logps], axis=0)
+            
+        else:
+            # Fallback to sequential (single chain case)
+            log.info("Using sequential method (fallback)")
+            samples_x = []
+            logps = []
+            for i in range(num_chains):
+                samples_x_i, logps_i = run_single_chain(rng_keys[i], inits[i])
+                samples_x.append(samples_x_i)
+                logps.append(logps_i)
             samples_x = jnp.concatenate(samples_x)
             logps = jnp.concatenate(logps)
 

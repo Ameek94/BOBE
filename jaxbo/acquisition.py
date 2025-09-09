@@ -292,12 +292,16 @@ class EI(AcquisitionFunction):
         fun_args = (gp, best_y, zeta)
         fun_kwargs = {}
         best_x = gp.train_x[jnp.argmax(gp.train_y)]
+
+        # For Classifier GP, we make sure to get points inside the positive region
         if n_restarts > 1:
-            x0_acq = jnp.vstack([gp.get_random_point() for _ in range(n_restarts-1)])
-            x0_acq = jnp.vstack([x0_acq, best_x])
+            n_random_restarts = int(n_restarts/2)
+            x0_acq = jnp.vstack([gp.get_random_point() for _ in range(n_random_restarts)])
+            n_best_restarts = n_restarts - n_random_restarts
+            x0_acq = jnp.vstack([x0_acq, jnp.full((n_best_restarts, gp.ndim), best_x)])
         else:
             x0_acq = best_x
-        jitter = rng.normal(0.,0.001,size=x0_acq.shape)
+        jitter = rng.normal(0.,0.005,size=x0_acq.shape)
         x0_acq = jnp.clip(x0_acq + jitter, 0., 1.)
         return self.acq_optimize(fun=self.fun,
                             fun_args=fun_args,
@@ -338,7 +342,7 @@ class WIPV(AcquisitionFunction):
     name: str = "WIPV"
 
     def __init__(self,
-                 optimizer: str = "optax", optimizer_kwargs: Optional[Dict[str, Any]] = {'name': 'adam', 'lr': 1e-3}):
+                 optimizer: str = "scipy", optimizer_kwargs: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
 
         super().__init__(optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
 
@@ -349,8 +353,8 @@ class WIPV(AcquisitionFunction):
 
     def get_next_point(self, gp,
                  acq_kwargs,
-                 maxiter: int = 200,
-                 n_restarts: int = 4,
+                 maxiter: int = 100,
+                 n_restarts: int = 1,
                  verbose: bool = True,
                  early_stop_patience: int = 25,
                  rng=None):
@@ -360,12 +364,16 @@ class WIPV(AcquisitionFunction):
         mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
         k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.kernel_variance, gp.noise, include_noise=False)
 
-        # @jax.jit
+        @jax.jit
         def mapped_fn(x):
             return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
+        # acq_vals = []
+        # for i in range(mc_points.shape[0]):
+        #     acq_vals.append(mapped_fn(mc_points[i]))
+        # acq_vals = jnp.array(acq_vals)
         acq_vals = lax.map(mapped_fn, mc_points)
         acq_val_min = jnp.min(acq_vals)
-        log.debug(f"WIPV acquisition min value on MC points: {float(acq_val_min):.4e}")
+        log.info(f"WIPV acquisition min value on MC points: {float(acq_val_min):.4e}")
         best_x = mc_points[jnp.argmin(acq_vals)]
         x0_acq = best_x
 
