@@ -177,6 +177,7 @@ class BOBE:
         self.converged = False
         self.prev_converged = False
         self.convergence_counter = 0  # Track successive convergence iterations
+        self.min_delta_seen = np.inf  # Track minimum delta for checkpoint saving
         self.termination_reason = "Max evaluation budget reached"
 
         self.optimizer = 'optax'
@@ -435,6 +436,9 @@ class BOBE:
 
             # GP Training and timing
             self.results_manager.start_timing('GP Training')
+            if self.gp.train_x.shape[0] < 200:
+                # override refit for small training sets
+                refit = True
             self.gp.update(new_pts_u, new_vals, refit=refit,n_restarts=4,maxiter=200)
             self.results_manager.end_timing('GP Training')
 
@@ -708,6 +712,24 @@ class BOBE:
             )
 
         log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
+        
+        # Check if this is the smallest delta seen so far and save checkpoint, also ensure delta is reasonably good
+        if (delta < self.min_delta_seen) and (delta < 0.5):
+            self.min_delta_seen = delta
+            log.info(f"New minimum delta achieved: {delta:.4f}")
+            log.info("Saving checkpoint results for new minimum delta")
+            
+            # Create checkpoint filename with suffix
+            checkpoint_filename = f"{self.output_file}_checkpoint"
+            
+            # Save GP checkpoint
+            self.gp.save(filename=f"{checkpoint_filename}_gp")
+            log.info(f"Saved GP checkpoint to {checkpoint_filename}_gp.npz")
+
+            # Save intermediate results checkpoint
+            self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}.json")
+            log.info(f"Saved intermediate results checkpoint to {checkpoint_filename}.json")
+        
         if converged:
             self.convergence_counter += 1
             if self.convergence_counter >= self.convergence_n_iters:
@@ -715,20 +737,6 @@ class BOBE:
                 return True
             else:
                 log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
-                # Checkpoint for saving some results
-                log.info("Saving checkpoint results for partial convergence")
-                
-                # Create checkpoint filename with suffix
-                checkpoint_filename = f"{self.output_file}_checkpoint"
-                
-                # Save GP checkpoint
-                self.gp.save(filename=f"{checkpoint_filename}_gp")
-                log.info(f"Saved GP checkpoint to {checkpoint_filename}_gp.pkl")
-
-                # Save intermediate results checkpoint
-                self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}.json")
-                log.info(f"Saved intermediate results checkpoint to {checkpoint_filename}.json")
-
                 return False
         else:
             self.convergence_counter = 0  # Reset counter if not converged

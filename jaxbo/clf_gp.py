@@ -3,6 +3,7 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+from jax.scipy.linalg import cho_solve, solve_triangular
 import copy
 import numpyro
 from numpyro.infer import MCMC, NUTS, SA, AIES
@@ -227,16 +228,30 @@ class GPwithClassifier(GP):
         self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
         log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
 
-        for i in range(new_pts_to_add.shape[0]):
-            val = new_vals_to_add[i]
-            x = new_pts_to_add[i]
-            if val > (self.train_y_clf.max() - self.gp_threshold):
-                # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
-                super().update(x, val,refit=False)
-            else:
-                log.info("Point not within GP threshold, not updating GP.")
+        # for i in range(new_pts_to_add.shape[0]):
+        #     val = new_vals_to_add[i]
+        #     x = new_pts_to_add[i]
+        #     if val > (self.train_y_clf.max() - self.gp_threshold):
+        #         # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
+        #         super().update(x, val,refit=False)
+        #     else:
+        #         log.info("Point not within GP threshold, not updating GP.")
+
+        mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
+        self.train_x = self.train_x_clf[mask_gp]
+        self.train_y = self.train_y_clf[mask_gp]
+        self.train_y = self.train_y.reshape(-1, 1)
+        self.y_std = jnp.std(self.train_y) if self.train_y.shape[0] > 1 else 1.0
+        self.y_mean = jnp.mean(self.train_y)
+        self.train_y = (self.train_y - self.y_mean) / self.y_std
+        print(f"Shapes after filtering: train_x_clf: {self.train_x_clf.shape}, train_y_clf: {self.train_y_clf.shape}, train_y (GP): {self.train_y.shape}")
+
         if refit:
-            super().fit(maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
+            super().fit(maxiter=maxiter, n_restarts=n_restarts)
+        else:
+            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+            self.cholesky = jnp.linalg.cholesky(K)
+            self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
         # Check if classifier data size has reached the threshold
         if not self.use_clf:
@@ -357,7 +372,7 @@ class GPwithClassifier(GP):
             lengthscale_prior=state.get('lengthscale_prior_spec'),
             tausq=state.get('tausq', 1.0),
             tausq_bounds=state.get('tausq_bounds', [-4, 4]),
-            train_clf_on_init=False,
+            train_clf_on_init=state.get('train_clf_on_init', True),
         )
         
         # # Restore computed state if available
@@ -455,10 +470,10 @@ class GPwithClassifier(GP):
 
         rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1.5,5.)  # 6
+        high_temp = rng_mcmc.uniform(1.,4.)  # 6
         # high_temp = rng_mcmc.uniform(1.,2.) ** 2
-        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        temp=1. # For now always use temp=1
+        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        # temp=1. # For now always use temp=1
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 

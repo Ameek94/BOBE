@@ -194,6 +194,7 @@ class GP:
         """
         # Setup and validate training data
         self._setup_training_data(train_x, train_y)
+        # print(f"shapes train_x: {self.train_x.shape}, train_y: {self.train_y.shape}")
 
         # Setup kernel and initial hyperparameters
         self.kernel_name = kernel if kernel == "rbf" else "matern"
@@ -504,9 +505,17 @@ class GP:
         if refit:
             self.fit(maxiter=maxiter,n_restarts=n_restarts)
         else:
-            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-            self.cholesky = jnp.linalg.cholesky(K)
-            self.alphas = cho_solve((self.cholesky, True), self.train_y)
+            self.recompute_cholesky()
+        # print(f"shapes train_x: {self.train_x.shape}, train_y: {self.train_y.shape}")
+
+
+    def recompute_cholesky(self):
+        """
+        Recomputes the Cholesky decomposition and alphas. Useful if hyperparameters are changed manually.
+        """
+        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+        self.cholesky = jnp.linalg.cholesky(K)
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
     def fantasy_var(self,new_x,mc_points,k_train_mc):
         """

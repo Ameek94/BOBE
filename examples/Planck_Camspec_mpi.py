@@ -52,15 +52,15 @@ def main():
         
         # Iteration and budget settings
         n_log_ei_iters=n_log_ei_iters,
-        n_cobaya_init=0,
-        n_sobol_init=16,
+        n_cobaya_init=4,
+        n_sobol_init=32,
         min_evals=750,
         max_evals=2500,
-        max_gp_size=1500,
+        max_gp_size=1250,
         
         # Step settings
         fit_step=5,
-        wipv_batch_size=8,
+        wipv_batch_size=5,
         ns_step=5,
         
         # Acquisition function settings
@@ -68,7 +68,7 @@ def main():
         
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=8000,
+        num_hmc_samples=6000,
         mc_points_size=512,
         
         # GP settings
