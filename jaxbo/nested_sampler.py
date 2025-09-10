@@ -82,7 +82,7 @@ def nested_sampling_Dy(gp: GP
                        ,dlogz: float = 0.1
                        ,dynamic: bool = True
                        ,logz_std: bool = True
-                       ,maxcall: Optional[int] = None
+                       ,maxcall: Optional[int] = int(5e6)
                         ,boost_maxcall: Optional[int] = 1
                         ,print_progress : Optional[bool] = True
                         ,equal_weights: bool = False
@@ -131,14 +131,6 @@ def nested_sampling_Dy(gp: GP
     # Auto-detect cluster environment if print_progress not explicitly set
     print_progress = not is_cluster_environment()
     
-    if maxcall is None:
-        if ndim<=4:
-            maxcall = int(5000*ndim*boost_maxcall) # type: ignore
-        else:
-            maxcall = max(int(10000*ndim*boost_maxcall),int(1e6)*boost_maxcall) # type: ignore
-    else:
-         maxcall = int(maxcall)
-
     @jax.jit
     def loglike(x):
         mu = gp.predict_mean_single(x) 

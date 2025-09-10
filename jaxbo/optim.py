@@ -316,12 +316,12 @@ def optimize_scipy(
                 global_best_f = result.fun
                 global_best_params = result.x
                 if result.success:
-                    log.info(f"New best found in restart {restart_idx + 1}: {result.fun:.6e}")
+                    log.debug(f"New best found in restart {restart_idx + 1}: {result.fun:.6e}")
                 else:
-                    log.info(f"New best found in restart {restart_idx + 1} (max iter): {result.fun:.6e}")
+                    log.debug(f"New best found in restart {restart_idx + 1} (max iter): {result.fun:.6e}")
             elif not result.success and not is_max_iter:
                 # Only treat as failure if it's not just hitting max iterations
-                log.warning(f"Restart {restart_idx + 1} failed: {result.message}")
+                log.debug(f"Restart {restart_idx + 1} failed: {result.message}")
             elif is_max_iter:
                 # Max iterations reached but not better than current best
                 log.debug(f"Restart {restart_idx + 1} reached max iterations with value {result.fun:.6e} (not better than current best {global_best_f:.6e})")

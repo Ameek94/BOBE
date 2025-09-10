@@ -19,6 +19,7 @@ from .clf import (
 )
 from .utils.seed_utils import get_new_jax_key, get_numpy_rng
 from .utils.logging_utils import get_logger
+from .utils.core_utils import get_threshold_for_nsigma
 log = get_logger("clf_gp")
 
 
@@ -248,11 +249,13 @@ class GPwithClassifier(GP):
                 new_pts_to_add.append(new_x[i])
                 new_vals_to_add.append(new_y[i])
 
-        new_pts_to_add = jnp.array(new_pts_to_add)
-        new_vals_to_add = jnp.array(new_vals_to_add).reshape(-1, 1)
-        self.train_x_clf = jnp.concatenate([self.train_x_clf, new_pts_to_add], axis=0)
-        self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
-        log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
+
+        if len(new_pts_to_add) > 0:
+            new_pts_to_add = jnp.array(new_pts_to_add)
+            new_vals_to_add = jnp.array(new_vals_to_add).reshape(-1, 1)
+            self.train_x_clf = jnp.concatenate([self.train_x_clf, new_pts_to_add], axis=0)
+            self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
+            log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
 
         mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
         self.train_x = self.train_x_clf[mask_gp]
@@ -261,7 +264,7 @@ class GPwithClassifier(GP):
         self.y_std = jnp.std(self.train_y) if self.train_y.shape[0] > 1 else 1.0
         self.y_mean = jnp.mean(self.train_y)
         self.train_y = (self.train_y - self.y_mean) / self.y_std
-        print(f"Shapes after filtering: train_x_clf: {self.train_x_clf.shape}, train_y_clf: {self.train_y_clf.shape}, train_y (GP): {self.train_y.shape}")
+        log.info(f"Shapes after filtering: train_x_clf: {self.train_x_clf.shape}, train_x (GP): {self.train_x.shape}")
 
         if refit:
             super().fit(maxiter=maxiter, n_restarts=n_restarts)
@@ -287,13 +290,18 @@ class GPwithClassifier(GP):
         """
         return super().kernel(x1,x2,lengthscales,kernel_variance,noise,include_noise=include_noise)
 
-    def get_random_point(self,rng=None):
+    def get_random_point(self,rng=None, nstd = None):
 
         rng = rng if rng is not None else get_numpy_rng()
 
         if self.use_clf:
-            pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold
-    
+            if nstd is not None:
+                threshold = get_threshold_for_nsigma(nstd,self.ndim)
+            else:
+                threshold = self.clf_threshold
+
+            pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - threshold
+
             # Sample a random point from the filtered points
             valid_indices = jnp.where(pts_idx)[0]
     
@@ -526,7 +534,7 @@ class GPwithClassifier(GP):
             inits = jnp.array([self.get_random_point(rng=rng_mcmc)])
         else:
             # Create num_chains-1 random points
-            random_inits = [self.get_random_point(rng=rng_mcmc) for _ in range(num_chains-1)]
+            random_inits = [self.get_random_point(rng=rng_mcmc,nstd=5) for _ in range(num_chains-1)]
             # Add the best point as the last initialization
             best_point = self.train_x_clf[jnp.argmax(self.train_y_clf)]
             all_inits = random_inits + [best_point]

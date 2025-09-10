@@ -309,7 +309,7 @@ class BOBEResults:
             self.converged = existing_results.get('converged', False)
             self.termination_reason = existing_results.get('termination_reason', "Resumed run")
 
-    def update_iteration(self, iteration: int, save_step: int, gp = None, **kwargs):
+    def update_iteration(self, iteration: int, save_step: int, gp = None, filepath: Optional[str] = None):
         """
         Simplified iteration update - only saves intermediate results periodically.
         
@@ -319,7 +319,7 @@ class BOBEResults:
         """
         # Save intermediate results periodically
         if iteration % save_step == 0:
-            self.save_intermediate(gp=gp)
+            self.save_intermediate(gp=gp, filename=filepath)
 
     def update_acquisition(self, iteration: int, acquisition_value: float, acquisition_function: str):
         """
@@ -525,9 +525,7 @@ class BOBEResults:
         }
     
     def finalize(self,
-                 samples: np.ndarray,
-                 weights: np.ndarray,
-                 loglikes: np.ndarray,
+                 samples_dict: Dict[str, np.ndarray] = {},
                  logz_dict: Optional[Dict[str, float]] = None,
                  converged: bool = False,
                  termination_reason: str = "Max iterations reached",
@@ -546,10 +544,11 @@ class BOBEResults:
         """
         self.end_time = time.time()
         
-        self.final_samples = np.array(samples)
-        self.final_weights = np.array(weights)
-        self.final_loglikes = np.array(loglikes)
-        
+        self.final_samples = samples_dict.get('samples', np.array([]))
+        self.final_weights = samples_dict.get('weights', np.array([]))
+        self.final_loglikes = samples_dict.get('loglikes', np.array([]))
+
+
         # Use provided logz_dict, or fall back to the last convergence check
         if logz_dict is not None:
             self.final_logz_dict = logz_dict
@@ -562,10 +561,9 @@ class BOBEResults:
         self.converged = converged
         self.termination_reason = termination_reason
         self.gp_info = gp_info or {}
-        
-        log.info(f"Finalized BOBE results: {len(samples)} samples, "
-                f"converged={converged}, reason={termination_reason}")
-        
+
+        log.info(f"Finalized BOBE results: converged={converged}, reason={termination_reason}")
+
         # Save all results
         self.save_all_formats()
     
@@ -790,7 +788,7 @@ class BOBEResults:
         with open(stats_file, 'w') as f:
             json.dump(stats, f, indent=2)
         log.info(f"Saved summary statistics to {stats_file}")
-    
+
     def save_intermediate(self, gp, filename: Optional[str] = None):
         """Save intermediate results for crash recovery and resuming."""
         intermediate = {
@@ -830,6 +828,8 @@ class BOBEResults:
         }
         
         # Use provided filename or default naming
+        if filename:
+            filename = f"{filename}_intermediate.json"
         intermediate_file = filename or f"{self.output_file}_intermediate.json"
         with open(intermediate_file, 'w') as f:
             # Convert the entire intermediate dictionary to ensure all JAX arrays are handled

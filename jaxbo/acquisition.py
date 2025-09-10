@@ -171,7 +171,7 @@ class AcquisitionFunction:
 
     name: str = "BaseAcquisitionFunction"
 
-    def __init__(self, optimizer="optax", optimizer_kwargs: Optional[Dict[str, Any]] = {'name': 'adam', 'lr': 1e-3}):
+    def __init__(self, optimizer: str = "scipy", optimizer_kwargs: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
         self.optimizer = optimizer
         self.optimizer_kwargs = optimizer_kwargs
         if self.optimizer == "scipy":
@@ -229,7 +229,7 @@ class AcquisitionFunction:
         acq_vals.append(acq_val_next)
 
         if n_batch > 1:
-            # Create dummy GP without classifier functionality
+            # Create dummy GP without classifier functionality, for now we do not use batching for EI/LogEI
             dummy_gp = GP(train_x=gp.train_x, 
                          train_y=gp.train_y*gp.y_std + gp.y_mean,
                          noise=gp.noise,
@@ -253,24 +253,21 @@ class AcquisitionFunction:
 
         return np.array(x_batch), np.array(acq_vals)
 
-        # raise NotImplementedError("Base class get_next_batch() not implemented")
 
 class EI(AcquisitionFunction):
     """Expected Improvement acquisition function"""
 
     name: str = "EI"
 
-    def __init__(self, zeta: float = 0.1, 
-                 optimizer: str = "optax", optimizer_kwargs: Optional[Dict[str, Any]] = {'name': 'adam', 'lr': 1e-3}):
+    def __init__(self, optimizer: str = "scipy", optimizer_kwargs: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
         super().__init__(optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
-        self.zeta = zeta
 
     def fun(self, x, gp, best_y, zeta):
         """
-        Expected Improvement in pure JAX.
+        Expected Improvement.
         """
         mu, var = gp.predict_single(x)
-        var = jnp.clip(var, a_min=1e-18)  # prevent zero variance
+        var = jnp.clip(var, a_min=1e-20)  # prevent zero variance
         sigma = jnp.sqrt(var)
 
         u = _scaled_improvement(mu - zeta, sigma, best_y)
@@ -287,7 +284,7 @@ class EI(AcquisitionFunction):
                  rng=None):
 
         rng = rng if rng is not None else get_numpy_rng()
-        zeta = acq_kwargs.get('zeta', self.zeta)
+        zeta = acq_kwargs.get('zeta', 0.)
         best_y = acq_kwargs.get('best_y', max(gp.train_y.flatten()))
         fun_args = (gp, best_y, zeta)
         fun_kwargs = {}
@@ -296,14 +293,14 @@ class EI(AcquisitionFunction):
         # For Classifier GP, we make sure to get points inside the positive region
         if n_restarts > 1:
             n_random_restarts = int(n_restarts/2)
-            x0_acq = jnp.vstack([gp.get_random_point() for _ in range(n_random_restarts)])
+            x0_acq = jnp.vstack([gp.get_random_point(rng,nstd=5) for _ in range(n_random_restarts)])
             n_best_restarts = n_restarts - n_random_restarts
             x0_acq = jnp.vstack([x0_acq, jnp.full((n_best_restarts, gp.ndim), best_x)])
         else:
             x0_acq = best_x
-        jitter = rng.normal(0.,0.005,size=x0_acq.shape)
+        jitter = rng.normal(0.,0.004,size=x0_acq.shape)
         x0_acq = jnp.clip(x0_acq + jitter, 0., 1.)
-        return self.acq_optimize(fun=self.fun,
+        pts, vals =  self.acq_optimize(fun=self.fun,
                             fun_args=fun_args,
                             fun_kwargs=fun_kwargs,
                             num_params=gp.ndim,
@@ -312,14 +309,15 @@ class EI(AcquisitionFunction):
                             maxiter=maxiter,
                             n_restarts=n_restarts,
                             verbose=verbose)
+        return pts, -vals # we minimize -EI so return -vals
 
 class LogEI(EI):
     """Log Expected Improvement acquisition function. Better numerical stability compared to EI."""
 
     name: str = "LogEI"
 
-    def __init__(self, zeta: float = 0.2, optimizer = "optax", optimizer_kwargs: Optional[Dict[str, Any]] = {'name': 'adam', 'lr': 1e-3}):
-        super().__init__(zeta=zeta, optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
+    def __init__(self, optimizer: str = "scipy", optimizer_kwargs: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
+        super().__init__(optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
 
     def fun(self, x, gp, best_y, zeta):
         """
@@ -387,11 +385,11 @@ class WIPV(AcquisitionFunction):
                                   n_restarts=n_restarts,
                                   verbose=verbose)
 
-def get_mc_samples(gp,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",init_params=None,np_rng=None,rng_key=None):
+def get_mc_samples(gp: GP,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",num_chains=4,np_rng=None,rng_key=None):
     if method=='NUTS':
         try:
             mc_samples = gp.sample_GP_NUTS(warmup_steps=warmup_steps,
-            num_samples=num_samples, thinning=thinning
+            num_samples=num_samples, thinning=thinning, num_chains=num_chains,np_rng=np_rng,rng_key=rng_key
             )
         except Exception as e:
             log.error(f"Error in sampling GP NUTS: {e}")
@@ -416,14 +414,3 @@ def get_mc_points(mc_samples, mc_points_size=128, rng=None):
     rng = rng if rng is not None else get_numpy_rng()   
     idxs = rng.choice(mc_size, size=mc_points_size, replace=False)
     return mc_samples['x'][idxs]
-    
-def get_acquisition_function(name: str, gp, **kwargs) -> AcquisitionFunction:
-    """Factory function to get an acquisition function by name."""
-    if name == "EI":
-        return EI(gp, **kwargs)
-    elif name == "LogEI":
-        return LogEI(gp, **kwargs)
-    elif name == "WIPV":
-        return WIPV(gp, **kwargs)
-    else:
-        raise ValueError(f"Unknown acquisition function: {name}")
