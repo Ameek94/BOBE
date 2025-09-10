@@ -478,7 +478,7 @@ class BOBE:
                 self.termination_reason = f"{acq.upper()} goal reached"
                 self.results_dict['termination_reason'] = self.termination_reason
                 break
-
+            jax.clear_caches()
 
         # End EI
         self.current_iteration = ii
@@ -600,6 +600,8 @@ class BOBE:
 
             if self.converged:
                 break
+            
+            jax.clear_caches()
 
         # End of main BO loop for WIPV
         self.current_iteration = ii

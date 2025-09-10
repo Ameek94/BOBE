@@ -170,7 +170,7 @@ class GPwithClassifier(GP):
         if not self.use_clf or self._clf_predict_func is None:
             return mean
 
-        clf_probs = self._clf_predict_func(jnp.atleast_2d(x))
+        clf_probs = self._clf_predict_func(x)
         mean = jnp.where(clf_probs >= self.probability_threshold, mean, self.minus_inf)
         return mean
 
@@ -180,7 +180,7 @@ class GPwithClassifier(GP):
         if not self.use_clf or self._clf_predict_func is None:
             return var
 
-        clf_probs = self._clf_predict_func(jnp.atleast_2d(x))
+        clf_probs = self._clf_predict_func(x)
         var = jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
         return var
 
@@ -190,7 +190,7 @@ class GPwithClassifier(GP):
         if not self.use_clf or self._clf_predict_func is None:
             return mean, var
 
-        clf_probs = self._clf_predict_func(jnp.atleast_2d(x))
+        clf_probs = self._clf_predict_func(x)
         mean = jnp.where(clf_probs >= self.probability_threshold, mean, self.minus_inf)
         var = jnp.where(clf_probs >= self.probability_threshold, var, safe_noise_floor)
         return mean, var
@@ -486,8 +486,8 @@ class GPwithClassifier(GP):
         log.info(f"Loaded GPwithClassifier from {filename} with {gp_clf.train_x.shape[0]} training points")
         return gp_clf
         
-    def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,thinning=8,
-                      temp=1.,num_chains=8,np_rng=None, rng_key=None):
+    def sample_GP_NUTS(self,warmup_steps=512,num_samples=2048,thinning=4,
+                      temp=1.,num_chains=4,np_rng=None, rng_key=None):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.

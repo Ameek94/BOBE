@@ -48,7 +48,7 @@ plt.rcParams['font.family'] = 'serif'
 def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=None, param_bounds=None,
                        reference_samples=None,
                        reference_file=None, reference_ignore_rows=0., reference_label='MCMC',
-                       scatter_points=False, markers=None, output_file='output'):
+                       scatter_points=False, markers=None, output_file='output', output_dir='./', **kwargs):
     """
     Plot the final samples from the Bayesian optimization process.
 
@@ -133,7 +133,7 @@ def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=N
                 ax = g.subplots[j, i]
                 ax.scatter(points[:, i], points[:, j], alpha=0.5, color='forestgreen', s=5)
 
-    g.export(output_file + '_param_posteriors.pdf')
+    g.export(output_dir + output_file + '_param_posteriors.pdf')
 
 
 

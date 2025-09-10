@@ -375,14 +375,17 @@ class WIPV(AcquisitionFunction):
         best_x = mc_points[jnp.argmin(acq_vals)]
         x0_acq = best_x
 
-        return self.acq_optimize(fun=self.fun,
+        if gp.train_x.shape[0] > 900:
+            return x0_acq, float(acq_val_min)
+        else:
+            return self.acq_optimize(fun=self.fun,
                                   fun_args=(gp,),
                                   fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
                                   num_params=gp.ndim,
                                   x0=x0_acq,
                                   optimizer_kwargs=self.optimizer_kwargs,
                                   maxiter=maxiter,
-                                  n_restarts=n_restarts,
+                                  n_restarts=1,
                                   verbose=verbose)
 
 def get_mc_samples(gp: GP,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",num_chains=4,np_rng=None,rng_key=None):

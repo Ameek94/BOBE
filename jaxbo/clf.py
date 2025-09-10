@@ -70,12 +70,16 @@ def train_nn_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     """Train neural network classifier and return parameters, metrics, and predict function."""
     # Create model with settings
     label_size = X.shape[0]
+    dim = X.shape[1]
     if label_size < 500:
-        settings.update({'hidden_dims': [32, 32]})
         settings.update({'batch_size': 64})
     else:
-        settings.update({'hidden_dims': [32, 32]})
         settings.update({'batch_size': 128})
+
+    if dim <= 10:
+        settings.update({'hidden_dims': [8, 8]})
+    else:
+        settings.update({'hidden_dims': [16, 16]}) # 32, 32?
     model = MLPClassifier(**settings)
     
     # Train with multiple restarts

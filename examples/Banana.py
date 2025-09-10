@@ -109,13 +109,7 @@ def main():
 
         reference_samples = MCSamples(samples=dns_samples, names=param_list, labels=param_labels,
                                     weights=weights, 
-                                    ranges= dict(zip(param_list,param_bounds.T)))
-
-        plt.style.use('default')
-
-        # Enable LaTeX rendering for mathematical expressions
-        plt.rcParams['text.usetex'] = True 
-        plt.rcParams['font.family'] = 'serif'        
+                                    ranges= dict(zip(param_list,param_bounds.T)))      
 
         plot_final_samples(
             gp,
@@ -124,6 +118,7 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             output_file=likelihood.name,
+            output_dir='./results/',
             reference_samples=reference_samples,
             reference_file=None,
             reference_label='Dynesty',
@@ -197,7 +192,7 @@ def main():
             acquisition_data=acquisition_data,
             best_loglike_data=best_loglike_data,
             timing_data=timing_data,
-            save_path=f"{likelihood.name}_dashboard.pdf"
+            save_path=f"./results/{likelihood.name}_dashboard.pdf"
         )
         # plt.show()
 
