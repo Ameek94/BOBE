@@ -62,6 +62,8 @@ def main():
         minus_inf=-1e5,
         logz_threshold=1e-3,
         seed=42,
+        save_dir='./results',
+        save=True,
         do_final_ns=False,
     )
 

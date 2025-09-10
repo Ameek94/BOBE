@@ -623,7 +623,7 @@ class GP:
 
         return var_std * (self.y_std ** 2)  # scale back to original
 
-    def get_random_point(self,rng=None):
+    def get_random_point(self,rng=None,nstd=None):
         """
         Returns a random point in the unit cube.
         """

@@ -5,6 +5,7 @@ This module provides comprehensive result storage and formatting similar to
 typical nested samplers like Dynesty, PolyChord, MultiNest, etc.
 """
 
+import os
 import numpy as np
 import jax.numpy as jnp
 import json
@@ -85,10 +86,11 @@ class BOBEResults:
     """
     
     def __init__(self, 
-                 output_file: str,
                  param_names: List[str],
                  param_labels: List[str],
                  param_bounds: np.ndarray,
+                 output_file: str = 'results',
+                 save_dir: Optional[str] = './',
                  settings: Optional[Dict[str, Any]] = None,
                  likelihood_name: str = "unknown",
                  resume_from_existing: bool = False):
@@ -104,7 +106,9 @@ class BOBEResults:
             likelihood_name: Name of the likelihood function
             resume_from_existing: If True, try to load existing results and continue from there
         """
-        self.output_file = output_file
+        self.output_file = output_file or 'results'
+        self.save_dir = save_dir or './'
+        self.save_path = os.path.join(self.save_dir, output_file)
         self.param_names = param_names
         self.param_labels = param_labels
         self.param_bounds = np.array(param_bounds)
@@ -272,12 +276,6 @@ class BOBEResults:
             self.kl_iterations = kl_data.get('iterations', []).copy()
             self.kl_divergences = kl_data.get('kl_divergences', []).copy()
             self.successive_kl = kl_data.get('successive_kl', []).copy()
-        # Also check legacy naming for backward compatibility
-        elif 'kl_divergence_data' in existing_results:
-            kl_data = existing_results['kl_divergence_data']
-            self.kl_iterations = kl_data.get('iterations', []).copy()
-            self.kl_divergences = kl_data.get('kl_divergences', []).copy()
-            self.successive_kl = kl_data.get('successive_kl', []).copy()
         
         # Restore timing information (accumulate previous times)
         if 'timing' in existing_results and 'phase_times' in existing_results['timing']:
@@ -308,18 +306,6 @@ class BOBEResults:
             self.final_logz_dict = existing_results.get('final_logz_dict', existing_results.get('logz_bounds', {}))
             self.converged = existing_results.get('converged', False)
             self.termination_reason = existing_results.get('termination_reason', "Resumed run")
-
-    def update_iteration(self, iteration: int, save_step: int, gp = None, filepath: Optional[str] = None):
-        """
-        Simplified iteration update - only saves intermediate results periodically.
-        
-        Args:
-            iteration: Current iteration number
-            **kwargs: Additional arguments (ignored in simplified version)
-        """
-        # Save intermediate results periodically
-        if iteration % save_step == 0:
-            self.save_intermediate(gp=gp, filename=filepath)
 
     def update_acquisition(self, iteration: int, acquisition_value: float, acquisition_function: str):
         """
@@ -479,7 +465,7 @@ class BOBEResults:
     def save_timing_data(self):
         """Save timing data to JSON file."""
         timing_data = self.get_timing_summary()
-        timing_file = f"{self.output_file}_timing.json"
+        timing_file = f"{self.save_path}_timing.json"
         
         with open(timing_file, 'w') as f:
             json.dump(timing_data, f, indent=2)
@@ -685,7 +671,7 @@ class BOBEResults:
         results = self.get_results_dict()
         
         # Save as pickle for full Python object preservation
-        pickle_file = f"{self.output_file}_results.pkl"
+        pickle_file = f"{self.save_path}_results.pkl"
         with open(pickle_file, 'wb') as f:
             pickle.dump(results, f, protocol=pickle.HIGHEST_PROTOCOL)
         log.info(f"Saved main results to {pickle_file}")
@@ -707,7 +693,7 @@ class BOBEResults:
         
         # Use GetDist's saveAsText method to save the chain files
         # This automatically creates .txt, .paramnames, and .ranges files
-        samples.saveAsText(self.output_file)
+        samples.saveAsText(root=self.output_file, dir=self.save_dir)
         log.info(f"Saved GetDist format files using MCSamples.saveAsText to {self.output_file}")
         log.info("  - Created: .txt (chain), .paramnames (parameter info), .ranges (parameter bounds)")
         
@@ -766,11 +752,7 @@ class BOBEResults:
                 "termination_reason": str(self.termination_reason)
             },
             "gp_info": self.gp_info,
-            # "acquisition_function": {
-            #     "iterations": [int(x) for x in self.acquisition_iterations],
-            #     "values": [float(x) for x in self.acquisition_values],
-            #     "functions": self.acquisition_functions
-            # },
+
             "final_convergence": {
                 "iteration": int(self.convergence_history[-1].iteration),
                 "logz_value": float(self.convergence_history[-1].logz_dict.get('mean', np.nan)),
@@ -784,7 +766,7 @@ class BOBEResults:
 
         }
         
-        stats_file = f"{self.output_file}_stats.json"
+        stats_file = f"{self.save_path}_stats.json"
         with open(stats_file, 'w') as f:
             json.dump(stats, f, indent=2)
         log.info(f"Saved summary statistics to {stats_file}")
@@ -823,22 +805,24 @@ class BOBEResults:
             'run_info': {
                 'start_time': datetime.fromtimestamp(self.start_time).isoformat(),
                 'likelihood_name': self.likelihood_name,
-                'output_file': self.output_file
+                'output_file': self.output_file,
+                'save_dir': self.save_dir
             }
         }
         
-        # Use provided filename or default naming
-        if filename:
-            filename = f"{filename}_intermediate.json"
-        intermediate_file = filename or f"{self.output_file}_intermediate.json"
+        if filename is not None:
+            save_path = os.path.join(self.save_dir, filename)
+        else:
+            save_path = self.save_path
+        intermediate_file = save_path + "_intermediate.json"
         with open(intermediate_file, 'w') as f:
             # Convert the entire intermediate dictionary to ensure all JAX arrays are handled
             json_safe_intermediate = convert_jax_to_json_serializable(intermediate)
             json.dump(json_safe_intermediate, f, indent=2)
         log.info(f"Saved intermediate results to {intermediate_file}")
 
-        if gp is not None and filename is None:  # Only save GP if using default naming
-            gp.save(filename=f"{self.output_file}_gp")
+        if gp is not None:  # Only save GP if provided
+            gp.save(filename=f"{self.save_path}_gp")
     
     def get_getdist_samples(self) -> Optional['MCSamples']:
         """

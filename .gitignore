@@ -54,3 +54,4 @@ build/
 /docs/build
 examples/.DS_Store
 *.csv
+examples/results/plot_CPL.ipynb

@@ -72,7 +72,7 @@ class BOBE:
                  num_hmc_samples=512,
                  mc_points_size=64,
                  thinning=4,
-                 num_chains=6,
+                 num_chains=4,
                  mc_points_method='NUTS',
                  acq = 'WIPV',
                  zeta_ei = 0.01,
@@ -192,6 +192,7 @@ class BOBE:
         # Initialize results manager BEFORE any timing operations
         self.results_manager = BOBEResults(
             output_file=self.output_file,
+            save_dir=self.save_dir,
             param_names=self.loglikelihood.param_list,
             param_labels=self.loglikelihood.param_labels,
             param_bounds=self.loglikelihood.param_bounds,
@@ -319,14 +320,13 @@ class BOBE:
         self.mc_points_method = mc_points_method
         self.zeta_ei = zeta_ei
 
-
         self.gp.save(filename=f"{self.save_path}_gp")
         log.info(f" Saving GP to file {self.save_path}_gp")
 
         # Initialize KL divergence tracking
         self.prev_samples = None
     
-    def update_gp(self, new_pts_u, new_vals, refit=True, verbose=True):
+    def update_gp(self, new_pts_u, new_vals, refit=True, step = 0, verbose=True):
         """
         Update the GP with new points and values, and track hyperparameters.
         """
@@ -345,7 +345,7 @@ class BOBE:
         # Extract GP hyperparameters for tracking
         lengthscales = list(self.gp.lengthscales)
         kernel_variance = float(self.gp.kernel_variance)
-        self.results_manager.update_gp_hyperparams(self.start_iteration, lengthscales, kernel_variance)
+        self.results_manager.update_gp_hyperparams(step, lengthscales, kernel_variance)
 
     def get_next_batch(self, acq_kwargs, n_batch, n_restarts, maxiter, early_stop_patience, step, verbose=True):
         """
@@ -400,7 +400,7 @@ class BOBE:
 
         return new_vals
     
-    def run(self,acqs: Union[str, Tuple[str]]):
+    def run(self, acqs: Union[str, Tuple[str]]):
         acqs_funcs_available = list(_acq_funcs.keys())
 
         self.samples_dict = {}
@@ -442,6 +442,7 @@ class BOBE:
         current_evals = self.gp.npoints
         self.convergence_counter = 0  # Track successive convergence iterations
         log.info(f"Starting iteration {ii}")
+
         while current_evals < self.max_evals:
             ii += 1
             refit = (ii % self.fit_step == 0)
@@ -459,22 +460,25 @@ class BOBE:
             new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
             current_evals += n_batch
 
-            self.update_gp(new_pts_u, new_vals, refit=refit, verbose=verbose)
+            self.update_gp(new_pts_u, new_vals, refit=refit, step = ii, verbose=verbose)
 
 
             self.results_manager.update_best_loglike(ii, self.best_f)
             if verbose:
                 log.info(f" Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
 
-            # Update results manager with iteration info, also save results and gp if save_step
-            self.results_manager.update_iteration(iteration=ii, save_step=self.save_step,gp=self.gp,filepath=self.save_path)
-
             if current_evals >= self.min_evals:
                 self.converged = self.check_convergence_ei(ii,acq_vals)
+
+            # Update results manager with iteration info, also save results and gp if save_step
+            if ii % self.save_step == 0:
+                self.results_manager.save_intermediate(gp=self.gp)
+
             if self.converged:
                 self.termination_reason = f"{acq.upper()} goal reached"
                 self.results_dict['termination_reason'] = self.termination_reason
                 break
+
 
         # End EI
         self.current_iteration = ii
@@ -507,12 +511,11 @@ class BOBE:
             self.convergence_counter = 0  # Reset counter if not converged
             return False
 
-    def run_WIPV(self):
+    def run_WIPV(self, ii = 0):
         """
         Run the optimization loop for WIPV acquisition function.
         """
         self.acquisition = WIPV(optimizer=self.optimizer)  # Set acquisition function to WIPV
-        ii = self.start_iteration
         current_evals = self.gp.npoints
         self.results_manager.start_timing('MCMC Sampling')
         self.mc_samples = get_mc_samples(
@@ -541,16 +544,11 @@ class BOBE:
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
             new_pts_u = jnp.atleast_2d(new_pts_u)
-            new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
-
-            acq_val = float(np.mean(acq_vals))
-            log.info(f"Mean acquisition value {acq_val:.4e} at new point")
-            self.results_manager.update_acquisition(ii, acq_val, self.acquisition.name)
-
-            new_vals = self.evaluate_likelihood(new_pts,ii)
+            new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
             current_evals += self.wipv_batch_size
 
-            self.update_gp(new_pts_u, new_vals, refit=refit)
+
+            self.update_gp(new_pts_u, new_vals, step = ii, refit=refit)
 
             # Check convergence and update MCMC samples
             if ns_flag:
@@ -573,12 +571,11 @@ class BOBE:
                         'method': 'NS',
                         'best': ns_samples['best']
                     }
-                    self.converged = self.check_convergence(ii, logz_dict, equal_samples, equal_logl)
+                    self.converged = self.check_convergence_WIPV(ii, logz_dict, equal_samples, equal_logl)
                     if self.converged:
                         self.termination_reason = "LogZ converged"
                         self.results_dict['logz'] = logz_dict
                         self.results_dict['termination_reason'] = self.termination_reason
-                        break
             else:
                 self.results_manager.start_timing('MCMC Sampling')
                 self.mc_samples = get_mc_samples(
@@ -592,9 +589,14 @@ class BOBE:
                         rng_key=get_jax_key()
                     )
                 self.results_manager.end_timing('MCMC Sampling')
+            
+            self.results_manager.update_best_loglike(ii, self.best_f)
+            if verbose:
+                log.info(f" Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
 
             # Update results manager with iteration info, also save results and gp if save_step
-            self.results_manager.update_iteration(iteration=ii, save_step=self.save_step,gp=self.gp, filepath=self.save_path)
+            if ii % self.save_step == 0:
+                self.results_manager.save_intermediate(gp=self.gp)
 
             if self.converged:
                 break
@@ -619,7 +621,7 @@ class BOBE:
             if ns_success:
                 equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
                 log.info(f"Using nested sampling results")
-                self.check_convergence(ii+1, logz_dict, equal_samples, equal_logl)
+                self.check_convergence_WIPV(ii+1, logz_dict, equal_samples, equal_logl)
                 if self.converged:
                     self.termination_reason = "LogZ converged"
                     self.results_dict['logz'] = logz_dict
@@ -669,6 +671,8 @@ class BOBE:
         successive_kl = None
         
         equal_samples = scale_from_unit(equal_samples, self.loglikelihood.param_bounds)
+    
+
         if self.prev_samples is not None:
 
             prev_samples_x = self.prev_samples['x']
@@ -678,11 +682,15 @@ class BOBE:
             cov2 = np.cov(equal_samples, rowvar=False)
             successive_kl = kl_divergence_gaussian(mu1, cov1, mu2, cov2)
 
-            # Store current samples for next iteration
-            self.prev_samples = {'x': equal_samples, 'logl': equal_logl}
+            log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
+            # Store KL divergences if computed
+            self.results_manager.update_kl_divergences(
+                iteration=step,
+                successive_kl=successive_kl
+            )
 
-            if successive_kl:
-                log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
+        # Store current samples for next iteration
+        self.prev_samples = {'x': equal_samples, 'logl': equal_logl}
 
         # Update results manager with convergence info and KL divergences
         self.results_manager.update_convergence(
@@ -692,12 +700,6 @@ class BOBE:
             threshold=self.logz_threshold
         )
         
-        # Store KL divergences if computed
-        if successive_kl is not None:
-            self.results_manager.update_kl_divergences(
-                iteration=step,
-                successive_kl=successive_kl
-            )
 
         log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
         
@@ -706,10 +708,7 @@ class BOBE:
             self.min_delta_seen = delta
 
             # Create checkpoint filename with suffix
-            checkpoint_filename = f"{self.save_path}_checkpoint"
-
-            # Save GP checkpoint
-            self.gp.save(filename=f"{checkpoint_filename}_gp")
+            checkpoint_filename = f"{self.output_file}_checkpoint"
 
             # Save intermediate results checkpoint
             self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}.json")
@@ -760,11 +759,12 @@ class BOBE:
             })
 
         # Add evidence info if available
+        samples_dict = self.samples_dict or {}
         logz_dict = self.results_dict.get('logz', {})
 
         # Finalize results with comprehensive data
         self.results_manager.finalize(
-            samples_dict = self.samples_dict,
+            samples_dict=samples_dict,
             logz_dict=logz_dict,
             converged=self.converged,
             termination_reason=self.termination_reason,
@@ -773,6 +773,7 @@ class BOBE:
 
         self.results_dict['gp'] = self.gp
         self.results_dict['likelihood'] = self.loglikelihood
+        self.results_dict['samples'] = self.samples_dict
 
         # Add results manager info
         self.results_dict['results_manager'] = self.results_manager
