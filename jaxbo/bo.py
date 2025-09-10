@@ -399,7 +399,7 @@ class BOBE:
             else:
                 acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten())}
                 n_restarts = 40
-                maxiter = 500
+                maxiter = 1000
                 early_stop_patience = 50
                 n_batch = 1
 
