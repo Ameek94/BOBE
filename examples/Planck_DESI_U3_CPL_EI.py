@@ -1,8 +1,7 @@
 import os
 import sys
-num_devices = int(sys.argv[1]) if len(sys.argv) > 1 else 8
 os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
-    num_devices
+    os.cpu_count()
 )
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 import time
@@ -20,14 +19,27 @@ def main():
     print("Starting BOBE run with automatic timing measurement...")
 
     clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm' 
-
     use_clf_str = str(sys.argv[3]) if len(sys.argv) > 3 else 'True'
+    hp_priors = str(sys.argv[4]) if len(sys.argv) > 4 else 'SAAS'
+    
+    if hp_priors == 'SAAS':
+        lengthscale_prior = "SAAS"
+        kernel_variance_prior = {'name': 'LogNormal', 'loc': 0.0, 'scale': 0.5}
+    elif hp_priors == 'uniform':
+        lengthscale_prior = None
+        kernel_variance_prior = None
+    elif hp_priors == 'DSLP':
+        lengthscale_prior = "DSLP"
+        kernel_variance_prior = "fixed"
+    else:
+        raise ValueError(f"Unknown hyperparameter prior setting: {hp_priors}")
+
     if use_clf_str.lower() in ['false', '0', 'no']:
         use_clf = False
-        likelihood_name = f'Planck_DESI_U3_CPL_EI_DSLP_noCLF'
+        likelihood_name = f'Planck_DESI_U3_CPL_EI_noCLF_{hp_priors}'
     else:
         use_clf = True
-        likelihood_name = f'Planck_DESI_U3_CPL_{clf_type}_EI_DSLP'
+        likelihood_name = f'Planck_DESI_U3_CPL_{clf_type}_EI_{hp_priors}'
 
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -53,9 +65,9 @@ def main():
         mc_points_size=512,
         clf_nsigma_threshold=15.0,
         # GP settings
-        gp_kwargs={'lengthscale_prior': "DSLP", 'kernel_variance_prior': "fixed"},
-        use_clf=True,
-        resume=True,
+        gp_kwargs={'lengthscale_prior': lengthscale_prior, 'kernel_variance_prior': kernel_variance_prior},
+        use_clf=use_clf,
+        resume=False,
         resume_file=f'{likelihood_name}',
         clf_type=clf_type,
         minus_inf=-1e5,

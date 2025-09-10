@@ -398,8 +398,8 @@ class BOBE:
                 n_batch = self.wipv_batch_size # since we only need to update true GP before doing the next MCMC
             else:
                 acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten())}
-                n_restarts = 25
-                maxiter = 250
+                n_restarts = 40
+                maxiter = 500
                 early_stop_patience = 50
                 n_batch = 1
 
@@ -438,10 +438,12 @@ class BOBE:
             if self.gp.train_x.shape[0] < 250:
                 # override refit for small training sets
                 refit = True
-                n_restarts = 8
+                maxiter = 1000
+                n_restarts = 10
             else:
                 n_restarts = 4
-            self.gp.update(new_pts_u, new_vals, refit=refit,n_restarts=n_restarts,maxiter=500)
+                maxiter = 500
+            self.gp.update(new_pts_u, new_vals, refit=refit,n_restarts=n_restarts,maxiter=maxiter)
             self.results_manager.end_timing('GP Training')
 
             log.info(f"New GP y_mean: {self.gp.y_mean:.4f}, y_std: {self.gp.y_std:.4f}")
