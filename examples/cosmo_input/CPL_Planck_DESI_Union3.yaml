@@ -27,7 +27,7 @@ params:
     ref:
       dist: norm
       loc: -0.674
-      scale: 0.063
+      scale: 0.05
     proposal: 0.05
     latex: w_0
   wa:
@@ -37,7 +37,7 @@ params:
     ref:
       dist: norm
       loc: -1.06
-      scale: 0.28
+      scale: 0.05
     proposal: 0.05
     latex: w_a
   omk: 0.
@@ -69,7 +69,7 @@ params:
     ref:
      dist: norm
      loc: 66.5
-     scale: 0.85
+     scale: 0.5
     proposal: 0.05 
   logA:
     prior:
@@ -105,6 +105,106 @@ params:
      loc: 5.546101493e-02
      scale: 0.003
     proposal: 0.003
+  A_planck:
+    prior:
+      dist: norm
+      loc: 1
+      scale: 0.0025
+    ref:
+      dist: norm
+      loc: 1
+      scale: 0.002
+    proposal: 0.0005
+    latex: y_\mathrm{cal}
+    renames: calPlanck
+  amp_143:
+    prior:
+      dist: uniform
+      min: 0
+      max: 50
+    ref:
+      dist: norm
+      loc: 1.778787048e+01
+      scale: 1
+    latex: A^{\rm power}_{143}
+    proposal: 1
+  amp_217:
+    prior:
+      dist: uniform
+      min: 0
+      max: 50
+    ref:
+      dist: norm
+      loc: 1.163383768e+01
+      scale: 1
+    latex: A^{\rm power}_{217}
+    proposal: 1
+  amp_143x217:
+    prior:
+      dist: uniform
+      min: 0
+      max: 50
+    ref:
+      dist: norm
+      loc: 8.542669523e+00 
+      scale: 1
+    latex: A^{\rm power}_{143\times217}
+    proposal: 1
+  n_143:
+    prior:
+      dist: uniform
+      min: 0
+      max: 5
+    ref:
+      dist: norm
+      loc: 1.058733547e+00 
+      scale: 0.2
+    latex: \gamma^{\rm power}_{143}
+    proposal: 0.2
+  n_217:
+    prior:
+      dist: uniform
+      min: 0
+      max: 5
+    ref:
+      dist: norm
+      loc: 1.546673841e+00
+      scale: 0.2
+    latex: \gamma^{\rm power}_{217}
+    proposal: 0.2
+  n_143x217:
+    prior:
+      dist: uniform
+      min: 0
+      max: 5
+    ref:
+      dist: norm
+      loc: 1.729442742e+00 
+      scale: 0.2
+    latex: \gamma^{\rm power}_{143\times217}
+    proposal: 0.2
+  calTE:
+    prior:
+      dist: norm
+      loc: 1
+      scale: 0.01
+    ref:
+      dist: norm
+      loc: 1
+      scale: 0.01
+    proposal: 0.01
+    latex: c_{TE}
+  calEE:
+    prior:
+      dist: norm
+      loc: 1
+      scale: 0.01
+    ref:
+      dist: norm
+      loc: 1
+      scale: 0.01
+    proposal: 0.01
+    latex: c_{EE}
   mnu: 0.06
 sampler:
   polychord:

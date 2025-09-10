@@ -53,3 +53,4 @@ docs/build/html/
 build/
 /docs/build
 examples/.DS_Store
+*.csv
