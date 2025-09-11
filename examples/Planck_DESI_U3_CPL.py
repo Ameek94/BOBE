@@ -51,7 +51,7 @@ def main():
         n_sobol_init=32,
         min_evals=900,
         max_evals=2500,
-        max_gp_size=1500,
+        max_gp_size=1600,
         
         # Step settings
         fit_step=10,

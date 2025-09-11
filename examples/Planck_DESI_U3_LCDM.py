@@ -60,7 +60,7 @@ def main():
                 
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=6000,
+        num_hmc_samples=8000,
         mc_points_size=512,
         num_chains = 6,
         thinning = 4,
@@ -106,7 +106,7 @@ def main():
         weights_array = samples['weights']
 
 
-        param_list_CPL = ['w','wa','omch2','ombh2','H0','logA','ns','tau']
+        param_list_CPL = ['omch2','ombh2','H0','logA','ns','tau']
         plot_final_samples(
             gp, 
             {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
@@ -117,8 +117,8 @@ def main():
             output_file=f'{likelihood.name}_cosmo',
             output_dir='./results/',
             reference_file='./cosmo_input/chains/union3_LCDM_pchord',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
+            reference_ignore_rows=0.,
+            reference_label='Polychord',
             scatter_points=False
         )
 
@@ -132,8 +132,8 @@ def main():
             output_file=f'{likelihood.name}_full',
             output_dir='./results/',
             reference_file='./cosmo_input/chains/union3_LCDM_pchord',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
+            reference_ignore_rows=0.,
+            reference_label='Polychord',
             scatter_points=False
         )
 
