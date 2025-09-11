@@ -555,7 +555,7 @@ class BOBE:
                 log.info("Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01, equal_weights=False,
+                    self.gp, self.ndim, maxcall=int(2e6), dynamic=False, dlogz=0.05, equal_weights=False,
                     rng=self.np_rng
                 )
                 self.results_manager.end_timing('Nested Sampling')
@@ -616,7 +616,7 @@ class BOBE:
             log.info(" Final Nested Sampling")
             self.results_manager.start_timing('Nested Sampling')
             ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                self.gp, self.ndim, maxcall=int(1e7), dynamic=True, dlogz=0.01,rng=self.np_rng
+                self.gp, self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01,rng=self.np_rng
             )
             self.results_manager.end_timing('Nested Sampling')
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))

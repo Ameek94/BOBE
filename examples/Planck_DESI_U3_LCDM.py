@@ -27,7 +27,7 @@ def main():
     #     likelihood_name = f'Planck_DESI_U3_CPL_EI_DSLP_noCLF'
     # else:
     #     use_clf = True
-    likelihood_name = f'Planck_DESI_U3_CPL_{clf_type}'
+    likelihood_name = f'Planck_DESI_U3_LCDM_{clf_type}'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -49,9 +49,9 @@ def main():
 
         n_cobaya_init=16,
         n_sobol_init=32,
-        min_evals=600,
+        min_evals=750,
         max_evals=2500,
-        max_gp_size=1500,
+        max_gp_size=1250,
         
         # Step settings
         fit_step=5,
@@ -116,7 +116,7 @@ def main():
             plot_params=param_list_CPL,
             output_file=f'{likelihood.name}_cosmo',
             output_dir='./results/',
-            reference_file='./cosmo_input/chains/union3_CPL',
+            reference_file='./cosmo_input/chains/union3_LCDM_pchord',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
             scatter_points=False
@@ -131,7 +131,7 @@ def main():
             param_labels=likelihood.param_labels,
             output_file=f'{likelihood.name}_full',
             output_dir='./results/',
-            reference_file='./cosmo_input/chains/union3_CPL',
+            reference_file='./cosmo_input/chains/union3_LCDM_pchord',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
             scatter_points=False

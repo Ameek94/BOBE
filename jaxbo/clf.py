@@ -299,6 +299,8 @@ def train_with_restarts(
             best_params = params
             best_metrics = metrics
             log.debug(f"[Restart {i+1}/{n_restarts}] New best train_loss: {train_loss:.4e}")
+    
+    best_metrics['n_restarts'] = n_restarts
 
     log.debug(f"[Training] Best model selected with train_loss = {best_train_loss:.4e}")
     return best_params, best_metrics

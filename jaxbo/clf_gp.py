@@ -534,7 +534,7 @@ class GPwithClassifier(GP):
             inits = jnp.array([self.get_random_point(rng=rng_mcmc)])
         else:
             # Create num_chains-1 random points
-            random_inits = [self.get_random_point(rng=rng_mcmc,nstd=5) for _ in range(num_chains-1)]
+            random_inits = [self.get_random_point(rng=rng_mcmc,nstd=15) for _ in range(num_chains-1)]
             # Add the best point as the last initialization
             best_point = self.train_x_clf[jnp.argmax(self.train_y_clf)]
             all_inits = random_inits + [best_point]

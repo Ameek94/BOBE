@@ -47,9 +47,9 @@ def main():
         verbosity='INFO',
         seed=1500,
 
-        n_cobaya_init=16,
+        n_cobaya_init=32,
         n_sobol_init=32,
-        min_evals=750,
+        min_evals=900,
         max_evals=2500,
         max_gp_size=1500,
         
