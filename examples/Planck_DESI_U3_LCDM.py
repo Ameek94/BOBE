@@ -41,7 +41,7 @@ def main():
         },
         
         # General run settings
-        resume=False,
+        resume=True,
         resume_file=f'./results/{likelihood_name}',
         save_dir='./results',
         verbosity='INFO',
