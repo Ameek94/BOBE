@@ -31,7 +31,7 @@ def main():
     param_labels = ['x_1', 'x_2']
     param_bounds = np.array([[-1, 1], [-1, 2]]).T
     ls_priors = 'DSLP'
-    likelihood_name = f'banana_test'
+    likelihood_name = f'banana_test_{ls_priors}'
 
     start = time.time()
     print("Starting BOBE run...")

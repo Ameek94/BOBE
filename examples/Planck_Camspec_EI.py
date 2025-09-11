@@ -15,8 +15,6 @@ def main():
     cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
     ei_method = str(sys.argv[1]) if len(sys.argv) > 1 else 'logei'
     clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
-    ei_method = str(sys.argv[1]) if len(sys.argv) > 1 else 'logei'
-    clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
     ls_prior = str(sys.argv[3]) if len(sys.argv) > 3 else 'DSLP'
     kernel_var_prior = str(sys.argv[4]) if len(sys.argv) > 4 else {'name': 'LogNormal', 'loc': 0.0, 'scale': 0.1}
     kernel_var_prior_str = kernel_var_prior['name'] if isinstance(kernel_var_prior, dict) else str(kernel_var_prior)
@@ -83,7 +81,7 @@ def main():
         )
         # print(acquisition_data)
         # plt.show()
-        plt.savefig(f'{likelihood_name}_run_summary.pdf',bbox_inches='tight')
+        plt.savefig(f'./results/{likelihood_name}_run_summary.pdf',bbox_inches='tight')
 
 if __name__ == "__main__":
     # Run the analysis

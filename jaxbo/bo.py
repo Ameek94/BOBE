@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from scipy.stats import qmc
 import jax
 import jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
@@ -11,8 +10,8 @@ from typing import Optional, Union, Tuple, Dict, Any
 from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import BaseLikelihood, CobayaLikelihood
-from .utils.core_utils import scale_from_unit, scale_to_unit, renormalise_log_weights, resample_equal, kl_divergence_gaussian, kl_divergence_samples, get_threshold_for_nsigma
-from .utils.seed_utils import set_global_seed, get_jax_key, split_jax_key, ensure_reproducibility, get_numpy_rng
+from .utils.core_utils import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
+from .utils.seed_utils import set_global_seed, get_jax_key,  get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
 from .utils.logging_utils import get_logger
 from .utils.results import BOBEResults
@@ -25,9 +24,6 @@ log.info(f'JAX using {jax.device_count()} devices.')
 
 _acq_funcs = {"wipv": WIPV, "ei": EI, "logei": LogEI}
 
-import numpy as np
-from scipy import stats
-import warnings
 
 
 def load_gp(filename: str, clf: bool) -> Union[GP, GPwithClassifier]:
@@ -65,6 +61,7 @@ class BOBE:
                  save_dir='.',
                  save=True,
                  save_step=5,
+                 optimizer='scipy',
                  fit_step=10,
                  wipv_batch_size=4,
                  ns_step=10,
@@ -187,7 +184,9 @@ class BOBE:
         self.termination_reason = "Max evaluation budget reached"
         self.ei_goal_log = np.log(ei_goal)
 
-        self.optimizer = 'scipy' # default
+        if optimizer.lower() not in ['optax', 'scipy']:
+            raise ValueError("optimizer must be either 'optax' or 'scipy'")
+        self.optimizer = optimizer
         
         # Initialize results manager BEFORE any timing operations
         self.results_manager = BOBEResults(
@@ -626,7 +625,7 @@ class BOBE:
                 break
             
             jax.clear_caches()
-            
+
             max_evals_or_gpsize_reached = self.check_max_evals_and_gpsize(current_evals)
             if max_evals_or_gpsize_reached:
                 break

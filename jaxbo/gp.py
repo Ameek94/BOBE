@@ -6,12 +6,11 @@ import numpy as np
 import jax
 from jax import jit
 from jax.scipy.linalg import cho_solve, solve_triangular
-from scipy import optimize
+from jax.nn import softplus
 from .utils.core_utils import scale_to_unit, scale_from_unit
 jax.config.update("jax_enable_x64", True)
 import numpyro
 from numpyro.infer import MCMC, NUTS
-from numpyro.infer.util import init_to_value
 from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
@@ -27,6 +26,10 @@ safe_noise_floor = 1e-12
 sqrt2 = sqrt(2.)
 sqrt3 = sqrt(3.)
 sqrt5 = sqrt(5.)
+
+
+def softplus_inv(y, eps=1e-12):
+    return jnp.log(jnp.expm1(y) + eps)
 
 class DummyDistribution:
     """A dummy distribution that always returns log_prob = 0.0"""
@@ -308,7 +311,7 @@ class GP:
             self.param_names.append('tausq')
             self.hyperparam_bounds.append(self.tausq_bounds)
 
-        self.hyperparam_bounds = jnp.log10(jnp.array(self.hyperparam_bounds).T)
+        self.hyperparam_bounds = jnp.array(self.hyperparam_bounds).T
         self.num_hyperparams = self.hyperparam_bounds.shape[1]
         log.debug(f" Hyperparameter bounds =  {self.hyperparam_bounds}")
 
@@ -412,13 +415,17 @@ class GP:
         """SAAS prior log probability."""
         return saas_prior_logprob(lengthscales, kernel_variance, tausq)
     
-    def _parse_hyperparams(self, log10_params):
-        """Parse log10 parameters into lengthscales, kernel_variance, and optionally tausq."""
-        hyperparams = 10**log10_params
+    def _parse_hyperparams(self, unconstrained_params):
+        """
+        Parse unconstrained parameters into lengthscales, kernel_variance, and optionally tausq.
+        Using the softplus transform to enforce positivity.
+        """
+        hyperparams = softplus(unconstrained_params)
+
         lengthscales = hyperparams[:self.ndim]
-        
+
         if self.fixed_kernel_variance:
-            kernel_variance = self.kernel_variance  # Use fixed value
+            kernel_variance = self.kernel_variance
             if 'tausq' in self.param_names:
                 tausq = hyperparams[self.ndim] if len(hyperparams) > self.ndim else self.tausq
             else:
@@ -426,87 +433,87 @@ class GP:
         else:
             kernel_variance = hyperparams[self.ndim]
             tausq = hyperparams[self.ndim + 1] if len(hyperparams) > self.ndim + 1 else self.tausq
-            
+
         return lengthscales, kernel_variance, tausq
 
-    def neg_mll(self, log10_params):
+    def neg_mll(self, unconstrained_params):
         """
         Computes the negative log marginal likelihood for the GP with given hyperparameters.
+        Parameters are in unconstrained space; we transform them with softplus.
         """
-        lengthscales, kernel_variance, tausq = self._parse_hyperparams(log10_params)
-        
-        # Use original kernel computation
+        lengthscales, kernel_variance, tausq = self._parse_hyperparams(unconstrained_params)
+
         K = self.kernel(
-            self.train_x, self.train_x, lengthscales, kernel_variance, 
+            self.train_x, self.train_x, lengthscales, kernel_variance,
             noise=self.noise, include_noise=True
         )
         mll = gp_mll(K, self.train_y, self.train_y.shape[0])
-        
-        # Add prior
+
+        # Add prior in original space
         mll += self.prior_func(lengthscales, kernel_variance, tausq)
-        
+
         return -mll
 
     def fit(self, maxiter=1000, n_restarts=4, rng=None):
         """ 
         Fits the GP using maximum likelihood hyperparameters with the chosen optimizer.
-
-        Arguments
-        ---------
-        maxiter: int
-            The maximum number of iterations for the optimizer. Default is 1000.
-        n_restarts: int
-            The number of restarts for the optimizer. Default is 4.
         """
-
         rng = rng if rng is not None else get_numpy_rng()
 
-        # Prepare initial parameters based on current hyperparameters
+        # Prepare initial parameters from current hyperparameters
         init_params = jnp.array(self.lengthscales)
         if not self.fixed_kernel_variance:
             init_params = jnp.concatenate([init_params, jnp.array([self.kernel_variance])])
         if 'tausq' in self.param_names:
             init_params = jnp.concatenate([init_params, jnp.array([self.tausq])])
 
-        lengthscales_str = {name: f"{float(val):.4f}" for name, val in zip(self.param_names, self.lengthscales.tolist())}
+        # Logging initial MLL
+        lengthscales_str = {n: f"{float(v):.4f}" for n, v in zip(self.param_names, self.lengthscales.tolist())}
         msg = f"Fitting GP: lengthscales={lengthscales_str}, kernel_variance={self.kernel_variance:.4f}"
         if self.fixed_kernel_variance:
             msg += " (fixed kernel_variance)"
         if 'tausq' in self.param_names:
             msg += f", tausq={self.tausq:.4f}"
-        current_mll = -self.neg_mll(jnp.log10(init_params))
+        current_mll = -self.neg_mll(softplus_inv(init_params))
         msg += f", current MLL={current_mll:.4f}"
         log.info(msg)
 
-        init_params = jnp.log10(init_params)
-        init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
+        # Warm start in unconstrained space
+        init_params_u = softplus_inv(init_params)
+
+        # Add random restarts directly in unconstrained space
         if n_restarts > 1:
-            #addn_init_params =  init_params_u + 0.25 * np.random.normal(size=(n_restarts-1, init_params.shape[0]))
-            # addn_init_params = rng.uniform(low=self.hyperparam_bounds[0], high=self.hyperparam_bounds[1], size=(n_restarts-1, init_params.shape[0]))
-            addn_init_params_u = rng.uniform(low=0., high=1., size=(n_restarts-1, init_params.shape[0]))
+            addn_init_params_u = rng.normal(size=(n_restarts-1, init_params.shape[0]))
             init_params_u = np.vstack([init_params_u, addn_init_params_u])
-        x0 = jnp.clip(init_params_u, 0.0, 1.0)
+        x0 = init_params_u
 
         optimizer_options = self.optimizer_options.copy()
 
         best_params, best_f = self.mll_optimize(
             fun=self.neg_mll,
             num_params=self.num_hyperparams,
-            bounds=self.hyperparam_bounds,
+            bounds=None,  # no need for bounds in unconstrained space
             x0=x0,
             maxiter=maxiter,
             n_restarts=n_restarts,
             optimizer_options=optimizer_options
         )
 
-        # Update hyperparameters
+        # Transform to +ve constrained space
         lengthscales, kernel_variance, tausq = self._parse_hyperparams(best_params)
+
+        # Final hard clipping to bounds and update GP
+        lengthscales = jnp.clip(lengthscales, min=self.hyperparam_bounds[0,:self.ndim], max=self.hyperparam_bounds[1,:self.ndim])
         self.lengthscales = lengthscales
         if not self.fixed_kernel_variance:
+            kernel_variance = jnp.clip(kernel_variance, min=self.hyperparam_bounds[0,self.ndim], max=self.hyperparam_bounds[1,self.ndim])
             self.kernel_variance = kernel_variance
-        self.tausq = tausq
+        if 'tausq' in self.param_names:
+            tausq = jnp.clip(tausq, min=self.hyperparam_bounds[0,self.ndim + 1], max=self.hyperparam_bounds[1,self.ndim + 1])
+            self.tausq = tausq
 
-        lengthscales_str = {name: f"{float(val):.4f}" for name, val in zip(self.param_names, self.lengthscales.tolist())}
+        # Final log
+        lengthscales_str = {n: f"{float(v):.4f}" for n, v in zip(self.param_names, self.lengthscales.tolist())}
         msg = f"Final hyperparams: lengthscales={lengthscales_str}, kernel_variance={self.kernel_variance:.4f}"
         if self.fixed_kernel_variance:
             msg += " (fixed kernel_variance)"
@@ -514,6 +521,7 @@ class GP:
             msg += f", tausq={self.tausq:.4f}"
         msg += f", final MLL={-best_f:.4f}"
         log.info(msg)
+
 
         self.recompute_cholesky_alphas()
 
