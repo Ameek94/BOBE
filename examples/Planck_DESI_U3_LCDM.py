@@ -52,6 +52,7 @@ def main():
         min_evals=750,
         max_evals=2500,
         max_gp_size=1250,
+        optimizer='scipy',
         
         # Step settings
         fit_step=5,
