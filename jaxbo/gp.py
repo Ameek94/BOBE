@@ -149,9 +149,9 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
 
 class GP:
     
-    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_kwargs={'method': 'L-BFGS-B'},
+    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={'method': 'L-BFGS-B'},
                  kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,10],lengthscales=None,kernel_variance=None,
-                 kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4]):
+                 kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4],param_names: List[str] = None):
         """
         Initializes the Gaussian Process model.
 
@@ -167,7 +167,7 @@ class GP:
             Kernel to use. Only "rbf" is supported in this implementation. Defaults to "rbf".
         optimizer : str, optional
             Optimizer to use for hyperparameter tuning. Defaults to "scipy".
-        optimizer_kwargs : dict, optional
+        optimizer_options : dict, optional
             Keyword arguments for the optimizer. Defaults to {'method': 'L-BFGS-B'}.
         kernel_variance_bounds : list, optional
             Bounds for the kernel variance (in log10 space). Defaults to [-4, 8].
@@ -219,7 +219,7 @@ class GP:
             self.mll_optimize = optimize_scipy
         else:
             self.mll_optimize = optimize_optax
-        self.optimizer_kwargs = optimizer_kwargs
+        self.optimizer_options = optimizer_options
     
 
         # Store bounds
@@ -233,6 +233,9 @@ class GP:
         self._setup_kernel_variance_prior(kernel_variance_prior)
         self._setup_lengthscale_prior(lengthscale_prior)
         self._setup_optimization_parameters()
+
+        self.param_names = param_names if param_names is not None else [f'x_{i}' for i in range(self.ndim)]
+
 
     def _setup_training_data(self, train_x, train_y):
         """Setup and validate training data, compute standardization parameters."""
@@ -464,24 +467,27 @@ class GP:
             init_params = jnp.concatenate([init_params, jnp.array([self.kernel_variance])])
         if 'tausq' in self.param_names:
             init_params = jnp.concatenate([init_params, jnp.array([self.tausq])])
-            
-        msg = f"Fitting GP: lengthscales={self.lengthscales}, kernel_variance={self.kernel_variance}"
-        if 'tausq' in self.param_names:
-            msg += f", tausq={self.tausq}"
+
+        lengthscales_str = {name: f"{float(val):.4f}" for name, val in zip(self.param_names, self.lengthscales.tolist())}
+        msg = f"Fitting GP: lengthscales={lengthscales_str}, kernel_variance={self.kernel_variance:.4f}"
         if self.fixed_kernel_variance:
             msg += " (fixed kernel_variance)"
+        if 'tausq' in self.param_names:
+            msg += f", tausq={self.tausq:.4f}"
+        current_mll = -self.neg_mll(jnp.log10(init_params))
+        msg += f", current MLL={current_mll:.4f}"
         log.info(msg)
 
         init_params = jnp.log10(init_params)
         init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
         if n_restarts > 1:
             #addn_init_params =  init_params_u + 0.25 * np.random.normal(size=(n_restarts-1, init_params.shape[0]))
-            addn_init_params = rng.uniform(low=self.hyperparam_bounds[0], high=self.hyperparam_bounds[1], size=(n_restarts-1, init_params.shape[0]))
-            addn_init_params_u = scale_to_unit(addn_init_params, self.hyperparam_bounds)
+            # addn_init_params = rng.uniform(low=self.hyperparam_bounds[0], high=self.hyperparam_bounds[1], size=(n_restarts-1, init_params.shape[0]))
+            addn_init_params_u = rng.uniform(low=0., high=1., size=(n_restarts-1, init_params.shape[0]))
             init_params_u = np.vstack([init_params_u, addn_init_params_u])
         x0 = jnp.clip(init_params_u, 0.0, 1.0)
 
-        optimizer_kwargs = self.optimizer_kwargs.copy()
+        optimizer_options = self.optimizer_options.copy()
 
         best_params, best_f = self.mll_optimize(
             fun=self.neg_mll,
@@ -490,7 +496,7 @@ class GP:
             x0=x0,
             maxiter=maxiter,
             n_restarts=n_restarts,
-            optimizer_kwargs=optimizer_kwargs
+            optimizer_options=optimizer_options
         )
 
         # Update hyperparameters
@@ -499,13 +505,14 @@ class GP:
         if not self.fixed_kernel_variance:
             self.kernel_variance = kernel_variance
         self.tausq = tausq
-        
-        msg = f"Final hyperparams: lengthscales={self.lengthscales}, kernel_variance={self.kernel_variance}"
-        if 'tausq' in self.param_names:
-            msg += f", tausq={self.tausq}"
+
+        lengthscales_str = {name: f"{float(val):.4f}" for name, val in zip(self.param_names, self.lengthscales.tolist())}
+        msg = f"Final hyperparams: lengthscales={lengthscales_str}, kernel_variance={self.kernel_variance:.4f}"
         if self.fixed_kernel_variance:
             msg += " (fixed kernel_variance)"
-        msg += f", final MLL={-best_f}"
+        if 'tausq' in self.param_names:
+            msg += f", tausq={self.tausq:.4f}"
+        msg += f", final MLL={-best_f:.4f}"
         log.info(msg)
 
         self.recompute_cholesky_alphas()
@@ -773,7 +780,7 @@ class GP:
             'kernel_variance_prior_spec': self.kernel_variance_prior_spec,
             'fixed_kernel_variance': self.fixed_kernel_variance,
             'optimizer_method': self.optimizer_method,
-            'optimizer_kwargs': self.optimizer_kwargs,
+            'optimizer_options': self.optimizer_options,
             
             # Bounds
             'lengthscale_bounds': self.lengthscale_bounds,
@@ -786,6 +793,7 @@ class GP:
             
             # Dimensions
             'ndim': self.ndim,
+            'param_names': self.param_names,
             
             # Class identifier
             'gp_class': 'GP'
@@ -815,7 +823,7 @@ class GP:
             noise=state['noise'],
             kernel=state['kernel_name'],
             optimizer=state['optimizer_method'],
-            optimizer_kwargs=state['optimizer_kwargs'],
+            optimizer_options=state['optimizer_options'],
             lengthscales=state['lengthscales'],
             kernel_variance=state['kernel_variance'],
             lengthscale_bounds=state['lengthscale_bounds'],
@@ -823,7 +831,8 @@ class GP:
             kernel_variance_prior=state.get('kernel_variance_prior_spec'),
             lengthscale_prior=state.get('lengthscale_prior_spec'),
             tausq=state.get('tausq', 1.0),
-            tausq_bounds=state.get('tausq_bounds', [-4, 4])
+            tausq_bounds=state.get('tausq_bounds', [-4, 4]),
+            param_names=state.get('param_names', None)
         )
         
         # Restore computed state if available

@@ -120,7 +120,7 @@ class BOBEResults:
         
         # Try to resume from existing results if requested
         if resume_from_existing:
-            existing_results = self._load_existing_results(output_file)
+            existing_results = self._load_existing_results(self.save_path)
             if existing_results:
                 self._merge_existing_results(existing_results)
                 log.info(f"Resumed from existing results with {len(self.convergence_history)} previous iterations")

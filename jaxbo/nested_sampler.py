@@ -8,6 +8,7 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 from .gp import GP
+from .clf_gp import GPwithClassifier
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
 from .utils.core_utils import is_cluster_environment
@@ -76,14 +77,13 @@ def resample_equal(samples, aux, weights=None, logwts=None, rng = None):
 
 def prior_transform(x):
     return x
+        
 
 def nested_sampling_Dy(gp: GP
                        ,ndim: int = 1
                        ,dlogz: float = 0.1
-                       ,dynamic: bool = True
-                       ,logz_std: bool = True
+                       ,dynamic: bool = False
                        ,maxcall: Optional[int] = int(5e6)
-                        ,boost_maxcall: Optional[int] = 1
                         ,print_progress : Optional[bool] = True
                         ,equal_weights: bool = False
                         ,sample_method='rwalk',
@@ -129,38 +129,49 @@ def nested_sampling_Dy(gp: GP
     """
 
     # Auto-detect cluster environment if print_progress not explicitly set
-    print_progress = not is_cluster_environment()
-    
-    @jax.jit
-    def loglike(x):
-        mu = gp.predict_mean_single(x) 
-        return mu 
+    if is_cluster_environment():
+        print_progress = False
 
     start = time.time()
 
-    success = True
+    nlive = max(500, 35*ndim)  # set a minimum nlive of 500 for better accuracy
 
-    nlive = 500 if ndim <= 12 else 750
-
-    if dynamic:
-        sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
+    success = False
+    max_tries = 100
+    n_tried = 0
+    while not success:  # loop in case of failure
+        if dynamic:
+            sampler = DynamicNestedSampler(gp.predict_mean_single,prior_transform,ndim=ndim,blob=False,
                                        sample=sample_method,nlive=nlive,rstate=rng)
-        sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)
-    else:
-        sampler = StaticNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
+            sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)
+        else:
+            sampler = StaticNestedSampler(gp.predict_mean_single,prior_transform,ndim=ndim,blob=False,
                                       sample=sample_method,nlive=nlive,rstate=rng)
-        sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
-    res = sampler.results  # type: ignore # grab our results
-    logl = res['logl']
-    # add check for all same logl values in case of initial plateau
-    if np.all(logl == logl[0]):
-        success = False
-        nlive = 2*nlive
-        log.warning("All initial logl values are the same. Retrying with the dynamic nested sampler and increased nlive.")
-        sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
-                                       sample=sample_method,nlive=nlive)
-        sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)     
-            # need a better method to guarantee that at least one finite logl present.
+            sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
+        res = sampler.results  # type: ignore # grab our results
+        logl = res['logl']
+        n_tried += 1
+        # add check for all same logl values in case of initial plateau
+        if np.all(logl == logl[0]):
+            success = False
+            log.info(f" All logl values are the same on try {n_tried+1}/{max_tries}. Retrying...")
+        else:
+            success = True
+            log.info(f" Successful result on try {n_tried+1}/{max_tries}.")
+        if n_tried >= max_tries:
+            log.warning("Nested sampling failed after maximum retries. Exiting.")
+            break
+        if n_tried==50:
+            nlive = 2*nlive
+            log.warning(f"Unable to get non-constant logl values in {n_tried} tries. Retrying with increased nlive.")
+
+        
+        # nlive = 2*nlive
+        # log.warning("All initial logl values are the same. Retrying with the dynamic nested sampler and increased nlive.")
+        # sampler = DynamicNestedSampler(loglike,prior_transform,ndim=ndim,blob=False,
+        #                                sample=sample_method,nlive=nlive)
+        # sampler.run_nested(print_progress=print_progress,dlogz_init=dlogz,maxcall=maxcall)     
+        #     # need a better method to guarantee that at least one finite logl present.
         
     res = sampler.results
     mean = res['logz'][-1]

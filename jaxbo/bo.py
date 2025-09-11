@@ -270,7 +270,7 @@ class BOBE:
             train_y = jnp.array(init_vals)
         
 
-            gp_kwargs.update({'train_x': train_x, 'train_y': train_y})
+            gp_kwargs.update({'train_x': train_x, 'train_y': train_y, 'param_names': self.loglikelihood.param_list})
             if use_clf:
                 # Add clf specific parameters to gp_init_kwargs
                 clf_threshold = max(200,get_threshold_for_nsigma(clf_nsigma_threshold,self.ndim))
@@ -399,7 +399,25 @@ class BOBE:
             log.info(f" Objective function value = {new_vals[k].item():.4f}, GP predicted value = {predicted_val.item():.4f}")
 
         return new_vals
-    
+
+    def check_max_evals_and_gpsize(self,current_evals):
+        """
+        Check if the maximum evaluations or GP size has been reached.
+
+        Args:
+            current_evals: Current number of objective evaluations.
+        """
+        if current_evals >= self.max_evals:
+            self.termination_reason = "Maximum evaluations reached"
+            self.results_dict['termination_reason'] = self.termination_reason
+            return True
+        if self.gp.train_x.shape[0] >= self.max_gp_size:
+            self.termination_reason = "Maximum GP size reached"
+            self.results_dict['termination_reason'] = self.termination_reason
+            return True
+        
+        return False
+
     def run(self, acqs: Union[str, Tuple[str]]):
         acqs_funcs_available = list(_acq_funcs.keys())
 
@@ -443,7 +461,7 @@ class BOBE:
         self.convergence_counter = 0  # Track successive convergence iterations
         log.info(f"Starting iteration {ii}")
 
-        while current_evals < self.max_evals:
+        while not self.converged:
             ii += 1
             refit = (ii % self.fit_step == 0)
             verbose = True
@@ -462,7 +480,6 @@ class BOBE:
 
             self.update_gp(new_pts_u, new_vals, refit=refit, step = ii, verbose=verbose)
 
-
             self.results_manager.update_best_loglike(ii, self.best_f)
             if verbose:
                 log.info(f" Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
@@ -480,8 +497,15 @@ class BOBE:
                 break
             jax.clear_caches()
 
+            max_evals_or_gpsize_reached = self.check_max_evals_and_gpsize(current_evals)
+            if max_evals_or_gpsize_reached:
+                break
+
+
+
         # End EI
         self.current_iteration = ii
+
 
     def check_convergence_ei(self, step, acq_val):
         """
@@ -531,7 +555,7 @@ class BOBE:
         self.results_manager.end_timing('MCMC Sampling')
         self.convergence_counter = 0  # Track successive convergence iterations (should get from results manager if resuming)
 
-        while current_evals < self.max_evals:
+        while not self.converged:
             ii += 1
             refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and current_evals >= self.min_evals
@@ -549,6 +573,7 @@ class BOBE:
 
 
             self.update_gp(new_pts_u, new_vals, step = ii, refit=refit)
+            self.results_manager.update_best_loglike(ii, self.best_f)
 
             # Check convergence and update MCMC samples
             if ns_flag:
@@ -590,7 +615,6 @@ class BOBE:
                     )
                 self.results_manager.end_timing('MCMC Sampling')
             
-            self.results_manager.update_best_loglike(ii, self.best_f)
             if verbose:
                 log.info(f" Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
 
@@ -602,6 +626,11 @@ class BOBE:
                 break
             
             jax.clear_caches()
+            
+            max_evals_or_gpsize_reached = self.check_max_evals_and_gpsize(current_evals)
+            if max_evals_or_gpsize_reached:
+                break
+
 
         # End of main BO loop for WIPV
         self.current_iteration = ii

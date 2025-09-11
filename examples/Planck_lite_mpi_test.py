@@ -84,7 +84,7 @@ def main():
             param_list=likelihood.param_list,
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
-            output_file=likelihood.name,
+            output_file=f'./results/{likelihood.name}',
             reference_file='./cosmo_input/chains/Planck_lite_mcmc',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
@@ -158,7 +158,7 @@ def main():
             acquisition_data=acquisition_data,
             best_loglike_data=best_loglike_data,
             timing_data=timing_data,
-            save_path=f"{likelihood.name}_dashboard.pdf"
+            save_path=f"./results/{likelihood.name}_dashboard.pdf"
         )
 
         # Save comprehensive results

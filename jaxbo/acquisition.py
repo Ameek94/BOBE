@@ -171,9 +171,9 @@ class AcquisitionFunction:
 
     name: str = "BaseAcquisitionFunction"
 
-    def __init__(self, optimizer: str = "scipy", optimizer_kwargs: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
+    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
         self.optimizer = optimizer
-        self.optimizer_kwargs = optimizer_kwargs
+        self.optimizer_options = optimizer_options
         if self.optimizer == "scipy":
             self.acq_optimize = optimize_scipy
         else:
@@ -259,8 +259,8 @@ class EI(AcquisitionFunction):
 
     name: str = "EI"
 
-    def __init__(self, optimizer: str = "scipy", optimizer_kwargs: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
-        super().__init__(optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
+    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
+        super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
 
     def fun(self, x, gp, best_y, zeta):
         """
@@ -305,7 +305,7 @@ class EI(AcquisitionFunction):
                             fun_kwargs=fun_kwargs,
                             num_params=gp.ndim,
                             x0=x0_acq,
-                            optimizer_kwargs=self.optimizer_kwargs,
+                            optimizer_options=self.optimizer_options,
                             maxiter=maxiter,
                             n_restarts=n_restarts,
                             verbose=verbose)
@@ -316,8 +316,8 @@ class LogEI(EI):
 
     name: str = "LogEI"
 
-    def __init__(self, optimizer: str = "scipy", optimizer_kwargs: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
-        super().__init__(optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
+    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
+        super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
 
     def fun(self, x, gp, best_y, zeta):
         """
@@ -340,9 +340,9 @@ class WIPV(AcquisitionFunction):
     name: str = "WIPV"
 
     def __init__(self,
-                 optimizer: str = "scipy", optimizer_kwargs: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
+                 optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
 
-        super().__init__(optimizer=optimizer, optimizer_kwargs=optimizer_kwargs)
+        super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
 
     def fun(self, x, gp,  mc_points=None, k_train_mc = None):
         var = gp.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc)
@@ -383,7 +383,7 @@ class WIPV(AcquisitionFunction):
                                   fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
                                   num_params=gp.ndim,
                                   x0=x0_acq,
-                                  optimizer_kwargs=self.optimizer_kwargs,
+                                  optimizer_options=self.optimizer_options,
                                   maxiter=maxiter,
                                   n_restarts=1,
                                   verbose=verbose)

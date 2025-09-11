@@ -30,11 +30,13 @@ class GPwithClassifier(GP):
                  probability_threshold=0.5, minus_inf=-1e5,
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
-                 optimizer="scipy", optimizer_kwargs={'method': 'L-BFGS-B'},
+                 optimizer="scipy", optimizer_options={'method': 'L-BFGS-B'},
                  kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.01, 10],
                  tausq=None, tausq_bounds=[1e-4, 1e4],
-                 kernel_variance_prior=None, lengthscale_prior=None, lengthscales=None, kernel_variance=1.0,
-                 train_clf_on_init=True,  # Prevent retraining on copy
+                 kernel_variance_prior=None, lengthscale_prior=None, 
+                 lengthscales=None, kernel_variance=1.0,
+                 param_names=None,
+                 train_clf_on_init=True,
                  ):
         """
         Generic Classifier-GP class combining a GP with a classifier. The GP is trained on the data points
@@ -108,7 +110,7 @@ class GPwithClassifier(GP):
             'noise': noise,
             'kernel': kernel,
             'optimizer': optimizer,
-            'optimizer_kwargs': optimizer_kwargs,
+            'optimizer_options': optimizer_options,
             'kernel_variance_bounds': kernel_variance_bounds,
             'lengthscale_bounds': lengthscale_bounds,
             'lengthscales': lengthscales,
@@ -117,6 +119,7 @@ class GPwithClassifier(GP):
             'kernel_variance_prior': kernel_variance_prior,
             'tausq': tausq,
             'tausq_bounds': tausq_bounds,
+            'param_names': param_names,
         }
                     
         super().__init__(**gp_init_kwargs)
@@ -390,7 +393,7 @@ class GPwithClassifier(GP):
             noise=state['noise'],
             kernel=state['kernel_name'],
             optimizer=state['optimizer_method'],
-            optimizer_kwargs=state['optimizer_kwargs'],
+            optimizer_options=state['optimizer_options'],
             kernel_variance_bounds=state['kernel_variance_bounds'],
             lengthscale_bounds=state['lengthscale_bounds'],
             lengthscales=state['lengthscales'],
@@ -399,6 +402,7 @@ class GPwithClassifier(GP):
             lengthscale_prior=state.get('lengthscale_prior_spec'),
             tausq=state.get('tausq', 1.0),
             tausq_bounds=state.get('tausq_bounds', [-4, 4]),
+            param_names=state.get('param_names', None),
             train_clf_on_init=state.get('train_clf_on_init', True),
         )
         

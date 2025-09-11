@@ -26,7 +26,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}_DSLP_fixed'
+    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}_uniform'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -47,10 +47,10 @@ def main():
         seed=1500,
 
         n_cobaya_init=16,
-        n_sobol_init=32,
+        n_sobol_init=64,
         min_evals=700,
-        max_evals=2500,
-        max_gp_size=1200,
+        max_evals=1500,
+        max_gp_size=1000,
         
         # Step settings
         fit_step=5,
@@ -59,13 +59,13 @@ def main():
                 
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=6000,
+        num_hmc_samples=8000,
         mc_points_size=512,
         num_chains = 6,
         thinning = 4,
         
         # GP settings
-        gp_kwargs={'lengthscale_prior': 'DSLP', 'kernel_variance_prior': 'fixed'},
+        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None},
         
         # Classifier settings
         use_clf=True,
@@ -73,9 +73,9 @@ def main():
         
         # Convergence and other settings
         minus_inf=-1e5,
-        logz_threshold=0.1,
+        logz_threshold=0.01,
         do_final_ns=True, 
-        convergence_n_iters=2,
+        convergence_n_iters=1,
     )
 
     end = time.time()
