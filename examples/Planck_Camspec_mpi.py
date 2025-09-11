@@ -4,13 +4,11 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# --- Command line arguments ---
-# Arg 1: Number of devices for XLA
-num_devices = int(sys.argv[1]) if len(sys.argv) > 1 else 8
-os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={num_devices}"
 
-# Arg 2: Classifier type ('svm' or 'gp')
-clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
+os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={os.cpu_count()}"
+
+# Arg 1: Classifier type ('svm' or 'gp')
+clf_type = str(sys.argv[1]) if len(sys.argv) > 1 else 'svm'
 
 # --- Imports ---
 from jaxbo.run import run_bobe
@@ -28,7 +26,7 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}_uniform'
+    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}_DSLP_fixed'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -50,9 +48,9 @@ def main():
 
         n_cobaya_init=16,
         n_sobol_init=32,
-        min_evals=500,
+        min_evals=700,
         max_evals=2500,
-        max_gp_size=1250,
+        max_gp_size=1200,
         
         # Step settings
         fit_step=5,
@@ -67,7 +65,7 @@ def main():
         thinning = 4,
         
         # GP settings
-        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None},
+        gp_kwargs={'lengthscale_prior': 'DSLP', 'kernel_variance_prior': 'fixed'},
         
         # Classifier settings
         use_clf=True,
@@ -75,7 +73,7 @@ def main():
         
         # Convergence and other settings
         minus_inf=-1e5,
-        logz_threshold=0.01,
+        logz_threshold=0.1,
         do_final_ns=True, 
         convergence_n_iters=2,
     )

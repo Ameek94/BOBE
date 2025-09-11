@@ -121,6 +121,7 @@ class GPwithClassifier(GP):
                     
         super().__init__(**gp_init_kwargs)
 
+        log.info(f"Initialized GPwithClassifier, clf_type={self.clf_type}, use_clf={self.use_clf}, clf_threshold={self.clf_threshold}, gp_threshold={self.gp_threshold}")
         # Train classifier if conditions are met
         if self.use_clf:
              if train_clf_on_init:
@@ -269,7 +270,7 @@ class GPwithClassifier(GP):
         if refit:
             super().fit(maxiter=maxiter, n_restarts=n_restarts)
         else:
-            super().recompute_cholesky()
+            super().recompute_cholesky_alphas()
         # Update JIT functions after data update
         self._update_jit_functions()
 
@@ -500,7 +501,6 @@ class GPwithClassifier(GP):
         # high_temp = rng_mcmc.uniform(1.,2.) ** 2
         temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         temp=1. # For now always use temp=1
-        seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
         def model():
@@ -534,7 +534,7 @@ class GPwithClassifier(GP):
             inits = jnp.array([self.get_random_point(rng=rng_mcmc)])
         else:
             # Create num_chains-1 random points
-            random_inits = [self.get_random_point(rng=rng_mcmc,nstd=15) for _ in range(num_chains-1)]
+            random_inits = [self.get_random_point(rng=rng_mcmc) for _ in range(num_chains-1)]
             # Add the best point as the last initialization
             best_point = self.train_x_clf[jnp.argmax(self.train_y_clf)]
             all_inits = random_inits + [best_point]
@@ -588,18 +588,7 @@ class GPwithClassifier(GP):
             # Concatenate all chunks
             samples_x = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_samples], axis=0)
             logps = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_logps], axis=0)
-            
-        else:
-            # Fallback to sequential (single chain case)
-            log.info("Using sequential method (fallback)")
-            samples_x = []
-            logps = []
-            for i in range(num_chains):
-                samples_x_i, logps_i = run_single_chain(rng_keys[i], inits[i])
-                samples_x.append(samples_x_i)
-                logps.append(logps_i)
-            samples_x = jnp.concatenate(samples_x)
-            logps = jnp.concatenate(logps)
+        
 
         samples_dict = {
             'x': samples_x,

@@ -444,7 +444,7 @@ class GP:
         
         return -mll
 
-    def fit(self, maxiter=1000, n_restarts=4):
+    def fit(self, maxiter=1000, n_restarts=4, rng=None):
         """ 
         Fits the GP using maximum likelihood hyperparameters with the chosen optimizer.
 
@@ -455,6 +455,9 @@ class GP:
         n_restarts: int
             The number of restarts for the optimizer. Default is 4.
         """
+
+        rng = rng if rng is not None else get_numpy_rng()
+
         # Prepare initial parameters based on current hyperparameters
         init_params = jnp.array(self.lengthscales)
         if not self.fixed_kernel_variance:
@@ -462,20 +465,20 @@ class GP:
         if 'tausq' in self.param_names:
             init_params = jnp.concatenate([init_params, jnp.array([self.tausq])])
             
-        if self.fixed_kernel_variance and 'tausq' in self.param_names:
-            log.info(f"Fitting GP with SAAS priors and fixed kernel_variance: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), tausq = {self.tausq}")
-        elif self.fixed_kernel_variance:
-            log.info(f"Fitting GP with fixed kernel_variance: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed)")
-        elif 'tausq' in self.param_names:
-            log.info(f"Fitting GP with SAAS priors: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}")
-        else:
-            log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
+        msg = f"Fitting GP: lengthscales={self.lengthscales}, kernel_variance={self.kernel_variance}"
+        if 'tausq' in self.param_names:
+            msg += f", tausq={self.tausq}"
+        if self.fixed_kernel_variance:
+            msg += " (fixed kernel_variance)"
+        log.info(msg)
 
         init_params = jnp.log10(init_params)
         init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
         if n_restarts > 1:
-            addn_init_params = init_params_u + 0.25 * np.random.normal(size=(n_restarts-1, init_params.shape[0]))
-            init_params_u = np.vstack([init_params_u, addn_init_params])
+            #addn_init_params =  init_params_u + 0.25 * np.random.normal(size=(n_restarts-1, init_params.shape[0]))
+            addn_init_params = rng.uniform(low=self.hyperparam_bounds[0], high=self.hyperparam_bounds[1], size=(n_restarts-1, init_params.shape[0]))
+            addn_init_params_u = scale_to_unit(addn_init_params, self.hyperparam_bounds)
+            init_params_u = np.vstack([init_params_u, addn_init_params_u])
         x0 = jnp.clip(init_params_u, 0.0, 1.0)
 
         optimizer_kwargs = self.optimizer_kwargs.copy()
@@ -497,16 +500,15 @@ class GP:
             self.kernel_variance = kernel_variance
         self.tausq = tausq
         
-        if self.fixed_kernel_variance and 'tausq' in self.param_names:
-            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), tausq = {self.tausq}, final MLL = {-best_f}")
-        elif self.fixed_kernel_variance:
-            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), final MLL = {-best_f}")
-        elif 'tausq' in self.param_names:
-            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}, final MLL = {-best_f}")
-        else:
-            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, final MLL = {-best_f}")
+        msg = f"Final hyperparams: lengthscales={self.lengthscales}, kernel_variance={self.kernel_variance}"
+        if 'tausq' in self.param_names:
+            msg += f", tausq={self.tausq}"
+        if self.fixed_kernel_variance:
+            msg += " (fixed kernel_variance)"
+        msg += f", final MLL={-best_f}"
+        log.info(msg)
 
-        self.recompute_cholesky()
+        self.recompute_cholesky_alphas()
 
     def update(self,new_x,new_y,refit=True,maxiter=1000,n_restarts=4):
         """
@@ -557,13 +559,13 @@ class GP:
         if refit:
             self.fit(maxiter=maxiter,n_restarts=n_restarts)
         else:
-            self.recompute_cholesky()
+            self.recompute_cholesky_alphas()
 
         # Update JIT-compiled functions with new state
         self._update_jit_functions()
 
 
-    def recompute_cholesky(self):
+    def recompute_cholesky_alphas(self):
         """
         Recomputes the Cholesky decomposition and alphas. Useful if hyperparameters are changed manually.
         Also updates JIT-compiled prediction functions.
