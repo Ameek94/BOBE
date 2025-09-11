@@ -69,104 +69,105 @@ def _setup_bounds(bounds: Optional[Union[List, Tuple, jnp.ndarray]], num_params:
 
     return bounds
 
-def optimize_optax(
+def optimize_optax( # Renamed for clarity
     fun: Callable,
     fun_args: Optional[Tuple] = (),
     fun_kwargs: Optional[dict] = {},
     num_params: int = 1,
     bounds: Optional[Union[List, Tuple, jnp.ndarray]] = None,
-    x0: jnp.ndarray = None,  # now required
+    x0: jnp.ndarray = None,
     optimizer_options: Optional[dict] = {"name": "adam", "lr": 1e-3, "early_stop_patience": 25},
     maxiter: int = 200,
     n_restarts: int = 1,
     verbose: bool = False,
 ) -> Tuple[jnp.ndarray, float]:
     """
-    Minimize a function using JAX + optax.
-    Supports bounded (via scaling to unit cube) and unbounded optimization.
-    Assumes x0 is provided externally with shape (n_restarts, num_params).
+    Minimize a function using JAX, optax, and vmap for parallel restarts.
     """
 
     if x0 is None:
-        raise ValueError("x0 must be provided (shape: (n_restarts, num_params) or (num_params,))")
+        raise ValueError("x0 must be provided (shape: (n_restarts, num_params))")
 
     x0 = jnp.atleast_2d(x0)
-    if x0.shape[0] < n_restarts:
-        raise ValueError(f"x0 provided with {x0.shape[0]} restarts but n_restarts={n_restarts}")
-    elif x0.shape[0] > n_restarts:
-        x0 = x0[:n_restarts]
+    if x0.shape[0] != n_restarts:
+        raise ValueError(f"x0 has {x0.shape[0]} restarts but n_restarts was set to {n_restarts}")
 
     bounds_arr = _setup_bounds(bounds, num_params)
 
-    # Scaled function depending on bounds
+    # Scaled function for bounded optimization
     if bounds_arr is None:
         scaled_func = lambda x: fun(x, *fun_args, **fun_kwargs)
     else:
         scaled_func = lambda x: fun(scale_from_unit(x, bounds_arr), *fun_args, **fun_kwargs)
 
-    # Get optimizer
+    # Vectorized Optimizer Setup
     early_stop_patience = optimizer_options.pop("early_stop_patience", 25)
     lr = optimizer_options.pop("lr", 1e-3)
     optimizer_name = optimizer_options.pop("name", "adam")
     optimizer = _get_optimizer(optimizer_name, lr, optimizer_options)
 
-    # JIT step function
-    @jax.jit
     def step(params, opt_state):
         val, grad = jax.value_and_grad(scaled_func)(params)
         updates, opt_state = optimizer.update(grad, opt_state)
         params = optax.apply_updates(params, updates)
         if bounds_arr is not None:
-            params = jnp.clip(params, 0.0, 1.0)  # enforce unit cube if bounded
+            params = jnp.clip(params, 0.0, 1.0)
         return params, opt_state, val
 
-    global_best_f = np.inf
-    global_best_params = None
+    # It maps over params (axis 0) and opt_state (axis 0)
+    v_step = jax.vmap(step, in_axes=(0, 0), out_axes=(0, 0, 0))
+    v_step_jit = jax.jit(v_step)
 
-    # Run each restart
-    for restart_idx in range(n_restarts):
-        log.debug(f"Starting restart {restart_idx + 1}/{n_restarts}")
+    # `params` now has shape (n_restarts, num_params)
+    params = x0
+    # Initialize optimizer state for each restart in the batch
+    opt_state = jax.vmap(optimizer.init)(params)
+    
+    # Track the best value and corresponding params for each restart
+    best_vals = jnp.full(n_restarts, jnp.inf)
+    best_params = jnp.zeros_like(params)
+    patience_counters = jnp.full(n_restarts, early_stop_patience, dtype=jnp.int32)
+    
+    for iter_idx in range(maxiter):
+        # Perform one optimization step for ALL restarts in parallel
+        params, opt_state, current_vals = v_step_jit(params, opt_state)
+        
+        # Identify which restarts have improved
+        improved_mask = current_vals < best_vals
+        
+        # Update best values and params where improvement occurred
+        best_vals = jnp.where(improved_mask, current_vals, best_vals)
+        best_params = jnp.where(improved_mask[:, None], params, best_params)
+        
+        # Reset patience for improved restarts, decrement for others
+        patience_counters = jnp.where(
+            improved_mask, 
+            early_stop_patience, 
+            patience_counters - 1
+        )
+        
+        # If all restarts have run out of patience, stop early
+        if jnp.all(patience_counters <= 0):
+            if verbose:
+                log.info(f"All restarts stopped early at iteration {iter_idx}")
+            break
 
-        current_params = x0[restart_idx]
-        opt_state = optimizer.init(current_params)
+        if verbose and iter_idx % 100 == 0:
+            log.debug(f"Iter {iter_idx}, best overall={float(jnp.min(best_vals)):.4e}")
 
-        best_f_for_restart = float("inf")
-        patience_counter = early_stop_patience
-
-        current_params, opt_state, current_value = step(current_params, opt_state)
-        if current_value < best_f_for_restart:
-            best_f_for_restart = current_value
-
-        for iter_idx in range(maxiter):
-            current_params, opt_state, current_value = step(current_params, opt_state)
-
-            if current_value < best_f_for_restart:
-                best_f_for_restart = current_value
-                patience_counter = early_stop_patience
-            else:
-                patience_counter -= 1
-                if patience_counter == 0:
-                    if verbose:
-                        log.debug(f"Early stopping at iter {iter_idx} (restart {restart_idx+1})")
-                    break
-
-            if verbose and iter_idx % 10 == 0:
-                log.debug(f"Restart {restart_idx+1}, iter {iter_idx}, best={float(best_f_for_restart):.4e}")
-
-        if best_f_for_restart < global_best_f:
-            global_best_f = best_f_for_restart
-            global_best_params = current_params
-
-        if verbose:
-            log.debug(f"Restart {restart_idx+1} done. Best={float(best_f_for_restart):.4e}")
+    # --- Find the Global Best Result ---
+    best_restart_idx = jnp.argmin(best_vals)
+    global_best_f = best_vals[best_restart_idx]
+    global_best_params_scaled = best_params[best_restart_idx]
 
     # Map back to original space if bounded
     if bounds_arr is None:
-        best_params_original = global_best_params
+        best_params_original = global_best_params_scaled
     else:
-        best_params_original = scale_from_unit(global_best_params, bounds_arr)
+        best_params_original = scale_from_unit(global_best_params_scaled, bounds_arr)
 
     return jnp.array(best_params_original), float(global_best_f)
+
 
 
 def optimize_scipy(

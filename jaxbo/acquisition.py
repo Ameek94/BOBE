@@ -171,7 +171,7 @@ class AcquisitionFunction:
 
     name: str = "BaseAcquisitionFunction"
 
-    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
+    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {}):
         self.optimizer = optimizer
         self.optimizer_options = optimizer_options
         if self.optimizer == "scipy":
@@ -259,7 +259,7 @@ class EI(AcquisitionFunction):
 
     name: str = "EI"
 
-    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
+    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {}):
         super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
 
     def fun(self, x, gp, best_y, zeta):
@@ -317,7 +317,7 @@ class LogEI(EI):
 
     name: str = "LogEI"
 
-    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
+    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {}):
         super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
 
     def fun(self, x, gp, best_y, zeta):
@@ -341,7 +341,7 @@ class WIPV(AcquisitionFunction):
     name: str = "WIPV"
 
     def __init__(self,
-                 optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {"method": "L-BFGS-B"}):
+                 optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {}):
 
         super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
 
