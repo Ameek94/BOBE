@@ -478,7 +478,7 @@ class GP:
 
         # Add random restarts directly in unconstrained space
         if n_restarts > 1:
-            addn_init_params = init_params + 0.25 * rng.normal(size=(n_restarts-1, init_params.shape[0]))
+            addn_init_params = rng.uniform(low=self.hyperparam_bounds[0], high=self.hyperparam_bounds[1], size=(n_restarts-1, init_params.shape[0]))
             init_params = np.vstack([init_params, addn_init_params])
         x0 = jnp.clip(init_params, min=self.hyperparam_bounds[0], max=self.hyperparam_bounds[1])
 
@@ -653,7 +653,7 @@ class GP:
         rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
         high_temp = rng_mcmc.uniform(1., 2.) ** 2
-        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
         def model():

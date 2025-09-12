@@ -376,7 +376,7 @@ class WIPV(AcquisitionFunction):
         best_x = mc_points[jnp.argmin(acq_vals)]
         x0_acq = best_x
 
-        if gp.train_x.shape[0] > 1000:
+        if gp.train_x.shape[0] > 750:
             return x0_acq, float(acq_val_min)
         else:
             return self.acq_optimize(fun=self.fun,

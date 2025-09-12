@@ -56,9 +56,11 @@ class BaseLikelihood:
         self.pool = pool if pool is not None else MPI_Pool()
 
         log.info(f"Initialized {self.name} with {self.ndim} params")
-        log.info(f"Param list: {self.param_list}")
-        log.info(f"Param lower bounds: {self.param_bounds[0]}")
-        log.info(f"Param upper bounds: {self.param_bounds[1]}")
+
+        if self.pool.is_master():
+            log.info(f"Param list: {self.param_list}")
+            log.info(f"Param lower bounds: {self.param_bounds[0]}")
+            log.info(f"Param upper bounds: {self.param_bounds[1]}")
 
     def _safe_eval(self, x: np.ndarray) -> float:
         """Helper method to safely evaluate a single point."""
@@ -96,7 +98,9 @@ class BaseLikelihood:
         
         # The master process calls this method. It then calls pool.run_map(self, sobol_points)
         # to get the values, which works in both modes. Initial points are always generated on the master when going through run.py.
+        
         if self.pool.is_master():
+             log.info(f"Evaluating Likelihood at initial points")
              vals = self.pool.run_map(self.__call__, sobol_points)
         else:
             # Workers don't generate initial points

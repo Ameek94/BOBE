@@ -65,6 +65,8 @@ def main():
         seed=42,
         save_dir='./results/',
         save=True,
+        acq = ['logei','wipv'],
+        ei_goal = 1e-5,
         do_final_ns=False,
     )
 

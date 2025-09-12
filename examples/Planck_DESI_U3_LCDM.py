@@ -27,7 +27,7 @@ def main():
     #     likelihood_name = f'Planck_DESI_U3_CPL_EI_DSLP_noCLF'
     # else:
     #     use_clf = True
-    likelihood_name = f'Planck_DESI_U3_LCDM_{clf_type}_DSLP_LGN'
+    likelihood_name = f'Planck_DESI_U3_LCDM_{clf_type}_DSLP_LGN_boundedLS'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -45,13 +45,15 @@ def main():
         resume_file=f'./results/{likelihood_name}',
         save_dir='./results',
         verbosity='INFO',
-        seed=1500,
+        seed=42,
+        acq = ['wipv'],
+        ei_goal = 1e-10,
 
-        n_cobaya_init=16,
-        n_sobol_init=32,
-        min_evals=750,
-        max_evals=2500,
-        max_gp_size=1250,
+        n_cobaya_init=32,
+        n_sobol_init=64,
+        min_evals=700,
+        max_evals=1500,
+        max_gp_size=900,
         optimizer='scipy',
         
         # Step settings
@@ -61,14 +63,15 @@ def main():
                 
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=8000,
+        num_hmc_samples=12000,
         mc_points_size=512,
         num_chains = 6,
         thinning = 4,
         
         # GP settings
-        gp_kwargs={'lengthscale_prior': "DSLP", 'kernel_variance_prior': {'name': 'LogNormal', 'loc': 0.0, 'scale': 0.5}},
-        
+        gp_kwargs={'lengthscale_prior': "DSLP", 'kernel_variance_prior': {'name': 'LogNormal', 'loc': 0.0, 'scale': 1.},
+                   'lengthscale_bounds': (1e-2, 1.), 'kernel_variance_bounds': (1e-4, 1e4)},
+
         # Classifier settings
         use_clf=True,
         clf_type=clf_type,
@@ -77,7 +80,7 @@ def main():
         minus_inf=-1e5,
         logz_threshold=0.01,
         do_final_ns=True, 
-        convergence_n_iters=2,
+        convergence_n_iters=1,
     )
     end = time.time()
 

@@ -41,7 +41,7 @@ def main():
         },
         
         # General run settings
-        resume=False,
+        resume=True,
         resume_file=f'./results/{likelihood_name}',
         save_dir='./results',
         verbosity='INFO',
@@ -51,7 +51,7 @@ def main():
         n_sobol_init=32,
         min_evals=900,
         max_evals=2500,
-        max_gp_size=1600,
+        max_gp_size=1500,
         
         # Step settings
         fit_step=10,
@@ -74,7 +74,7 @@ def main():
         
         # Convergence and other settings
         minus_inf=-1e5,
-        logz_threshold=0.01,
+        logz_threshold=0.02,
         do_final_ns=True, 
         convergence_n_iters=1,
     )

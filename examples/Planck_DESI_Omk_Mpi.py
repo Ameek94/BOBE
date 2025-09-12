@@ -27,7 +27,8 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Planck_DESIDR2_Omk_{clf_type}'
+    likelihood_name = f'Planck_DESIDR2_Omk_{clf_type}_mpi'
+
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -45,13 +46,16 @@ def main():
         resume_file=f'./results/{likelihood_name}',
         save_dir='./results',
         verbosity='INFO',
-        seed=1000,
+        seed=20000,
+        acq = ['logei','wipv'],
+        ei_goal = 1e-6,
 
         n_cobaya_init=16,
-        n_sobol_init=64,
-        min_evals=800,
-        max_evals=2000,
-        max_gp_size=1400,
+        n_sobol_init=32,
+        min_evals=750,
+        max_evals=1500,
+        max_gp_size=1000,
+        optimizer='scipy',
         
         # Step settings
         fit_step=5,
@@ -60,14 +64,15 @@ def main():
                 
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=10000,
+        num_hmc_samples=15000,
         mc_points_size=512,
         num_chains = 6,
         thinning = 4,
         
         # GP settings
-        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None},
-        
+        gp_kwargs={'lengthscale_prior': "DSLP", 'kernel_variance_prior': {'name': 'LogNormal', 'loc': 0.0, 'scale': 1.},
+                   'lengthscale_bounds': (1e-2, 1.), 'kernel_variance_bounds': (1e-4, 1e4)},
+
         # Classifier settings
         use_clf=True,
         clf_type=clf_type,
@@ -76,12 +81,10 @@ def main():
         minus_inf=-1e5,
         logz_threshold=0.01,
         do_final_ns=True, 
-        convergence_n_iters=2,
+        convergence_n_iters=1,
     )
-
     end = time.time()
 
-    # --- Post-processing (runs only on the master process in MPI) ---
     if results is not None:
         log = get_logger("main")
         manual_timing = end - start
@@ -115,6 +118,7 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             plot_params=param_list_LCDM,
+            output_dir='./results/',
             output_file=f'{likelihood.name}_cosmo',
             reference_file='./cosmo_input/chains/Planck_DESIDR2_LCDM_Omk_MCMC',
             reference_ignore_rows=0.3,
@@ -130,6 +134,7 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             output_file=f'{likelihood.name}_full',
+            output_dir='./results/',
             reference_file='./cosmo_input/chains/Planck_DESIDR2_LCDM_Omk_MCMC',
             reference_ignore_rows=0.3,
             reference_label='MCMC',

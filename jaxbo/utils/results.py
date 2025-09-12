@@ -530,9 +530,9 @@ class BOBEResults:
         """
         self.end_time = time.time()
         
-        self.final_samples = samples_dict.get('samples', np.array([]))
+        self.final_samples = samples_dict.get('x', np.array([]))
         self.final_weights = samples_dict.get('weights', np.array([]))
-        self.final_loglikes = samples_dict.get('loglikes', np.array([]))
+        self.final_loglikes = samples_dict.get('logl', np.array([]))
 
 
         # Use provided logz_dict, or fall back to the last convergence check
@@ -676,25 +676,28 @@ class BOBEResults:
             pickle.dump(results, f, protocol=pickle.HIGHEST_PROTOCOL)
         log.info(f"Saved main results to {pickle_file}")
     
-    def save_chain_files(self):
+    def save_chain_files(self, samples_dict: Optional[Dict[str, np.ndarray]] = None, filename: Optional[str] = None):
         """Save chain files in GetDist format using MCSamples.saveAsText method."""
-        if len(self.final_samples) == 0:
-            return
         
         if not HAS_GETDIST:
             log.warning("GetDist not available, cannot save chain files")
             return
         
         # Get MCSamples object
-        samples = self.get_getdist_samples()
-        if samples is None:
+        getdist_samples = self.get_getdist_samples(samples_dict)
+        if getdist_samples is None:
             log.warning("Could not create MCSamples object")
             return
         
+        if filename is not None:
+            output_file = os.path.join(self.save_dir, filename)
+        else:
+            output_file = self.save_path
+        
         # Use GetDist's saveAsText method to save the chain files
         # This automatically creates .txt, .paramnames, and .ranges files
-        samples.saveAsText(root=self.output_file, dir=self.save_dir)
-        log.info(f"Saved GetDist format files using MCSamples.saveAsText to {self.output_file}")
+        getdist_samples.saveAsText(root=output_file, make_dirs=True)
+        log.info(f"Saved GetDist format files using MCSamples.saveAsText to {output_file}")
         log.info("  - Created: .txt (chain), .paramnames (parameter info), .ranges (parameter bounds)")
         
     
@@ -823,8 +826,8 @@ class BOBEResults:
 
         if gp is not None:  # Only save GP if provided
             gp.save(filename=f"{self.save_path}_gp")
-    
-    def get_getdist_samples(self) -> Optional['MCSamples']:
+
+    def get_getdist_samples(self, samples_dict = None) -> Optional['MCSamples']:
         """
         Convert results to GetDist MCSamples object.
         
@@ -835,30 +838,40 @@ class BOBEResults:
             log.warning("GetDist not available, cannot create MCSamples object")
             return None
         
-        if self.final_samples is None:
-            log.warning("No final samples available")
-            return None
-        
+        if samples_dict is not None: # for checkpoint samples
+            samples= samples_dict['x']
+            weights = samples_dict['weights']
+            loglikes = samples_dict['logl']
+            sampler_method = samples_dict.get('method','mcmc')
+        else: # for final samples
+            if self.final_samples is None:
+                log.warning("No final samples available")
+                return None
+            samples = self.final_samples
+            weights = self.final_weights
+            loglikes = self.final_loglikes
+            # Determine sampler method
+            sampler_method = 'nested' if self.final_logz_dict else 'mcmc'
+
+
         # Parameter ranges for GetDist
         # param_bounds is shape (2, nparams)
         ranges = {name: [self.param_bounds[0, i], self.param_bounds[1, i]] 
                   for i, name in enumerate(self.param_names)}
         
-        # Determine sampler method
-        sampler_method = 'nested' if self.final_logz_dict else 'mcmc'
         
-        samples = MCSamples(
-            samples=self.final_samples,
+        getdist_samples = MCSamples(
+            samples=samples,
             names=self.param_names,
             labels=self.param_labels,
             ranges=ranges,
-            weights=self.final_weights,
-            loglikes=self.final_loglikes,
+            weights=weights,
+            loglikes=loglikes,
             label='BOBE',
             sampler=sampler_method
         )
-        
-        return samples
+
+        return getdist_samples
     
     @classmethod
     def load_results(cls, output_file: str) -> 'BOBEResults':

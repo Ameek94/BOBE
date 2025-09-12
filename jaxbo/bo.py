@@ -272,7 +272,7 @@ class BOBE:
             gp_kwargs.update({'train_x': train_x, 'train_y': train_y, 'param_names': self.loglikelihood.param_list})
             if use_clf:
                 # Add clf specific parameters to gp_init_kwargs
-                clf_threshold = max(200,get_threshold_for_nsigma(clf_nsigma_threshold,self.ndim))
+                clf_threshold = max(100,get_threshold_for_nsigma(clf_nsigma_threshold,self.ndim))
                 gp_kwargs.update({
                     'clf_type': clf_type,
                     'clf_use_size': clf_use_size,
@@ -280,7 +280,7 @@ class BOBE:
                     'probability_threshold': 0.5,
                     'minus_inf': minus_inf,
                     'clf_threshold': clf_threshold,
-                    'gp_threshold': 2 * clf_threshold
+                    'gp_threshold': 2*clf_threshold
                 })
                 self.gp = GPwithClassifier(**gp_kwargs)
             else:
@@ -432,11 +432,11 @@ class BOBE:
         for acq in acqs:
             if acq.lower() not in acqs_funcs_available:
                 raise ValueError(f"Invalid acquisition function '{acq}'. Valid options are: {acqs_funcs_available}")
-            
+            self.acquisition = _acq_funcs[acq.lower()](optimizer=self.optimizer)  # Set acquisition function
             if acq.lower() == 'wipv':
                 self.run_WIPV(ii=self.current_iteration)
             else:
-                self.run_EI(acq, ii=self.current_iteration)
+                self.run_EI(ii=self.current_iteration)
 
         log.info(f" Final best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
 
@@ -451,16 +451,16 @@ class BOBE:
 
 
 
-    def run_EI(self, acq: str, ii = 0):
+    def run_EI(self, ii = 0):
         """
         Run the optimization loop for EI/LogEI acquisition functions.
         """
-        self.acquisition = _acq_funcs[acq.lower()](optimizer=self.optimizer)  # Set acquisition function
         current_evals = self.gp.npoints
         self.convergence_counter = 0  # Track successive convergence iterations
         log.info(f"Starting iteration {ii}")
+        converged=False
 
-        while not self.converged:
+        while not converged:
             ii += 1
             refit = (ii % self.fit_step == 0)
             verbose = True
@@ -483,15 +483,15 @@ class BOBE:
             if verbose:
                 log.info(f" Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
 
-            if current_evals >= self.min_evals:
-                self.converged = self.check_convergence_ei(ii,acq_vals)
+            # if current_evals >= self.min_evals:
+            converged = self.check_convergence_ei(ii,acq_vals)
 
             # Update results manager with iteration info, also save results and gp if save_step
             if ii % self.save_step == 0:
                 self.results_manager.save_intermediate(gp=self.gp)
 
-            if self.converged:
-                self.termination_reason = f"{acq.upper()} goal reached"
+            if converged:
+                self.termination_reason = f"{self.acquisition.name.upper()} goal reached"
                 self.results_dict['termination_reason'] = self.termination_reason
                 break
             jax.clear_caches()
@@ -525,10 +525,10 @@ class BOBE:
         if converged:
             self.convergence_counter += 1
             if self.convergence_counter >= self.convergence_n_iters:
-                log.info(f"Convergence achieved after {self.convergence_n_iters} successive iterations")
+                log.info(f"Convergence for {self.acquisition.name} achieved after {self.convergence_n_iters} successive iterations")
                 return True
             else:
-                log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
+                log.info(f"{self.acquisition.name} convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
                 return False
         else:
             self.convergence_counter = 0  # Reset counter if not converged
@@ -553,6 +553,7 @@ class BOBE:
         )
         self.results_manager.end_timing('MCMC Sampling')
         self.convergence_counter = 0  # Track successive convergence iterations (should get from results manager if resuming)
+        self.ns_samples = None
 
         while not self.converged:
             ii += 1
@@ -578,8 +579,8 @@ class BOBE:
             if ns_flag:
                 log.info("Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
-                ns_samples, logz_dict, ns_success = nested_sampling_Dy(
-                    self.gp, self.ndim, maxcall=int(2e6), dynamic=False, dlogz=0.05, equal_weights=False,
+                self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(
+                    self.gp, self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01, equal_weights=False,
                     rng=self.np_rng
                 )
                 self.results_manager.end_timing('Nested Sampling')
@@ -587,13 +588,13 @@ class BOBE:
                 log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
 
                 if ns_success:
-                    equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
+                    equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
                     self.mc_samples = {
                         'x': equal_samples,
                         'logl': equal_logl,
                         'weights': np.ones(equal_samples.shape[0]),
                         'method': 'NS',
-                        'best': ns_samples['best']
+                        'best': self.ns_samples['best']
                     }
                     self.converged = self.check_convergence_WIPV(ii, logz_dict, equal_samples, equal_logl)
                     if self.converged:
@@ -643,13 +644,13 @@ class BOBE:
 
             log.info(" Final Nested Sampling")
             self.results_manager.start_timing('Nested Sampling')
-            ns_samples, logz_dict, ns_success = nested_sampling_Dy(
+            self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(
                 self.gp, self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01,rng=self.np_rng
             )
             self.results_manager.end_timing('Nested Sampling')
             log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
             if ns_success:
-                equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
+                equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
                 log.info(f"Using nested sampling results")
                 self.check_convergence_WIPV(ii+1, logz_dict, equal_samples, equal_logl)
                 if self.converged:
@@ -657,10 +658,10 @@ class BOBE:
                     self.results_dict['logz'] = logz_dict
                     self.results_dict['termination_reason'] = self.termination_reason
 
-        if (ns_samples is not None) and ns_success:
-            samples = ns_samples['x']
-            weights = ns_samples['weights']
-            loglikes = ns_samples['logl']
+        if (self.ns_samples is not None) and ns_success:
+            samples = self.ns_samples['x']
+            weights = self.ns_samples['weights']
+            loglikes = self.ns_samples['logl']
         else:
             log.info("No nested sampling results found or nested sampling unsuccessful, MC samples from HMC/MCMC will be used instead.")
             self.results_manager.start_timing('MCMC Sampling')
@@ -741,7 +742,10 @@ class BOBE:
             checkpoint_filename = f"{self.output_file}_checkpoint"
 
             # Save intermediate results checkpoint
-            self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}.json")
+            self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}")
+
+            # Save getdist chains
+            self.results_manager.save_chain_files(samples_dict=self.ns_samples, filename=f"{checkpoint_filename}")
 
             if verbose:
                 log.info(f"New minimum delta achieved: {delta:.4f}")
@@ -790,6 +794,7 @@ class BOBE:
 
         # Add evidence info if available
         samples_dict = self.samples_dict or {}
+        print(samples_dict.keys())
         logz_dict = self.results_dict.get('logz', {})
 
         # Finalize results with comprehensive data

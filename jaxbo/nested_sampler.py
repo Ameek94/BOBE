@@ -134,10 +134,10 @@ def nested_sampling_Dy(gp: GP
 
     start = time.time()
 
-    nlive = max(400, 40*ndim)  # set a minimum nlive of 400 for better accuracy
+    nlive = 500 if ndim <= 10 else 750
 
     success = False
-    max_tries = 100
+    max_tries = 1000 # we can do lots since this is very fast in case of failure
     n_tried = 0
     while not success:  # loop in case of failure
         if dynamic:
@@ -154,14 +154,14 @@ def nested_sampling_Dy(gp: GP
         # add check for all same logl values in case of initial plateau
         if np.all(logl == logl[0]):
             success = False
-            log.info(f" All logl values are the same on try {n_tried+1}/{max_tries}. Retrying...")
+            log.debug(f" All logl values are the same on try {n_tried+1}/{max_tries}. Retrying...")
         else:
             success = True
             log.info(f" Successful result on try {n_tried+1}/{max_tries}.")
         if n_tried >= max_tries:
             log.warning("Nested sampling failed after maximum retries. Exiting.")
             break
-        if n_tried==50:
+        if n_tried==50 or n_tried==100 or n_tried==500:
             nlive = 2*nlive
             log.warning(f"Unable to get non-constant logl values in {n_tried} tries. Retrying with increased nlive.")
 
@@ -215,5 +215,5 @@ def nested_sampling_Dy(gp: GP
     samples_dict['logl_upper'] = logl_upper
     samples_dict['logl_lower'] = logl_lower
     samples_dict['logvol'] = logvol
-    samples_dict['method']= 'NS'
+    samples_dict['method']= 'nested'
     return (samples_dict, logz_dict, success)
