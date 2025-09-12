@@ -46,7 +46,7 @@ def main():
         gp_kwargs={'lengthscale_prior': "DSLP", 'kernel_variance_prior': {'name': 'LogNormal', 'loc': 0.0, 'scale': 1.},
                    'lengthscale_bounds': (1e-2, 2.), 'kernel_variance_bounds': (1e-4, 1e4)},
         use_clf=True,
-        clf_type='svm',
+        clf_type='ellipsoid',
         minus_inf=-1e5,
         logz_threshold=0.0025,
         convergence_n_iters=1,

@@ -503,7 +503,7 @@ class GPwithClassifier(GP):
         prob = rng_mcmc.uniform(0, 1)
         high_temp = rng_mcmc.uniform(2.,4.)  # 6
         # high_temp = rng_mcmc.uniform(1.,2.) ** 2
-        temp = np.where(prob < 2/3, 1., 2.) # Randomly choose temperature either 1 or high_temp
+        temp = np.where(prob < 2/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         # temp=1. # For now always use temp=1
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
