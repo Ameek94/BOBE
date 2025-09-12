@@ -134,7 +134,7 @@ def nested_sampling_Dy(gp: GP
 
     start = time.time()
 
-    nlive = max(500, 35*ndim)  # set a minimum nlive of 500 for better accuracy
+    nlive = max(400, 40*ndim)  # set a minimum nlive of 400 for better accuracy
 
     success = False
     max_tries = 100

@@ -76,7 +76,7 @@ class BOBE:
                  ei_goal = 1e-10,
                  use_clf=True,
                  clf_type = "svm",
-                 clf_nsigma_threshold=25.0,
+                 clf_nsigma_threshold=20,
                  clf_use_size = 10,
                  clf_update_step=1,
                  logz_threshold=0.01,

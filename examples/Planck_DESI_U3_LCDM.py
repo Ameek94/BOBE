@@ -27,7 +27,7 @@ def main():
     #     likelihood_name = f'Planck_DESI_U3_CPL_EI_DSLP_noCLF'
     # else:
     #     use_clf = True
-    likelihood_name = f'Planck_DESI_U3_LCDM_{clf_type}'
+    likelihood_name = f'Planck_DESI_U3_LCDM_{clf_type}_DSLP_LGN'
 
     # --- Run BOBE with combined settings ---
     results = run_bobe(
@@ -41,7 +41,7 @@ def main():
         },
         
         # General run settings
-        resume=True,
+        resume=False,
         resume_file=f'./results/{likelihood_name}',
         save_dir='./results',
         verbosity='INFO',
@@ -67,7 +67,7 @@ def main():
         thinning = 4,
         
         # GP settings
-        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None},
+        gp_kwargs={'lengthscale_prior': "DSLP", 'kernel_variance_prior': {'name': 'LogNormal', 'loc': 0.0, 'scale': 0.5}},
         
         # Classifier settings
         use_clf=True,

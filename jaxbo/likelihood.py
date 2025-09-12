@@ -57,9 +57,8 @@ class BaseLikelihood:
 
         log.info(f"Initialized {self.name} with {self.ndim} params")
         log.info(f"Param list: {self.param_list}")
-        log.info(f"Param bounds:")
-        log.info(f"Lower = {self.param_bounds[0]}")
-        log.info(f"Upper = {self.param_bounds[1]}")
+        log.info(f"Param lower bounds: {self.param_bounds[0]}")
+        log.info(f"Param upper bounds: {self.param_bounds[1]}")
 
     def _safe_eval(self, x: np.ndarray) -> float:
         """Helper method to safely evaluate a single point."""
