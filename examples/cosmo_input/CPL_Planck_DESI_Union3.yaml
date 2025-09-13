@@ -26,7 +26,7 @@ params:
       max: -0.4
     ref:
       dist: norm
-      loc: -0.827
+      loc: -0.674
       scale: 0.063
     proposal: 0.05
     latex: w_0
@@ -36,8 +36,8 @@ params:
       max: 0.5
     ref:
       dist: norm
-      loc: -0.75
-      scale: 0.1
+      loc: -1.06
+      scale: 0.28
     proposal: 0.05
     latex: w_a
   omk: 0.
@@ -48,8 +48,8 @@ params:
      max: 0.13
    ref:
      dist: norm
-     loc: 1.186384753e-01
-     scale: 0.0005
+     loc: 0.11921
+     scale: 0.00082
    proposal: 0.0005
   ombh2:
     prior:
@@ -57,8 +57,8 @@ params:
      max: 0.023
     ref:
      dist: norm
-     loc: 2.224954976e-02
-     scale: 0.0001
+     loc: 0.02222
+     scale: 0.00013
     proposal: 0.0001
     latex: \Omega_\mathrm{b} h^2
   H0: 
@@ -68,8 +68,8 @@ params:
       max: 72
     ref:
      dist: norm
-     loc: 6.771234910e+01
-     scale: 0.05
+     loc: 66.5
+     scale: 0.85
     proposal: 0.05 
   logA:
     prior:

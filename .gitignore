@@ -47,8 +47,9 @@ test_methods/
 *.png
 *.ranges
 *results_plots/
-*.doctree
-/docs/build
 examples/plot_CPL.ipynb
 docs/build/
 docs/build/html/
+build/
+/docs/build
+examples/.DS_Store

@@ -31,7 +31,7 @@ def main():
     param_labels = ['x_1', 'x_2']
     param_bounds = np.array([[-1, 1], [-1, 2]]).T
     ls_priors = 'DSLP'
-    likelihood_name = f'banana_{ls_priors}_lgn'
+    likelihood_name = f'banana_test_{ls_priors}'
 
     start = time.time()
     print("Starting BOBE run...")
@@ -49,20 +49,26 @@ def main():
         n_cobaya_init=4,
         n_sobol_init=8,
         min_evals=18,
-        n_log_ei_iters=10,
         max_evals=100,
         max_gp_size=200,
         fit_step=1,
         wipv_batch_size=2,
         ns_step=3,
+        optimizer='optax',
+        mc_points_method='NS',
         num_hmc_warmup=256,
         num_hmc_samples=1024,
         mc_points_size=128,
-        lengthscale_priors=ls_priors,
+        thinning=4,
+        num_chains=4,
         use_clf=False,
         minus_inf=-1e5,
         logz_threshold=1e-3,
         seed=42,
+        save_dir='./results/',
+        save=True,
+        acq = ['wipv'],
+        ei_goal = 1e-5,
         do_final_ns=False,
     )
 
@@ -82,8 +88,7 @@ def main():
         samples = results['samples']
         logz_dict = results.get('logz', {})
         likelihood = results['likelihood']
-        comprehensive_results = results['comprehensive']
-        timing_data = comprehensive_results['timing']
+        results_manager = results['results_manager']
 
         plt.style.use('default')
         plt.rcParams['text.usetex'] = True
@@ -91,12 +96,8 @@ def main():
 
         # Create parameter samples plot
         log.info("Creating parameter samples plot...")
-        if hasattr(samples, 'samples'):
-            sample_array = samples.samples
-            weights_array = samples.weights
-        else:
-            sample_array = samples['x']
-            weights_array = samples['weights']
+        sample_array = samples['x']
+        weights_array = samples['weights']
 
         dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,
                                                sample='rwalk',logl_kwargs={'slow': False})
@@ -112,13 +113,7 @@ def main():
 
         reference_samples = MCSamples(samples=dns_samples, names=param_list, labels=param_labels,
                                     weights=weights, 
-                                    ranges= dict(zip(param_list,param_bounds.T)))
-
-        plt.style.use('default')
-
-        # Enable LaTeX rendering for mathematical expressions
-        plt.rcParams['text.usetex'] = True 
-        plt.rcParams['font.family'] = 'serif'        
+                                    ranges= dict(zip(param_list,param_bounds.T)))      
 
         plot_final_samples(
             gp,
@@ -127,6 +122,7 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             output_file=likelihood.name,
+            output_dir='./results/',
             reference_samples=reference_samples,
             reference_file=None,
             reference_label='Dynesty',
@@ -137,6 +133,8 @@ def main():
         log.info("\n" + "="*60)
         log.info("DETAILED TIMING ANALYSIS")
         log.info("="*60)
+
+        timing_data = results_manager.get_timing_summary()
 
         log.info(f"Automatic timing: {timing_data['total_runtime']:.2f} seconds ({timing_data['total_runtime']/60:.2f} minutes)")
         log.info(f"Timing difference: {abs(manual_timing - timing_data['total_runtime']):.2f} seconds")
@@ -169,8 +167,8 @@ def main():
         log.info("\n" + "="*60)
         log.info("CONVERGENCE ANALYSIS")
         log.info("="*60)
-        log.info(f"Converged: {comprehensive_results['converged']}")
-        log.info(f"Termination reason: {comprehensive_results['termination_reason']}")
+        log.info(f"Converged: {results_manager.converged}")
+        log.info(f"Termination reason: {results_manager.termination_reason}")
         log.info(f"Final GP size: {gp.train_x.shape[0]}")
 
         if logz_dict:
@@ -184,12 +182,12 @@ def main():
         log.info("="*60)
 
         # Initialize plotter
-        plotter = BOBESummaryPlotter(results['results_manager'])
+        plotter = BOBESummaryPlotter(results_manager)
 
         # Get GP and best loglike evolution data
-        gp_data = results['results_manager'].get_gp_data()
-        best_loglike_data = results['results_manager'].get_best_loglike_data()
-        acquisition_data = results['results_manager'].get_acquisition_data()
+        gp_data = results_manager.get_gp_data()
+        best_loglike_data = results_manager.get_best_loglike_data()
+        acquisition_data = results_manager.get_acquisition_data()
 
         # Create summary dashboard with timing data
         log.info("Creating summary dashboard...")
@@ -198,7 +196,7 @@ def main():
             acquisition_data=acquisition_data,
             best_loglike_data=best_loglike_data,
             timing_data=timing_data,
-            save_path=f"{likelihood.name}_dashboard.pdf"
+            save_path=f"./results/{likelihood.name}_dashboard.pdf"
         )
         # plt.show()
 

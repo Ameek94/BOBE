@@ -15,15 +15,23 @@ def main():
 
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_Union3.yaml'
-
+    
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
     clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm' 
 
-    likelihood_name = f'Planck_DESI_U3_LCDM_{clf_type}'
+    # use_clf_str = str(sys.argv[3]) if len(sys.argv) > 3 else 'True'
+    # if use_clf_str.lower() in ['false', '0', 'no']:
+    #     use_clf = False
+    #     likelihood_name = f'Planck_DESI_U3_CPL_EI_DSLP_noCLF'
+    # else:
+    #     use_clf = True
+    likelihood_name = f'Planck_DESI_U3_LCDM_{clf_type}_DSLP_GAMMA'
 
+    # --- Run BOBE with combined settings ---
     results = run_bobe(
+        # Likelihood settings
         likelihood=cobaya_input_file,
         likelihood_kwargs={
             'confidence_for_unbounded': 0.9999995,
@@ -31,42 +39,58 @@ def main():
             'noise_std': 0.0,
             'name': likelihood_name,
         },
+        
+        # General run settings
+        resume=True,
+        resume_file=f'./results/{likelihood_name}',
+        save_dir='./results',
         verbosity='INFO',
-        n_log_ei_iters=0,
-        n_cobaya_init=16,
-        n_sobol_init=64,
-        min_evals=750,
-        max_eval_budget=5000,
-        max_gp_size=1600,
-        fit_step=10, 
-        zeta_ei = 0.1,
+        seed=42,
+        acq = ['wipv'],
+        ei_goal = 1e-10,
+
+        n_cobaya_init=32,
+        n_sobol_init=32,
+        min_evals=700,
+        max_evals=1500,
+        max_gp_size=1000,
+        optimizer='optax',
+        
+        # Step settings
+        fit_step=5,
         wipv_batch_size=5,
         ns_step=5,
+                
+        # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=10000, 
+        num_hmc_samples=800,
         mc_points_size=512,
-        lengthscale_priors='DSLP', 
+        num_chains = 8,
+        thinning = 8,
+
+        # GP settings
+        gp_kwargs={'lengthscale_prior': 'DSLP', 'kernel_variance_prior': {'name': 'Gamma', 'concentration': 2.0, 'rate': 0.15},
+                                      'lengthscale_bounds': (1e-2, 5.), 'kernel_variance_bounds': (1e-4, 1e4)},
+
+        # # GP settings
+        # gp_kwargs={'lengthscale_prior': "DSLP", 'kernel_variance_prior': {'name': 'LogNormal', 'loc': 0.0, 'scale': 1.},
+        #            'lengthscale_bounds': (1e-2, 1.), 'kernel_variance_bounds': (1e-4, 1e4)},
+
+        # Classifier settings
         use_clf=True,
-        resume=False,
-        resume_file=f'{likelihood_name}',
-        clf_use_size=50,
-        clf_threshold=350,
-        gp_threshold=700,
-        clf_update_step=1,
         clf_type=clf_type,
+        
+        # Convergence and other settings
         minus_inf=-1e5,
         logz_threshold=0.01,
-        seed=1000,  # For reproducibility
-        do_final_ns=True,
+        do_final_ns=True, 
+        convergence_n_iters=1,
     )
-
     end = time.time()
 
-    # The rest of the script runs only on the master process
     if results is not None:
-        # Run BOBE with automatic timing collection
+        log = get_logger("main")
         manual_timing = end - start
-        log = get_logger("[main]")
 
         log.info("\n" + "="*60)
         log.info("RUN COMPLETED")
@@ -76,24 +100,19 @@ def main():
         # Extract components for backward compatibility
         gp = results['gp']
         samples = results['samples']
-        likelihood = results['likelihood']
         logz_dict = results.get('logz', {})
-        comprehensive_results = results['comprehensive']
-        timing_data = comprehensive_results['timing']
+        likelihood = results['likelihood']
+        results_manager = results['results_manager']
+
+        plt.style.use('default')
+        plt.rcParams['text.usetex'] = True
+        plt.rcParams['font.family'] = 'serif'
 
         # Create parameter samples plot
         log.info("Creating parameter samples plot...")
-        if hasattr(samples, 'samples'):  # GetDist samples
-            sample_array = samples.samples
-            weights_array = samples.weights
-        else:  # Dictionary format
-            sample_array = samples['x']
-            weights_array = samples['weights']
+        sample_array = samples['x']
+        weights_array = samples['weights']
 
-        plt.style.use('default')
-        # Enable LaTeX rendering for mathematical expressions
-        plt.rcParams['text.usetex'] = True 
-        plt.rcParams['font.family'] = 'serif'
 
         param_list_CPL = ['omch2','ombh2','H0','logA','ns','tau']
         plot_final_samples(
@@ -104,9 +123,10 @@ def main():
             param_labels=likelihood.param_labels,
             plot_params=param_list_CPL,
             output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/Union3_LCDMflat',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
+            output_dir='./results/',
+            reference_file='./cosmo_input/chains/union3_LCDM_pchord',
+            reference_ignore_rows=0.,
+            reference_label='Polychord',
             scatter_points=False
         )
 
@@ -118,9 +138,10 @@ def main():
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
             output_file=f'{likelihood.name}_full',
-            reference_file='./cosmo_input/chains/Union3_LCDMflat',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
+            output_dir='./results/',
+            reference_file='./cosmo_input/chains/union3_LCDM_pchord',
+            reference_ignore_rows=0.,
+            reference_label='Polychord',
             scatter_points=False
         )
 
@@ -129,6 +150,8 @@ def main():
         log.info("\n" + "="*60)
         log.info("DETAILED TIMING ANALYSIS")
         log.info("="*60)
+
+        timing_data = results_manager.get_timing_summary()
 
         log.info(f"Automatic timing: {timing_data['total_runtime']:.2f} seconds ({timing_data['total_runtime']/60:.2f} minutes)")
         log.info(f"Timing difference: {abs(manual_timing - timing_data['total_runtime']):.2f} seconds")
@@ -145,21 +168,24 @@ def main():
         log.info("-" * 40)
         total_measured = sum(t for t in timing_data['phase_times'].values() if t > 0)
         overhead = timing_data['total_runtime'] - total_measured
-        overhead_pct = (overhead / timing_data['total_runtime']) * 100
+        overhead_pct = (overhead / timing_data['total_runtime']) * 100 if timing_data['total_runtime'] > 0 else 0
 
         log.info(f"Total measured phases: {total_measured:.2f}s ({(total_measured/timing_data['total_runtime']*100):.1f}%)")
         log.info(f"Overhead/unmeasured: {overhead:.2f}s ({overhead_pct:.1f}%)")
 
         # Find dominant phase
-        max_phase = max(timing_data['phase_times'].items(), key=lambda x: x[1])
-        log.info(f"Dominant phase: {max_phase[0]} ({timing_data['percentages'][max_phase[0]]:.1f}%)")
+        if any(t > 0 for t in timing_data['phase_times'].values()):
+            max_phase = max(timing_data['phase_times'].items(), key=lambda x: x[1])
+            log.info(f"Dominant phase: {max_phase[0]} ({timing_data['percentages'][max_phase[0]]:.1f}%)")
+
+        sns.set_theme('notebook', 'ticks', palette='husl')
 
         # Print convergence info
         log.info("\n" + "="*60)
         log.info("CONVERGENCE ANALYSIS")
         log.info("="*60)
-        log.info(f"Converged: {comprehensive_results['converged']}")
-        log.info(f"Termination reason: {comprehensive_results['termination_reason']}")
+        log.info(f"Converged: {results_manager.converged}")
+        log.info(f"Termination reason: {results_manager.termination_reason}")
         log.info(f"Final GP size: {gp.train_x.shape[0]}")
 
         if logz_dict:
@@ -173,12 +199,12 @@ def main():
         log.info("="*60)
 
         # Initialize plotter
-        plotter = BOBESummaryPlotter(results['results_manager'])
+        plotter = BOBESummaryPlotter(results_manager)
 
         # Get GP and best loglike evolution data
-        gp_data = results['results_manager'].get_gp_data()
-        best_loglike_data = results['results_manager'].get_best_loglike_data()
-        acquisition_data = results['results_manager'].get_acquisition_data()
+        gp_data = results_manager.get_gp_data()
+        best_loglike_data = results_manager.get_best_loglike_data()
+        acquisition_data = results_manager.get_acquisition_data()
 
         # Create summary dashboard with timing data
         log.info("Creating summary dashboard...")
@@ -189,41 +215,6 @@ def main():
             timing_data=timing_data,
             save_path=f"{likelihood.name}_dashboard.pdf"
         )
-        # plt.show()
-
-        # Create individual timing plot
-        # log.info("Creating detailed timing plot...")
-        # fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
-        # plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
-        # ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
-        # plt.tight_layout()
-        # plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
-        # plt.show()
-
-        # # Create evidence evolution plot if available
-        # if comprehensive_results.get('logz_history'):
-        #     log.info("Creating evidence evolution plot...")
-        #     fig_evidence, ax_evidence = plt.subplots(1, 1, figsize=(10, 6))
-        #     plotter.plot_evidence_evolution(ax=ax_evidence)
-        #     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
-        #     plt.tight_layout()
-        #     plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
-        #     # plt.show()
-
-        # # Create acquisition function evolution plot
-        # log.info("Creating acquisition function evolution plot...")
-        # acquisition_data = results['results_manager'].get_acquisition_data()
-        # if acquisition_data and acquisition_data.get('iterations'):
-        #     fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
-        #     plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
-        #     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
-        #     plt.tight_layout()
-        #     plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
-        #     # plt.show()
-        # else:
-        #     log.info("No acquisition function data available for plotting.")
-
 
 if __name__ == "__main__":
-    # Run the analysis
     main()

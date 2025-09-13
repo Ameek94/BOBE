@@ -48,7 +48,7 @@ plt.rcParams['font.family'] = 'serif'
 def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=None, param_bounds=None,
                        reference_samples=None,
                        reference_file=None, reference_ignore_rows=0., reference_label='MCMC',
-                       scatter_points=False, markers=None, output_file='output'):
+                       scatter_points=False, markers=None, output_file='output', output_dir='./', **kwargs):
     """
     Plot the final samples from the Bayesian optimization process.
 
@@ -133,7 +133,7 @@ def plot_final_samples(gp, samples_dict, param_list, param_labels, plot_params=N
                 ax = g.subplots[j, i]
                 ax.scatter(points[:, i], points[:, j], alpha=0.5, color='forestgreen', s=5)
 
-    g.export(output_file + '_param_posteriors.pdf')
+    g.export(output_dir + output_file + '_param_posteriors.pdf')
 
 
 
@@ -399,7 +399,7 @@ class BOBESummaryPlotter:
         return self.plot_gp_lengthscales(gp_data=gp_data, ax=ax)
     
     def plot_best_loglike_evolution(self, best_loglike_data: Optional[Dict] = None,
-                                   ax: Optional[plt.Axes] = None) -> plt.Axes:
+                                   ax: Optional[plt.Axes] = None, scatter_improvements = False) -> plt.Axes:
         """
         Plot evolution of the best log-likelihood found so far.
         
@@ -433,12 +433,14 @@ class BOBESummaryPlotter:
                label='Best log-likelihood', alpha=0.8)
         
         # Mark improvements
-        improvements = np.diff(best_loglike) > 0
-        if np.any(improvements):
-            improve_iter = iterations[1:][improvements]
-            improve_vals = best_loglike[1:][improvements]
-            ax.scatter(improve_iter, improve_vals, color='red', s=30, 
-                      marker='o', alpha=0.6, label='Improvements')
+
+        if scatter_improvements:
+            improvements = np.diff(best_loglike) > 0
+            if np.any(improvements):
+                improve_iter = iterations[1:][improvements]
+                improve_vals = best_loglike[1:][improvements]
+                ax.scatter(improve_iter, improve_vals, color='red', s=10, 
+                      marker='o', alpha=0.5, label='Improvements')
         
         # Final value
         if len(best_loglike) > 0:
@@ -495,15 +497,14 @@ class BOBESummaryPlotter:
             func_iterations, func_values = iterations[mask], values[mask]
             
             # Transform values based on function type
-            if func_name == "WIPV":
-                func_values = np.log10(func_values)
-                label = "WIPV"
-            elif func_name in ["LogEI", "EI"]:
-                func_values = -func_values / np.log(10) # convert to log10 from log
-                label = func_name
+            if func_name in ["WIPV", "EI"]:
+                #plot log10 of values of EI and WIPV
+                func_values = np.log10(func_values + 1e-100) # avoid log(0)
             else:
-                label = func_name
-            
+                func_values = func_values / np.log(10) # convert to log10 from log for LogEI
+
+            label = func_name
+
             y_values.extend(func_values)
             
             # Plot with lines connecting points

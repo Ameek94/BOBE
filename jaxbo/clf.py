@@ -77,7 +77,7 @@ def train_nn_classifier(X, Y, settings = {}, init_params=None, **kwargs):
         settings.update({'hidden_dims': [32, 32]})
         settings.update({'batch_size': 64})
     else:
-        settings.update({'hidden_dims': [64, 64]})
+        settings.update({'hidden_dims': [32, 32]})
         settings.update({'batch_size': 128})
     model = MLPClassifier(**settings)
     
@@ -249,7 +249,7 @@ def train_with_restarts(
     **train_kwargs
 ) -> Tuple[Dict, Dict]:
     """
-    Train model with multiple restarts using consistent train/val split.
+    Train model with multiple restarts using the entire dataset.
     
     Args:
         train_fn: Training function that returns (params, metrics)
@@ -257,16 +257,11 @@ def train_with_restarts(
         y: (N,) labels
         n_restarts: number of random restarts
         seed_offset: offset for training seed generation
-        split_seed: fixed seed for train/val split consistency
+        split_seed: fixed seed for train/val split consistency (unused now)
         init_params: initial parameters for first restart
         **train_kwargs: passed to train_fn
     """
-    # Create consistent train/val split
-    (x_train, y_train), (x_val, y_val) = create_train_val_split(x, y, 
-                                                               train_kwargs.get('val_frac', 0.2), 
-                                                               split_seed)
-    
-    best_val_loss = jnp.inf
+    best_train_loss = jnp.inf
     best_params = None
     best_metrics = {}
 
@@ -288,37 +283,36 @@ def train_with_restarts(
         elif i > 0:
             log.debug(f"[Restart {i+1}/{n_restarts}] Using random initialization")
 
-        # Pass the pre-split data to avoid re-splitting
+        # Use entire dataset for training
         params, metrics = train_fn(
-            x_train=x_train, y_train=y_train,
-            x_val=x_val, y_val=y_val,
+            x_train=x, y_train=y,
             seed=current_seed,
             init_params=restart_init_params,  # Pass init_params to training function
             **train_kwargs
         )
 
-        val_loss = float(metrics['val_loss'])
+        train_loss = float(metrics['train_loss'])
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if train_loss < best_train_loss:
+            best_train_loss = train_loss
             best_params = params
             best_metrics = metrics
-            log.debug(f"[Restart {i+1}/{n_restarts}] New best val_loss: {val_loss:.4e}")
+            log.debug(f"[Restart {i+1}/{n_restarts}] New best train_loss: {train_loss:.4e}")
 
-    log.debug(f"[Training] Best model selected with val_loss = {best_val_loss:.4e}")
+    log.debug(f"[Training] Best model selected with train_loss = {best_train_loss:.4e}")
     return best_params, best_metrics
 
 
 # Neural Network Classifier
 class MLPClassifier(nn.Module):
-    hidden_dims: list = (64, 64)
+    hidden_dims: list = (32, 32)
     dropout_rate: float = 0.1
     lr: float = 1e-3
     weight_decay: float = 1e-4
     n_epochs: int = 1000
     batch_size: int = 128
     early_stop_patience: int = 50
-    n_restarts: int = 4
+    n_restarts: int = 2
     val_frac: float = 0.2
     seed_offset: int = 0
     split_seed: int = 42
@@ -349,12 +343,11 @@ class MLPClassifier(nn.Module):
 def train_nn(
     model: MLPClassifier,
     x_train: jnp.ndarray, y_train: jnp.ndarray,
-    x_val: jnp.ndarray, y_val: jnp.ndarray,
     seed=0,
     init_params=None,  # Add this parameter
     **kwargs
 ):
-    """Simplified NN training with pre-split data"""
+    """Simplified NN training using entire dataset"""
     N, d = x_train.shape
     
     # Handle initialization
@@ -373,18 +366,11 @@ def train_nn(
         return optax.sigmoid_binary_cross_entropy(logits.squeeze(-1), batch_y).mean()
 
     @jax.jit
-    def compute_val_loss(params):
-        logits = model.apply(params, x_val, train=False)
-        return optax.sigmoid_binary_cross_entropy(logits.squeeze(-1), y_val).mean()
-
-    @jax.jit
     def train_step(params, opt_state, batch_x, batch_y, rng):
         grads = jax.grad(loss_fn)(params, batch_x, batch_y, rng)
         updates, opt_state = optimizer.update(grads, opt_state, params)
         return optax.apply_updates(params, updates), opt_state
 
-    best_params = params
-    best_val_loss = jnp.inf
     x_np, y_np = np.array(x_train), np.array(y_train)
     steps = max(1, x_train.shape[0] // model.batch_size)
 
@@ -399,48 +385,36 @@ def train_nn(
             by = jnp.array(y_np[idx])
             key, subkey = jax.random.split(key)
             params, opt_state = train_step(params, opt_state, bx, by, subkey)
-            
-        val_loss = compute_val_loss(params)
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_params = params
-            patience = model.early_stop_patience
-        else:
-            patience -= 1
-            if patience <= 0:
-                log.debug(f"[NN] early stopping at epoch {epoch}")
-                break
 
+    # Compute final training loss
+    final_train_loss = loss_fn(params, x_train, y_train, key)
+    
     metrics = {
-        'train_loss': f"{float(loss_fn(best_params, x_train, y_train, key)):.2e}",
-        'val_loss': f"{float(best_val_loss):.2e}",
+        'train_loss': f"{float(final_train_loss):.2e}",
         'epochs': epoch + 1,
     }
 
-    return best_params, metrics
+    return params, metrics
 
 def train_nn_multiple_restarts(model: MLPClassifier, x: jnp.ndarray, y: jnp.ndarray, **kwargs):
     """Wrapper for NN training with restarts"""
-    train_kwargs = {
-        'val_frac': model.val_frac,
-    }
     return train_with_restarts(partial(train_nn, model), x, y, 
                                n_restarts=model.n_restarts, 
                                seed_offset=model.seed_offset, 
-                               split_seed=model.split_seed, **train_kwargs)
+                               split_seed=model.split_seed, **kwargs)
 
 # Ellipsoid Classifier with center at best fit point
 class EllipsoidClassifier(nn.Module):
     d: int
     mu: jnp.ndarray
-    init_scale: float = 1.0
+    init_scale: float = 0.1
     lr: float = 1e-2
     weight_decay: float = 1e-4
-    n_epochs: int = 1000
+    n_epochs: int = 500
     batch_size: int = 64
     patience: int = 50
     n_restarts: int = 2
-    val_frac: float = 0.2
+    val_frac: float = 0.1
     seed_offset: int = 0
     split_seed: int = 42
 
@@ -484,12 +458,11 @@ class EllipsoidClassifier(nn.Module):
 def train_ellipsoid(
     model: EllipsoidClassifier,
     x_train: jnp.ndarray, y_train: jnp.ndarray,
-    x_val: jnp.ndarray, y_val: jnp.ndarray,
     seed: int = 0,
     init_params=None,  # Add this parameter
     **kwargs
 ):
-    """Simplified ellipsoid training with pre-split data"""
+    """Simplified ellipsoid training using entire dataset"""
     # Handle initialization
     if init_params is not None:
         params = init_params
@@ -512,11 +485,8 @@ def train_ellipsoid(
         updates, opt_state = optimizer.update(grads, opt_state, params)
         return optax.apply_updates(params, updates), opt_state
 
-    best_params = params
-    best_val_loss = jnp.inf
     x_np, y_np = np.array(x_train), np.array(y_train)
     steps = max(1, x_train.shape[0] // model.batch_size)
-    patience_counter = 0
     
     rng = np.random.RandomState(seed)
 
@@ -528,33 +498,19 @@ def train_ellipsoid(
             by = jnp.array(y_np[idx])
             params, opt_state = train_step(params, opt_state, bx, by)
 
-        val_loss = loss_fn(params, x_val, y_val)
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_params = params
-            patience_counter = 0
-        else:
-            patience_counter += 1
-            if patience_counter > model.patience:
-                log.debug(f"Early stopping at epoch {epoch}")
-                break
-
-    train_loss = loss_fn(best_params, x_train, y_train)
+    # Compute final training loss
+    final_train_loss = loss_fn(params, x_train, y_train)
+    
     metrics = {
-        'train_loss': f"{float(train_loss):.2e}",
-        'val_loss': f"{float(best_val_loss):.2e}",
+        'train_loss': f"{float(final_train_loss):.2e}",
         'epochs': epoch + 1,
     }
 
-    return best_params, metrics
+    return params, metrics
 
 def train_ellipsoid_multiple_restarts(model: EllipsoidClassifier, x: jnp.ndarray, y: jnp.ndarray, **kwargs):
     """Wrapper for ellipsoid training with restarts"""
-    train_kwargs = {
-        'val_frac': model.val_frac,
-    }
     return train_with_restarts(partial(train_ellipsoid, model), x, y, 
                                n_restarts=model.n_restarts, 
                                seed_offset=model.seed_offset, 
-                               split_seed=model.split_seed, **train_kwargs)
+                               split_seed=model.split_seed, **kwargs)

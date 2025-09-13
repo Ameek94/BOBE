@@ -3,6 +3,7 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+from jax.scipy.linalg import cho_solve, solve_triangular
 import copy
 import numpyro
 from numpyro.infer import MCMC, NUTS, SA, AIES
@@ -16,6 +17,7 @@ from .clf import (
 )
 from .utils.seed_utils import get_new_jax_key, get_numpy_rng
 from .utils.logging_utils import get_logger
+from .utils.core_utils import get_threshold_for_nsigma
 log = get_logger("clf_gp")
 
 
@@ -26,10 +28,12 @@ class GPwithClassifier(GP):
                  probability_threshold=0.5, minus_inf=-1e5,
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
-                 optimizer="optax", optimizer_kwargs={'lr': 5e-3, 'name': 'adam'},
-                 kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.01, 10],
+                 optimizer="optax", optimizer_options={'lr': 5e-3, 'name': 'adam'},
+                 kernel_variance_bounds=[1e-4, 1e4], lengthscale_bounds=[0.01, 10],
                  tausq=None, tausq_bounds=[1e-4, 1e4],
-                 kernel_variance_prior=None, lengthscale_prior=None, lengthscales=None, kernel_variance=1.0,
+                 kernel_variance_prior=None, lengthscale_prior=None, 
+                 lengthscales=None, kernel_variance=1.0,
+                 param_names=None,
                  train_clf_on_init=True,  # Prevent retraining on copy
                  ):
         """
@@ -99,7 +103,7 @@ class GPwithClassifier(GP):
             'noise': noise,
             'kernel': kernel,
             'optimizer': optimizer,
-            'optimizer_kwargs': optimizer_kwargs,
+            'optimizer_options': optimizer_options,
             'kernel_variance_bounds': kernel_variance_bounds,
             'lengthscale_bounds': lengthscale_bounds,
             'lengthscales': lengthscales,
@@ -227,16 +231,30 @@ class GPwithClassifier(GP):
         self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
         log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
 
-        for i in range(new_pts_to_add.shape[0]):
-            val = new_vals_to_add[i]
-            x = new_pts_to_add[i]
-            if val > (self.train_y_clf.max() - self.gp_threshold):
-                # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
-                super().update(x, val,refit=False)
-            else:
-                log.info("Point not within GP threshold, not updating GP.")
+        # for i in range(new_pts_to_add.shape[0]):
+        #     val = new_vals_to_add[i]
+        #     x = new_pts_to_add[i]
+        #     if val > (self.train_y_clf.max() - self.gp_threshold):
+        #         # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
+        #         super().update(x, val,refit=False)
+        #     else:
+        #         log.info("Point not within GP threshold, not updating GP.")
+
+        mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
+        self.train_x = self.train_x_clf[mask_gp]
+        self.train_y = self.train_y_clf[mask_gp]
+        self.train_y = self.train_y.reshape(-1, 1)
+        self.y_std = jnp.std(self.train_y) if self.train_y.shape[0] > 1 else 1.0
+        self.y_mean = jnp.mean(self.train_y)
+        self.train_y = (self.train_y - self.y_mean) / self.y_std
+        print(f"Shapes after filtering: train_x_clf: {self.train_x_clf.shape}, train_y_clf: {self.train_y_clf.shape}, train_y (GP): {self.train_y.shape}")
+
         if refit:
-            super().fit(maxiter=maxiter, n_restarts=n_restarts) # Refit GP on existing data?
+            super().fit(maxiter=maxiter, n_restarts=n_restarts)
+        else:
+            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+            self.cholesky = jnp.linalg.cholesky(K)
+            self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
         # Check if classifier data size has reached the threshold
         if not self.use_clf:
@@ -254,13 +272,18 @@ class GPwithClassifier(GP):
         """
         return super().kernel(x1,x2,lengthscales,kernel_variance,noise,include_noise=include_noise)
 
-    def get_random_point(self,rng=None):
+    def get_random_point(self,rng=None, nstd = None):
 
         rng = rng if rng is not None else get_numpy_rng()
 
         if self.use_clf:
-            pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold
-    
+            if nstd is not None:
+                threshold = get_threshold_for_nsigma(nstd,self.ndim)
+            else:
+                threshold = self.clf_threshold
+
+            pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - threshold
+
             # Sample a random point from the filtered points
             valid_indices = jnp.where(pts_idx)[0]
     
@@ -348,7 +371,7 @@ class GPwithClassifier(GP):
             noise=state['noise'],
             kernel=state['kernel_name'],
             optimizer=state['optimizer_method'],
-            optimizer_kwargs=state['optimizer_kwargs'],
+            optimizer_options=state['optimizer_options'],
             kernel_variance_bounds=state['kernel_variance_bounds'],
             lengthscale_bounds=state['lengthscale_bounds'],
             lengthscales=state['lengthscales'],
@@ -357,7 +380,7 @@ class GPwithClassifier(GP):
             lengthscale_prior=state.get('lengthscale_prior_spec'),
             tausq=state.get('tausq', 1.0),
             tausq_bounds=state.get('tausq_bounds', [-4, 4]),
-            train_clf_on_init=False,
+            train_clf_on_init=state.get('train_clf_on_init', True),
         )
         
         # # Restore computed state if available
@@ -455,10 +478,10 @@ class GPwithClassifier(GP):
 
         rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1.5,5.)  # 6
+        high_temp = rng_mcmc.uniform(2., 4.)  # 6
         # high_temp = rng_mcmc.uniform(1.,2.) ** 2
-        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        temp=1. # For now always use temp=1
+        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        # temp=1. # For now always use temp=1
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
@@ -475,7 +498,7 @@ class GPwithClassifier(GP):
         @jax.jit
         def run_single_chain(rng_key,init_x):
                 init_strategy = init_to_value(values={'x': init_x})
-                kernel = NUTS(model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
+                kernel = NUTS(model, dense_mass=True, max_tree_depth=6, init_strategy=init_strategy)
                 mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
                         num_chains=1, progress_bar=False, thinning=thinning)
                 mcmc.run(rng_key)

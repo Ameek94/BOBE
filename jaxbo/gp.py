@@ -147,9 +147,9 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
 
 class GP:
     
-    def __init__(self,train_x=None,train_y=None,ndim=None,noise=1e-6,kernel="rbf",optimizer="optax",optimizer_kwargs={'lr': 1e-3, 'name': 'adam'},
+    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
                  kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,10],lengthscales=None,kernel_variance=None,
-                 kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4]):
+                 kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], param_names: List[str] = None):
         """
         Initializes the Gaussian Process model.
 
@@ -165,7 +165,7 @@ class GP:
             Kernel to use, either "rbf" or "matern". Defaults to "rbf".
         optimizer : str, optional
             Optimizer to use for hyperparameter tuning. Defaults to "optax".
-        optimizer_kwargs : dict, optional
+        optimizer_options : dict, optional
             Keyword arguments for the optimizer. Defaults to {'lr': 1e-3, 'name': 'adam'}.
         kernel_variance_bounds : list, optional
             Bounds for the kernel variance (in log10 space). Defaults to [-4, 8].
@@ -192,16 +192,9 @@ class GP:
             Bounds for the tausq parameter (in log10 space). Only used when lengthscale_prior='SAAS'.
             Defaults to [-4, 4].
         """
-
-        if train_x is None or train_y is None:
-            self.train_x = None
-            self.train_y = None
-            self.cholesky = None
-            self.alphas = None
-            self.ndim = ndim
-        else:
-            # Setup and validate training data
-            self._setup_training_data(train_x, train_y)
+        # Setup and validate training data
+        self._setup_training_data(train_x, train_y)
+        # print(f"shapes train_x: {self.train_x.shape}, train_y: {self.train_y.shape}")
 
         # Setup kernel and initial hyperparameters
         self.kernel_name = kernel if kernel == "rbf" else "matern"
@@ -209,7 +202,11 @@ class GP:
         self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
         self.kernel_variance = kernel_variance if kernel_variance is not None else 1.0
         self.noise = noise
-    
+        
+        # Compute initial kernel matrices
+        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+        self.cholesky = jnp.linalg.cholesky(K)
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
         # Setup optimizer
         self.optimizer_method = optimizer
@@ -217,7 +214,7 @@ class GP:
             self.mll_optimize = optimize_scipy
         else:
             self.mll_optimize = optimize_optax
-        self.optimizer_kwargs = optimizer_kwargs
+        self.optimizer_options = optimizer_options
     
 
         # Store bounds
@@ -257,11 +254,6 @@ class GP:
         self.train_x = jnp.array(train_x)
         self.train_y = (train_y - self.y_mean) / self.y_std
         log.debug(f"GP training size = {self.train_x.shape[0]}")
-        # Compute initial kernel matrices
-        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-        self.cholesky = jnp.linalg.cholesky(K)
-        self.alphas = cho_solve((self.cholesky, True), self.train_y)
-
 
     def _setup_kernel_variance_prior(self, kernel_variance_prior):
         """Setup kernel variance prior and determine if it should be fixed."""
@@ -389,7 +381,7 @@ class GP:
             init_params_u = np.vstack([init_params_u, addn_init_params])
         x0 = jnp.clip(init_params_u, 0.0, 1.0)
 
-        optimizer_kwargs = self.optimizer_kwargs.copy()
+        optimizer_options = self.optimizer_options.copy()
 
         best_params, best_f = self.mll_optimize(
             fun=self.neg_mll,
@@ -398,7 +390,7 @@ class GP:
             x0=x0,
             maxiter=maxiter,
             n_restarts=n_restarts,
-            optimizer_kwargs=optimizer_kwargs
+            optimizer_options=optimizer_options
         )
 
         # Update hyperparameters
@@ -513,9 +505,17 @@ class GP:
         if refit:
             self.fit(maxiter=maxiter,n_restarts=n_restarts)
         else:
-            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-            self.cholesky = jnp.linalg.cholesky(K)
-            self.alphas = cho_solve((self.cholesky, True), self.train_y)
+            self.recompute_cholesky()
+        # print(f"shapes train_x: {self.train_x.shape}, train_y: {self.train_y.shape}")
+
+
+    def recompute_cholesky(self):
+        """
+        Recomputes the Cholesky decomposition and alphas. Useful if hyperparameters are changed manually.
+        """
+        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+        self.cholesky = jnp.linalg.cholesky(K)
+        self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
     def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
@@ -540,7 +540,7 @@ class GP:
         var = k22 - jnp.sum(vv*vv,axis=0) 
         return var * self.y_std**2 # return to physical scale for better interpretability
 
-    def get_random_point(self,rng=None):
+    def get_random_point(self,rng=None,nstd=None):
         """
         Returns a random point in the unit cube.
         """
@@ -651,7 +651,7 @@ class GP:
             'kernel_variance_prior_spec': self.kernel_variance_prior_spec,
             'fixed_kernel_variance': self.fixed_kernel_variance,
             'optimizer_method': self.optimizer_method,
-            'optimizer_kwargs': self.optimizer_kwargs,
+            'optimizer_options': self.optimizer_options,
             
             # Bounds
             'lengthscale_bounds': self.lengthscale_bounds,
@@ -693,7 +693,7 @@ class GP:
             noise=state['noise'],
             kernel=state['kernel_name'],
             optimizer=state['optimizer_method'],
-            optimizer_kwargs=state['optimizer_kwargs'],
+            optimizer_options=state['optimizer_options'],
             lengthscales=state['lengthscales'],
             kernel_variance=state['kernel_variance'],
             lengthscale_bounds=state['lengthscale_bounds'],
