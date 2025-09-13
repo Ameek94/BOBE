@@ -8,21 +8,23 @@ from typing import Union, Callable, Dict, Any, Optional
 def run_bobe(likelihood: Union[Callable, str], 
              likelihood_kwargs: Dict[str, Any] = {},
              gp_kwargs: Dict[str, Any] = {},
+             acq = 'wipv',
              use_clf: bool = False,
              clf_type: str = 'svm',
-             clf_nsigma_threshold: float = 25.0,
+             clf_nsigma_threshold: float = 20,
              verbosity: str ='INFO', 
              log_file: Optional[str] = None, 
              min_evals: int = 100,
              max_evals: int = 1000,
              max_gp_size: int = 1200,
-             n_log_ei_iters: int = 0,
+             optimizer='scipy',
              fit_step: int = 5,
              ns_step: int = 5,
              wipv_batch_size: int = 5,
              zeta_ei: float = 0.1,
              resume: bool = False,
              resume_file: Optional[str] = None,
+             convergence_n_iters=1,
              **sampler_kwargs):
     """
     High-level wrapper to run the BOBE sampler.
@@ -73,26 +75,15 @@ def run_bobe(likelihood: Union[Callable, str],
         print(f"Rank {pool.rank} running BOBE with likelihood: {My_Likelihood.name}")
         # here should setup default arguments for all necessary parameters
 
-        # Handle lengthscale_priors specially to validate the choice
-        lengthscale_priors = gp_kwargs.get('lengthscale_priors', 'DSLP')
-        valid_priors = ['DSLP', 'SAAS', 'uniform']
-        if lengthscale_priors.upper() not in valid_priors:
-            print(f"Warning: Invalid lengthscale_priors '{lengthscale_priors}'. Defaulting to 'DSLP'.")
-            lengthscale_priors = 'DSLP'
-        
-        # Pass lengthscale_priors as a top-level parameter (still needed for GP type selection)
-        sampler_kwargs['lengthscale_priors'] = lengthscale_priors
-        
-        # Store the full gp_kwargs for passing to GP constructors
-        sampler_kwargs['gp_kwargs'] = gp_kwargs
-
         # Master creates the sampler and runs it
         sampler = BOBE(
             loglikelihood=My_Likelihood,
+            gp_kwargs=gp_kwargs,
             pool=pool,
             min_evals=min_evals,
             max_evals=max_evals,
             max_gp_size=max_gp_size,
+            optimizer=optimizer,
             fit_step=fit_step,
             ns_step=ns_step,
             wipv_batch_size=wipv_batch_size,
@@ -102,9 +93,10 @@ def run_bobe(likelihood: Union[Callable, str],
             use_clf=use_clf,
             clf_type=clf_type,
             clf_nsigma_threshold=clf_nsigma_threshold,
+            convergence_n_iters=convergence_n_iters,
             **sampler_kwargs
         )
-        results = sampler.run(n_log_ei_iters=n_log_ei_iters)
+        results = sampler.run(acq)
         pool.close()
         return results
     else:

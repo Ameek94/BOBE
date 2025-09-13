@@ -47,29 +47,42 @@ def main():
         resume=True,
         resume_file=f'{likelihood_name}',
         verbosity='INFO',
-        n_log_ei_iters=n_log_ei_iters,
-        n_cobaya_init=16,
+        n_cobaya_init=4,
         n_sobol_init=32,
-        min_evals=1000,
-        max_evals=3000,
-        max_gp_size=1600,
+        min_evals=750,
+        max_evals=2500,
+        max_gp_size=1250,
+        
+        # Step settings
         fit_step=5,
-        zeta_ei=0.1,
         wipv_batch_size=5,
         ns_step=5,
+        
+        # Acquisition function settings
+        zeta_ei=0.1,
+        
+        # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=10000, 
+        num_hmc_samples=6000,
         mc_points_size=512,
-        gp_kwargs={'lengthscale_prior': ls_priors,}, 
+        
+        # GP settings
+        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None},
+
+        # resume
+        resume=False,
+        resume_file=f'{likelihood_name}',
+        save=True,
+        save_dir='./results/',
+        
+        # Classifier settings
         use_clf=True,
-        clf_use_size=10,
-        clf_update_step=1,  # SVM update step
-        clf_type=clf_type,  # Using SVM for classification
+        clf_type=clf_type,
+        
+        # Convergence and other settings
         minus_inf=-1e5,
         logz_threshold=0.01,
-        seed=10000,  # For reproducibility
-        do_final_ns=True,
-        convergence_n_iters=1,
+        do_final_ns=True, 
     )
 
     end = time.time()

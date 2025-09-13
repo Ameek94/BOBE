@@ -17,6 +17,7 @@ from .clf import (
 )
 from .utils.seed_utils import get_new_jax_key, get_numpy_rng
 from .utils.logging_utils import get_logger
+from .utils.core_utils import get_threshold_for_nsigma
 log = get_logger("clf_gp")
 
 
@@ -27,10 +28,12 @@ class GPwithClassifier(GP):
                  probability_threshold=0.5, minus_inf=-1e5,
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
-                 optimizer="optax", optimizer_kwargs={'lr': 5e-3, 'name': 'adam'},
-                 kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.01, 10],
+                 optimizer="optax", optimizer_options={'lr': 5e-3, 'name': 'adam'},
+                 kernel_variance_bounds=[1e-4, 1e4], lengthscale_bounds=[0.01, 10],
                  tausq=None, tausq_bounds=[1e-4, 1e4],
-                 kernel_variance_prior=None, lengthscale_prior=None, lengthscales=None, kernel_variance=1.0,
+                 kernel_variance_prior=None, lengthscale_prior=None, 
+                 lengthscales=None, kernel_variance=1.0,
+                 param_names=None,
                  train_clf_on_init=True,  # Prevent retraining on copy
                  ):
         """
@@ -100,7 +103,7 @@ class GPwithClassifier(GP):
             'noise': noise,
             'kernel': kernel,
             'optimizer': optimizer,
-            'optimizer_kwargs': optimizer_kwargs,
+            'optimizer_options': optimizer_options,
             'kernel_variance_bounds': kernel_variance_bounds,
             'lengthscale_bounds': lengthscale_bounds,
             'lengthscales': lengthscales,
@@ -269,13 +272,18 @@ class GPwithClassifier(GP):
         """
         return super().kernel(x1,x2,lengthscales,kernel_variance,noise,include_noise=include_noise)
 
-    def get_random_point(self,rng=None):
+    def get_random_point(self,rng=None, nstd = None):
 
         rng = rng if rng is not None else get_numpy_rng()
 
         if self.use_clf:
-            pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - self.clf_threshold
-    
+            if nstd is not None:
+                threshold = get_threshold_for_nsigma(nstd,self.ndim)
+            else:
+                threshold = self.clf_threshold
+
+            pts_idx = self.train_y_clf.flatten() > self.train_y_clf.max() - threshold
+
             # Sample a random point from the filtered points
             valid_indices = jnp.where(pts_idx)[0]
     
@@ -363,7 +371,7 @@ class GPwithClassifier(GP):
             noise=state['noise'],
             kernel=state['kernel_name'],
             optimizer=state['optimizer_method'],
-            optimizer_kwargs=state['optimizer_kwargs'],
+            optimizer_options=state['optimizer_options'],
             kernel_variance_bounds=state['kernel_variance_bounds'],
             lengthscale_bounds=state['lengthscale_bounds'],
             lengthscales=state['lengthscales'],
@@ -470,7 +478,7 @@ class GPwithClassifier(GP):
 
         rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1.,4.)  # 6
+        high_temp = rng_mcmc.uniform(2., 4.)  # 6
         # high_temp = rng_mcmc.uniform(1.,2.) ** 2
         temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         # temp=1. # For now always use temp=1
@@ -490,7 +498,7 @@ class GPwithClassifier(GP):
         @jax.jit
         def run_single_chain(rng_key,init_x):
                 init_strategy = init_to_value(values={'x': init_x})
-                kernel = NUTS(model, dense_mass=False, max_tree_depth=5, init_strategy=init_strategy)
+                kernel = NUTS(model, dense_mass=True, max_tree_depth=6, init_strategy=init_strategy)
                 mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
                         num_chains=1, progress_bar=False, thinning=thinning)
                 mcmc.run(rng_key)

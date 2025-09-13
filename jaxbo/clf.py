@@ -407,10 +407,10 @@ class EllipsoidClassifier(nn.Module):
     init_scale: float = 0.1
     lr: float = 1e-2
     weight_decay: float = 1e-4
-    n_epochs: int = 1000
+    n_epochs: int = 500
     batch_size: int = 64
-    patience: int = 100
-    n_restarts: int = 4
+    patience: int = 50
+    n_restarts: int = 2
     val_frac: float = 0.1
     seed_offset: int = 0
     split_seed: int = 42
