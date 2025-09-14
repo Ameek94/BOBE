@@ -246,6 +246,10 @@ class BOBE:
                         best_loglike_idx = self.results_manager.best_loglike_values.index(self.best_f)
                         self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_loglike_idx]
                         log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
+                    if self.results_manager.converged:
+                        self.prev_converged = True
+                        self.convergence_counter = 1
+                        log.info(" Previous run had converged.")
                 else:
                     self.start_iteration = 0
                     log.info("Starting fresh optimization")
@@ -329,11 +333,11 @@ class BOBE:
         Update the GP with new points and values, and track hyperparameters.
         """
         self.results_manager.start_timing('GP Training')
-        if self.gp.train_x.shape[0] < 250:
+        if self.gp.train_x.shape[0] < 200:
             # Override refit for small training sets
             refit = True
             maxiter = 1000
-            n_restarts = 10
+            n_restarts = 8
         else:
             n_restarts = 4
             maxiter = 500
@@ -455,7 +459,6 @@ class BOBE:
         Run the optimization loop for EI/LogEI acquisition functions.
         """
         current_evals = self.gp.npoints
-        self.convergence_counter = 0  # Track successive convergence iterations
         log.info(f"Starting iteration {ii}")
         converged=False
 
@@ -551,7 +554,6 @@ class BOBE:
             method=self.mc_points_method,
         )
         self.results_manager.end_timing('MCMC Sampling')
-        self.convergence_counter = 0  # Track successive convergence iterations (should get from results manager if resuming)
         self.ns_samples = None
 
         while not self.converged:
