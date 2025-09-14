@@ -57,7 +57,7 @@ class BaseLikelihood:
 
         log.info(f"Initialized {self.name} with {self.ndim} params")
 
-        if self.pool.is_master():
+        if self.pool.is_master:
             log.info(f"Param list: {self.param_list}")
             log.info(f"Param lower bounds: {self.param_bounds[0]}")
             log.info(f"Param upper bounds: {self.param_bounds[1]}")
@@ -80,6 +80,7 @@ class BaseLikelihood:
         """
         points = np.atleast_2d(X)
         if points.shape[1] != self.ndim:
+            print(f"Input shape: {points.shape}, ndim: {self.ndim}")
             raise ValueError(f"Input shape {points.shape} does not match ndim {self.ndim}")
 
         # In a serial run, it evaluates all points.
@@ -99,9 +100,9 @@ class BaseLikelihood:
         # The master process calls this method. It then calls pool.run_map(self, sobol_points)
         # to get the values, which works in both modes. Initial points are always generated on the master when going through run.py.
         
-        if self.pool.is_master():
+        if self.pool.is_master:
              log.info(f"Evaluating Likelihood at initial points")
-             vals = self.pool.run_map(self.__call__, sobol_points)
+             vals = self.pool.run_map_objective(self.__call__, sobol_points)
         else:
             # Workers don't generate initial points
             vals = np.empty((n_sobol_init, 1))
@@ -171,7 +172,7 @@ class CobayaLikelihood(BaseLikelihood):
     def get_initial_points(self, n_cobaya_init=4, n_sobol_init=16, rng=None):
         # Can do further parallelization here by getting valid points from the pool.
         points, logpost = [], []
-        if self.pool.is_master():
+        if self.pool.is_master:
             for _ in range(n_cobaya_init):
                 pt, res = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False,
                                                             logposterior_as_dict=True, random_state=rng)

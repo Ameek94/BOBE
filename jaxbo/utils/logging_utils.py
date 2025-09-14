@@ -4,7 +4,19 @@ import sys
 import logging
 from logging.handlers import RotatingFileHandler
 import os
-from jaxbo.mpi import is_mpi, get_mpi_rank, is_main_process
+
+# ⭐ 1. Add MPI awareness at the top of the module.
+# This block will determine the process rank, defaulting to 0 for serial runs.
+try:
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    is_mpi = size > 1
+except ImportError:
+    rank = 0
+    size = 1
+    is_mpi = False
 
 class LevelFilter(logging.Filter):
     """Filter to allow specific log levels"""
@@ -40,7 +52,7 @@ def setup_logging(verbosity='INFO', log_file=None):
     base_level = verbosity_levels.get(verbosity.upper(), logging.INFO)
     
     # Add rank to the log format for clarity in files
-    log_format = f'[{get_mpi_rank()}: %(name)s] %(levelname)s: %(message)s' # %(asctime)s
+    log_format = f'[{rank}: %(name)s] %(levelname)s: %(message)s' # %(asctime)s 
     formatter = logging.Formatter(log_format)
 
     root_logger = logging.getLogger()
@@ -50,7 +62,7 @@ def setup_logging(verbosity='INFO', log_file=None):
     handlers = []
     
     # Only the master process should log to stdout/stderr
-    if is_main_process():
+    if rank == 0:
         # Stdout handler for INFO and DEBUG
         stdout_handler = logging.StreamHandler(sys.stdout)
         stdout_handler.setFormatter(formatter)
@@ -73,7 +85,7 @@ def setup_logging(verbosity='INFO', log_file=None):
         if is_mpi:
             # Create rank-specific log files, e.g., 'my_run_master.log', 'my_run_rank_1.log'
             base, ext = os.path.splitext(log_file)
-            rank_str = "master" if is_main_process() else f"rank_{get_mpi_rank()}"
+            rank_str = "master" if rank == 0 else f"rank_{rank}"
             final_log_file = f"{base}_{rank_str}{ext}"
         else:
             final_log_file = log_file

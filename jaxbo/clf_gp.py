@@ -162,10 +162,6 @@ class GPwithClassifier(GP):
         log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
         log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
 
-    def fit(self, maxiter=300, n_restarts=4):
-        """Fits the GP hyperparameters."""
-        super().fit(maxiter=maxiter, n_restarts=n_restarts)
-
     def predict_mean_single(self,x):
         gp_mean = super().predict_mean_single(x)
         if not self.use_clf or self._clf_predict_func is None:

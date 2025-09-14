@@ -347,72 +347,41 @@ class GP:
         
         return -mll
 
-    def fit(self, maxiter=500, n_restarts=4):
-        """ 
-        Fits the GP using maximum likelihood hyperparameters with the chosen optimizer.
-
-        Arguments
-        ---------
-        maxiter: int
-            The maximum number of iterations for the optimizer. Default is 200.
-        n_restarts: int
-            The number of restarts for the optimizer. Default is 4.
+    def fit(self, x0: np.ndarray, maxiter: int = 500) -> dict:
         """
-        # Prepare initial parameters based on current hyperparameters
-        init_params = jnp.array(self.lengthscales)
-        if not self.fixed_kernel_variance:
-            init_params = jnp.concatenate([init_params, jnp.array([self.kernel_variance])])
-        if 'tausq' in self.param_names:
-            init_params = jnp.concatenate([init_params, jnp.array([self.tausq])])
-            
-        if self.fixed_kernel_variance and 'tausq' in self.param_names:
-            log.info(f"Fitting GP with SAAS priors and fixed kernel_variance: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), tausq = {self.tausq}")
-        elif self.fixed_kernel_variance:
-            log.info(f"Fitting GP with fixed kernel_variance: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed)")
-        elif 'tausq' in self.param_names:
-            log.info(f"Fitting GP with SAAS priors: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}")
-        else:
-            log.info(f"Fitting GP with initial params lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}")
-
-        init_params = jnp.log10(init_params)
-        init_params_u = scale_to_unit(init_params, self.hyperparam_bounds)
-        if n_restarts > 1:
-            addn_init_params = init_params_u + 0.25 * np.random.normal(size=(n_restarts-1, init_params.shape[0]))
-            init_params_u = np.vstack([init_params_u, addn_init_params])
-        x0 = jnp.clip(init_params_u, 0.0, 1.0)
+        Performs a serial fit for a given batch of starting points (x0).
+        This method is called by each MPI process on its assigned chunk.
+        """
 
         optimizer_options = self.optimizer_options.copy()
 
-        best_params, best_f = self.mll_optimize(
+        best_params_log10, best_loss = self.mll_optimize(
             fun=self.neg_mll,
             num_params=self.num_hyperparams,
             bounds=self.hyperparam_bounds,
-            x0=x0,
+            x0=x0, # Use the chunk of starting points passed in
             maxiter=maxiter,
-            n_restarts=n_restarts,
+            n_restarts=x0.shape[0], # The number of restarts is the size of the chunk
             optimizer_options=optimizer_options
         )
+                
+        # Return the result in the format the pool expects
+        return {
+            'mll': -best_loss,
+            'params': best_params_log10 # Optionally return the raw params
+        }
 
-        # Update hyperparameters
-        lengthscales, kernel_variance, tausq = self._parse_hyperparams(best_params)
+    def update_hyperparams(self, hyperparams):
+        """
+        Update the GP hyperparameters and recompute the Cholesky and alphas.
+        """
+        lengthscales, kernel_variance, tausq = self._parse_hyperparams(hyperparams)
         self.lengthscales = lengthscales
         if not self.fixed_kernel_variance:
             self.kernel_variance = kernel_variance
         self.tausq = tausq
-        
-        if self.fixed_kernel_variance and 'tausq' in self.param_names:
-            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), tausq = {self.tausq}, final MLL = {-best_f}")
-        elif self.fixed_kernel_variance:
-            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance} (fixed), final MLL = {-best_f}")
-        elif 'tausq' in self.param_names:
-            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, tausq = {self.tausq}, final MLL = {-best_f}")
-        else:
-            log.info(f"Final hyperparams: lengthscales = {self.lengthscales}, kernel_variance = {self.kernel_variance}, final MLL = {-best_f}")
-
-        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-        self.cholesky = jnp.linalg.cholesky(K)
-        self.alphas = cho_solve((self.cholesky, True), self.train_y)
-
+        self.recompute_cholesky()
+    
     def predict_mean_single(self,x):
         """
         Single point prediction of mean

@@ -70,7 +70,7 @@ def run_bobe(likelihood: Union[Callable, str],
 
     My_Likelihood.pool = pool
 
-    if pool.is_master():
+    if pool.is_master:
 
         print(f"Rank {pool.rank} running BOBE with likelihood: {My_Likelihood.name}")
         # here should setup default arguments for all necessary parameters

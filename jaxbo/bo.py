@@ -1,9 +1,12 @@
 import os
 import numpy as np
 import jax
-jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+jax.config.update("jax_enable_x64", True)
+from numpyro.util import enable_x64
+enable_x64()
 from typing import Optional, Union, Tuple, Dict, Any
+# from .acquisition import WIPV, EI #, logEI
 from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import BaseLikelihood, CobayaLikelihood
@@ -13,7 +16,8 @@ from .nested_sampler import nested_sampling_Dy
 from .utils.logging_utils import get_logger
 from .utils.results import BOBEResults
 from .acquisition import *
-from .mpi import *
+from .utils.pool import MPI_Pool
+
 log = get_logger("bo")
 log.info(f'JAX using {jax.device_count()} devices.')
 
@@ -77,6 +81,7 @@ class BOBE:
                  logz_threshold=0.01,
                  convergence_n_iters=1,
                  minus_inf=-1e5,
+                 pool: MPI_Pool = None,
                  do_final_ns=False,
                  seed: Optional[int] = None,
                  ):
@@ -148,16 +153,11 @@ class BOBE:
             - kernel_variance: Initial kernel variance value (float)
         """
 
-        main_seed = None
-        if is_main_process():
-            # The master process sets the global seed for itself and gets the integer value.
-            main_seed = set_global_seed(seed)
-        # The master broadcasts the single main_seed to all other processes.
-        main_seed = share(main_seed, root=0)
-        # Each process gets a unique seed based on the main seed and its rank.
-        process_seed = main_seed + get_mpi_rank()
-        set_global_seed(process_seed)
-        self.rng = get_numpy_rng()
+        self.pool = pool
+
+
+        set_global_seed(seed)
+        self.np_rng = get_numpy_rng()
 
         if not isinstance(loglikelihood, BaseLikelihood):
             raise ValueError("loglikelihood must be an instance of ExternalLikelihood")
@@ -186,30 +186,12 @@ class BOBE:
         if optimizer.lower() not in ['optax', 'scipy']:
             raise ValueError("optimizer must be either 'optax' or 'scipy'")
         self.optimizer = optimizer
-
-        self.fresh_start = not resume
-        if resume and resume_file is not None:
-            # Resume from explicit file
-            try:
-                # Load GP from file on all processes
-                log.info(f" Attempting to resume from file {resume_file}")
-                gp_file = resume_file+'_gp'
-                self.gp = load_gp(gp_file, use_clf) # handling mpi inside
-                # Test a simple prediction to ensure everything works
-                test_point = self.gp.train_x[0]  # Use first training point as test
-                _ = self.gp.predict_mean_single(test_point)
-                log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")                                    
-            except Exception as e:
-                # We have to start fresh if 
-                log.error(f" Failed to load GP from file {gp_file}: {e}. Starting afresh.")
-                self.fresh_start = True
-
-        if is_main_process():
-            # Initialize results manager BEFORE any timing operations
-            self.results_manager = BOBEResults(
-                output_file=self.output_file,
-                save_dir=self.save_dir,
-                param_names=self.loglikelihood.param_list,
+        
+        # Initialize results manager BEFORE any timing operations
+        self.results_manager = BOBEResults(
+            output_file=self.output_file,
+            save_dir=self.save_dir,
+            param_names=self.loglikelihood.param_list,
             param_labels=self.loglikelihood.param_labels,
             param_bounds=self.loglikelihood.param_bounds,
             settings={
@@ -237,30 +219,54 @@ class BOBE:
             },
             likelihood_name=self.loglikelihood.name,
             resume_from_existing=resume
-            )
+        )
+
+        self.fresh_start = not resume  # Flag to indicate if we are starting fresh or resuming
+        
+        if resume and resume_file is not None:
+            # Resume from explicit file
+            try:
+                log.info(f" Attempting to resume from file {resume_file}")
+                gp_file = resume_file+'_gp'
+                self.gp = load_gp(gp_file, use_clf)
+                                            
+                # Test a simple prediction to ensure everything works
+                test_point = self.gp.train_x[0]  # Use first training point as test
+                _ = self.gp.predict_mean_single(test_point)
+                log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
+                                    
                 # Check if resuming and adjust starting iteration
-            if self.results_manager.is_resuming() and not self.fresh_start:
-                self.start_iteration = len(self.results_manager.acquisition_values) #self.results_manager.get_last_iteration()
-                log.info(f"Resuming from iteration {self.start_iteration}")
-                # log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
-                # If we have previous best loglikelihood data, restore the best point info
-                if self.results_manager.best_loglike_values:
-                    self.best_f = max(self.results_manager.best_loglike_values)
-                    best_loglike_idx = self.results_manager.best_loglike_values.index(self.best_f)
-                    self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_loglike_idx]
-                    log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
-            else:
-                self.start_iteration = 0
-                self.best_pt_iteration = 0
-                log.info("Starting fresh optimization")
+                if self.results_manager.is_resuming() and not self.fresh_start:
+                    self.start_iteration = self.results_manager.get_last_iteration()
+                    log.info(f"Resuming from iteration {self.start_iteration}")
+                    log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
+                    # If we have previous best loglikelihood data, restore the best point info
+                    if self.results_manager.best_loglike_values:
+                        self.best_f = max(self.results_manager.best_loglike_values)
+                        best_loglike_idx = self.results_manager.best_loglike_values.index(self.best_f)
+                        self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_loglike_idx]
+                        log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
+                    if self.results_manager.converged:
+                        self.prev_converged = True
+                        self.convergence_counter = 1
+                        log.info(" Previous run had converged.")
+                else:
+                    self.start_iteration = 0
+                    log.info("Starting fresh optimization")
+            except Exception as e:
+                log.error(f" Failed to load GP from file {gp_file}: {e}")
+                log.info(" Starting a fresh run instead.")
+                self.fresh_start = True
 
         if self.fresh_start:
+            self.start_iteration = 0
+            self.best_pt_iteration = 0
             # Fresh start - evaluate initial points
             self.results_manager.start_timing('True Objective Evaluations')
             if isinstance(self.loglikelihood, CobayaLikelihood):
                 init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,n_sobol_init=n_sobol_init,rng=self.np_rng)
             else:
-                init_points, init_vals = self.loglikelihood.get_initial_points(n_sobol_init=n_sobol_init,rng=self.rng)
+                init_points, init_vals = self.loglikelihood.get_initial_points(n_sobol_init=n_sobol_init,rng=self.np_rng)
             self.results_manager.end_timing('True Objective Evaluations')
             train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
             train_y = jnp.array(init_vals)
@@ -283,7 +289,7 @@ class BOBE:
             else:
                 self.gp = GP(**gp_kwargs)
             self.results_manager.start_timing('GP Training')
-            self.gp.fit(maxiter=500,n_restarts=4)
+            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500)
             self.results_manager.end_timing('GP Training')
 
         idx_best = jnp.argmax(self.gp.train_y)
@@ -327,15 +333,16 @@ class BOBE:
         Update the GP with new points and values, and track hyperparameters.
         """
         self.results_manager.start_timing('GP Training')
-        if self.gp.train_x.shape[0] < 250:
+        if self.gp.train_x.shape[0] < 200:
             # Override refit for small training sets
-            refit = True
-            maxiter = 1000
+            maxiter = 2000
             n_restarts = 10
         else:
             n_restarts = 4
-            maxiter = 500
-        self.gp.update(new_pts_u, new_vals, refit=refit, n_restarts=n_restarts, maxiter=maxiter) # add verbose
+            maxiter = 1000
+        self.gp.update(new_pts_u, new_vals, refit=False, n_restarts=n_restarts, maxiter=maxiter) # add verbose
+        if refit:
+            self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
         self.results_manager.end_timing('GP Training')
 
         # Extract GP hyperparameters for tracking
@@ -375,7 +382,7 @@ class BOBE:
         new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
 
         self.results_manager.start_timing('True Objective Evaluations')
-        new_vals = self.pool.run_map(self.loglikelihood, new_pts)
+        new_vals = self.pool.run_map_objective(self.loglikelihood, new_pts)
         new_vals = jnp.reshape(new_vals, (len(new_pts), 1))
         self.results_manager.end_timing('True Objective Evaluations')
 
@@ -453,7 +460,6 @@ class BOBE:
         Run the optimization loop for EI/LogEI acquisition functions.
         """
         current_evals = self.gp.npoints
-        self.convergence_counter = 0  # Track successive convergence iterations
         log.info(f"Starting iteration {ii}")
         converged=False
 
@@ -549,7 +555,6 @@ class BOBE:
             method=self.mc_points_method,
         )
         self.results_manager.end_timing('MCMC Sampling')
-        self.convergence_counter = 0  # Track successive convergence iterations (should get from results manager if resuming)
         self.ns_samples = None
 
         while not self.converged:
@@ -636,7 +641,7 @@ class BOBE:
         if self.do_final_ns and not self.converged:
             
             self.results_manager.start_timing('GP Training')
-            self.gp.fit()
+            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500)
             self.results_manager.end_timing('GP Training')
 
             log.info(" Final Nested Sampling")
