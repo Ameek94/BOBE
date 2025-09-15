@@ -12,8 +12,8 @@ from jaxbo.run import run_bobe
 def main():
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/LCDM_lite.yaml'
-    ls_priors = 'SAAS'
-    likelihood_name = f'Planck_lite_{ls_priors}'
+    ls_priors = None
+    likelihood_name = f'Planck_lite_uniform'
 
     start = time.time()
     print("Starting BOBE run...")
@@ -31,22 +31,22 @@ def main():
         save_dir='./results/',
         save=True,
         verbosity='INFO',
-        n_cobaya_init=2, 
-        n_sobol_init=4, 
+        n_cobaya_init=4, 
+        n_sobol_init=8, 
         min_evals=25, 
         max_evals=250,
         max_gp_size=200,
         fit_step=4, 
         ns_step=4,
-        wipv_batch_size=2,
-        num_hmc_warmup=512,
-        num_hmc_samples=4096, 
+        wipv_batch_size=4,
+        num_hmc_warmup=256,
+        num_hmc_samples=2048, 
         mc_points_size=256,
         gp_kwargs={'lengthscale_prior': ls_priors,}, 
         use_clf=True,
         clf_type='svm',
         minus_inf=-1e5,
-        logz_threshold=0.005,
+        logz_threshold=0.001,
         seed=10,
         do_final_ns=False,
     )

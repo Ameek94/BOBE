@@ -44,7 +44,7 @@ def main():
             'name': likelihood_name,
         },
         # resume
-        resume=False,
+        resume=True,
         resume_file=f'./results/{likelihood_name}',
         save=True,
         save_dir='./results/',

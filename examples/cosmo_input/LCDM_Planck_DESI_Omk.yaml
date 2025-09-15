@@ -193,15 +193,15 @@ params:
     latex: c_{EE}
   mnu: 0.06
 sampler:
-  # polychord:
-  #   nlive: 25d
-  #   path: 'global'
-  #   precision_criterion: 0.01
-  mcmc:
-   drag: False
-   oversample_power: 0.4
-   proposal_scale: 1.9
-   covmat: auto
-   Rminus1_stop: 0.01
-   Rminus1_cl_stop: 0.2   
+  polychord:
+    nlive: 15d
+    path: 'global'
+    precision_criterion: 0.01
+  # mcmc:
+  #  drag: False
+  #  oversample_power: 0.4
+  #  proposal_scale: 1.9
+  #  covmat: auto
+  #  Rminus1_stop: 0.01
+  #  Rminus1_cl_stop: 0.2   
 output: chains/Planck_DESIDR2_LCDM_Omk_MCMC

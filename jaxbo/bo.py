@@ -113,7 +113,7 @@ class BOBE:
         save : bool
             If True, save the GP training data to a file so that it can be resumed from later.
         fit_step : int
-            Number of iterations between GP refits.
+            Number of iterations between GP fitting.
         ns_step : int
             Number of iterations between nested sampling runs.
         num_hmc_warmup : int
@@ -331,20 +331,22 @@ class BOBE:
         # Initialize KL divergence tracking
         self.prev_samples = None
     
-    def update_gp(self, new_pts_u, new_vals, refit=True, step = 0, verbose=True):
+    def update_gp(self, new_pts_u, new_vals, step = 0, verbose=True):
         """
         Update the GP with new points and values, and track hyperparameters.
         """
-        self.results_manager.start_timing('GP Training')
+        refit = (step % self.fit_step == 0)
         if self.gp.train_x.shape[0] < 200:
-            # Override refit for small training sets
-            refit = True
+            # Override refit for small training sets to do more frequent fitting
+            override_fit_step = min(2, self.fit_step)
+            refit = (step % override_fit_step == 0)
             maxiter = 1000
-            n_restarts = 10
+            n_restarts = 8
         else:
             n_restarts = 4
             maxiter = 500
-        self.gp.update(new_pts_u, new_vals, refit=False, n_restarts=n_restarts, maxiter=maxiter) # add verbose
+        self.results_manager.start_timing('GP Training')
+        self.gp.update(new_pts_u, new_vals) # add verbose
         if refit:
             log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
             self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
@@ -382,8 +384,6 @@ class BOBE:
         """
         Evaluate the likelihood for new points.
         """
-
-
         new_pts_u = jnp.atleast_2d(new_pts_u)
         new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
 
@@ -471,7 +471,6 @@ class BOBE:
 
         while not converged:
             ii += 1
-            refit = (ii % self.fit_step == 0)
             verbose = True
 
             if verbose:
@@ -486,7 +485,7 @@ class BOBE:
             new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
             current_evals += n_batch
 
-            self.update_gp(new_pts_u, new_vals, refit=refit, step = ii, verbose=verbose)
+            self.update_gp(new_pts_u, new_vals, step = ii, verbose=verbose)
 
             self.results_manager.update_best_loglike(ii, self.best_f)
             if verbose:
@@ -565,13 +564,12 @@ class BOBE:
 
         while not self.converged:
             ii += 1
-            refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and current_evals >= self.min_evals
             verbose = True
 
             if verbose:
                 print("\n")
-                log.info(f" Iteration {ii} of WIPV, objective evals {current_evals}/{self.max_evals}, refit={refit}, ns={ns_flag}")
+                log.info(f" Iteration {ii} of WIPV, objective evals {current_evals}/{self.max_evals}, ns={ns_flag}")
 
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
@@ -580,7 +578,7 @@ class BOBE:
             current_evals += self.wipv_batch_size
 
 
-            self.update_gp(new_pts_u, new_vals, step = ii, refit=refit)
+            self.update_gp(new_pts_u, new_vals, step = ii)
             self.results_manager.update_best_loglike(ii, self.best_f)
 
             # Check convergence and update MCMC samples
