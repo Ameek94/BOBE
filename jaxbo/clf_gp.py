@@ -112,6 +112,7 @@ class GPwithClassifier(GP):
             'kernel_variance_prior': kernel_variance_prior,
             'tausq': tausq,
             'tausq_bounds': tausq_bounds,
+            'param_names': param_names,
         }
                     
         super().__init__(**gp_init_kwargs)
@@ -457,7 +458,7 @@ class GPwithClassifier(GP):
 
         rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
         prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(2., 4.)  # 6
+        high_temp = rng_mcmc.uniform(1.5,4.)  # 6
         # high_temp = rng_mcmc.uniform(1.,2.) ** 2
         temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
         # temp=1. # For now always use temp=1

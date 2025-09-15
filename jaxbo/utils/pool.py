@@ -74,10 +74,10 @@ class MPI_Pool:
                         fit_params = payload['fit_params']
                         use_clf = payload.get('use_clf', False)
 
-                        if use_clf:
-                            worker_gp = GPwithClassifier.from_state_dict(state_dict)
-                        else:
-                            worker_gp = GP.from_state_dict(state_dict)
+                        # if use_clf:
+                            # worker_gp = GPwithClassifier.from_state_dict(state_dict)
+                        # else:
+                        worker_gp = GP.from_state_dict(state_dict)
 
                         fit_results = worker_gp.fit(**fit_params)
                         self.comm.send(fit_results, dest=0)

@@ -52,7 +52,7 @@ def main():
         verbosity='INFO',
         n_cobaya_init=32,
         n_sobol_init=64,
-        min_evals=750,
+        min_evals=800,
         max_evals=2500,
         max_gp_size=1500,
         acq=['wipv'],

@@ -73,7 +73,8 @@ def run_bobe(likelihood: Union[Callable, str],
 
     if pool.is_master:
 
-        print(f"Rank {pool.rank} running BOBE with likelihood: {My_Likelihood.name}")
+        print(f"\nRunning BOBE with likelihood: {My_Likelihood.name}")
+        print(f"MPI mode: {pool.is_mpi}, Number of processes: {pool.size}\n")
         # here should setup default arguments for all necessary parameters
 
         # Master creates the sampler and runs it

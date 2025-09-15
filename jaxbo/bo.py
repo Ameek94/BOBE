@@ -339,11 +339,11 @@ class BOBE:
         if self.gp.train_x.shape[0] < 200:
             # Override refit for small training sets
             refit = True
-            maxiter = 2000
+            maxiter = 1000
             n_restarts = 10
         else:
             n_restarts = 4
-            maxiter = 1000
+            maxiter = 500
         self.gp.update(new_pts_u, new_vals, refit=False, n_restarts=n_restarts, maxiter=maxiter) # add verbose
         if refit:
             log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
