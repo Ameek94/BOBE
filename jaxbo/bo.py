@@ -82,6 +82,8 @@ class BOBE:
                  convergence_n_iters=1,
                  minus_inf=-1e5,
                  pool: MPI_Pool = None,
+                 use_pool_likelihood: bool = True,
+                 use_pool_gp_fit: bool = True,
                  do_final_ns=False,
                  seed: Optional[int] = None,
                  ):
@@ -221,6 +223,8 @@ class BOBE:
             resume_from_existing=resume
         )
 
+        self.use_pool_likelihood = use_pool_likelihood #
+        self.use_pool_gp_fit = use_pool_gp_fit #
         self.fresh_start = not resume  # Flag to indicate if we are starting fresh or resuming
         
         if resume and resume_file is not None:
@@ -263,10 +267,7 @@ class BOBE:
             self.best_pt_iteration = 0
             # Fresh start - evaluate initial points
             self.results_manager.start_timing('True Objective Evaluations')
-            if isinstance(self.loglikelihood, CobayaLikelihood):
-                init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,n_sobol_init=n_sobol_init,rng=self.np_rng)
-            else:
-                init_points, init_vals = self.loglikelihood.get_initial_points(n_sobol_init=n_sobol_init,rng=self.np_rng)
+            init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,n_sobol_init=n_sobol_init,rng=self.np_rng)
             self.results_manager.end_timing('True Objective Evaluations')
             train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
             train_y = jnp.array(init_vals)
@@ -289,7 +290,9 @@ class BOBE:
             else:
                 self.gp = GP(**gp_kwargs)
             self.results_manager.start_timing('GP Training')
+            log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
             self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500)
+            log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
             self.results_manager.end_timing('GP Training')
 
         idx_best = jnp.argmax(self.gp.train_y)
@@ -335,6 +338,7 @@ class BOBE:
         self.results_manager.start_timing('GP Training')
         if self.gp.train_x.shape[0] < 200:
             # Override refit for small training sets
+            refit = True
             maxiter = 2000
             n_restarts = 10
         else:
@@ -342,7 +346,9 @@ class BOBE:
             maxiter = 1000
         self.gp.update(new_pts_u, new_vals, refit=False, n_restarts=n_restarts, maxiter=maxiter) # add verbose
         if refit:
+            log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
             self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
+            log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
         self.results_manager.end_timing('GP Training')
 
         # Extract GP hyperparameters for tracking

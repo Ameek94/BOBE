@@ -221,46 +221,31 @@ class GPwithClassifier(GP):
                 new_pts_to_add.append(new_x[i])
                 new_vals_to_add.append(new_y[i])
 
-        new_pts_to_add = jnp.atleast_2d(jnp.array(new_pts_to_add))
-        new_vals_to_add = jnp.atleast_2d(jnp.array(new_vals_to_add)).reshape(-1, 1)
-        self.train_x_clf = jnp.concatenate([self.train_x_clf, new_pts_to_add], axis=0)
-        self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
-        log.info(f"Added point to classifier data. New size: {self.clf_data_size}")
+        if new_pts_to_add:
+            new_pts_to_add = jnp.atleast_2d(jnp.array(new_pts_to_add))
+            new_vals_to_add = jnp.atleast_2d(jnp.array(new_vals_to_add)).reshape(-1, 1)
+            self.train_x_clf = jnp.concatenate([self.train_x_clf, new_pts_to_add], axis=0)
+            self.train_y_clf = jnp.concatenate([self.train_y_clf, new_vals_to_add], axis=0)
 
-        # for i in range(new_pts_to_add.shape[0]):
-        #     val = new_vals_to_add[i]
-        #     x = new_pts_to_add[i]
-        #     if val > (self.train_y_clf.max() - self.gp_threshold):
-        #         # log.info(f"Point {new_pts_to_add[i]} with value {val} added to GP training set.")
-        #         super().update(x, val,refit=False)
-        #     else:
-        #         log.info("Point not within GP threshold, not updating GP.")
+            mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
+            self.train_x = self.train_x_clf[mask_gp]
+            self.train_y = self.train_y_clf[mask_gp].reshape(-1, 1)
+            self.y_std = jnp.std(self.train_y) if self.train_y.shape[0] > 1 else 1.0
+            self.y_mean = jnp.mean(self.train_y)
+            self.train_y = (self.train_y - self.y_mean) / self.y_std
+            self.recompute_cholesky()
 
-        mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
-        self.train_x = self.train_x_clf[mask_gp]
-        self.train_y = self.train_y_clf[mask_gp]
-        self.train_y = self.train_y.reshape(-1, 1)
-        self.y_std = jnp.std(self.train_y) if self.train_y.shape[0] > 1 else 1.0
-        self.y_mean = jnp.mean(self.train_y)
-        self.train_y = (self.train_y - self.y_mean) / self.y_std
-        print(f"Shapes after filtering: train_x_clf: {self.train_x_clf.shape}, train_y_clf: {self.train_y_clf.shape}, train_y (GP): {self.train_y.shape}")
+            log.info(f"Classifier data size: {self.train_y_clf.shape[0]},  GP data size: {self.train_y.shape[0]}")
 
-        if refit:
-            super().fit(maxiter=maxiter, n_restarts=n_restarts)
-        else:
-            K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
-            self.cholesky = jnp.linalg.cholesky(K)
-            self.alphas = cho_solve((self.cholesky, True), self.train_y)
-
-        # Check if classifier data size has reached the threshold
-        if not self.use_clf:
-            if self.clf_data_size >= self.clf_use_size:
-                log.info(f"Classifier data size ({self.clf_data_size}) reached use size ({self.clf_use_size}). Will start using classifier.")
-                self.use_clf = True
+            # Check if classifier data size has reached the threshold
+            if not self.use_clf:
+                if self.clf_data_size >= self.clf_use_size:
+                    log.info(f"Classifier data size ({self.clf_data_size}) reached use size ({self.clf_use_size}). Will start using classifier.")
+                    self.use_clf = True
 
             # Retrain classifier if conditions are met
-        if self.use_clf: #
-            self._train_classifier()
+            if self.use_clf: 
+                self._train_classifier()
 
     def kernel(self,x1,x2,lengthscales,kernel_variance,noise,include_noise=True):
         """
@@ -288,9 +273,7 @@ class GPwithClassifier(GP):
             pt = self.train_x_clf[chosen_index]
             log.debug(f"Random point sampled with value {self.train_y_clf[chosen_index]}")
         else:
-            log.debug(f"Getting random point in unit cube")
-
-            pt = rng.uniform(0, 1, size=self.ndim)
+            pt = super().get_random_point(rng=rng, nstd=nstd)
 
         return pt
     

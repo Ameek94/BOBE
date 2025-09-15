@@ -109,6 +109,16 @@ def optimize_optax(
     global_best_f = np.inf
     global_best_params = None
 
+    for i, x_init in enumerate(x0):
+        try:
+            val = scaled_func(x_init)
+            if np.isfinite(val) and val < global_best_f:
+                global_best_f = val
+                global_best_params = x_init
+                log.debug(f"  Initial point {i+1}/{n_restarts}: New best found -> {val:.4e}")
+        except Exception as e:
+            log.warning(f"  Initial point {i+1}/{n_restarts}: Failed with an error: {e}")
+
     for restart_idx in range(n_restarts):
         log.debug(f"Starting restart {restart_idx + 1}/{n_restarts}")
         current_params = x0[restart_idx]

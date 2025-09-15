@@ -6,11 +6,11 @@ from typing import Callable, Dict, List, Any, Union, Optional, Tuple
 import importlib
 import pickle
 import inspect
-from .logging_utils import get_logger
+from jaxbo.utils.seed_utils import set_global_seed, get_numpy_rng, get_new_jax_key
+from jaxbo.utils.logging_utils import get_logger
 from jaxbo.gp import GP
 from jaxbo.clf_gp import GPwithClassifier
-log = get_logger(__name__)
-
+log = get_logger('pool')
 
 try:
     from mpi4py import MPI
@@ -25,6 +25,7 @@ class MPI_Pool:
     TASK_OBJECTIVE_EVAL = 0
     TASK_GP_FIT = 1
     TASK_ACQUISITION_OPT = 3
+    TASK_COBAYA_INIT = 4
     TASK_INIT = 99
     TASK_EXIT = 100
     
@@ -44,37 +45,50 @@ class MPI_Pool:
             self.is_mpi = False
             self.is_master = True
             self.is_worker = False
-    
-    def worker_wait(self, likelihood):
+
+    def worker_wait(self, likelihood, seed=None):
         """Main loop for worker processes - only used in MPI mode"""
         if not self.is_worker:
             return
             
-        # Initialize worker state
         print(f"Worker starting at rank {self.rank}")
-        
+        if seed is not None:
+            seed = seed + self.rank
+        set_global_seed(seed)
+        rng = get_numpy_rng()
+        rng_key = get_new_jax_key()
+
         while True:
-            # Wait for task from master
             task_data = self.comm.recv(source=0)
             task_type, data = task_data
             try:    
                 if task_type == self.TASK_OBJECTIVE_EVAL:
-                    # Evaluate objective function
-                    point, task_index = data # map sends (point, index)
+                    point, task_index = data
                     result = likelihood(point)
-                    self.comm.send((result,task_index), dest=0)
+                    self.comm.send((result, task_index), dest=0)
                     
-
                 elif task_type == self.TASK_GP_FIT:
-                    # Initialize GP object (likelihood should already be set)
-                    state_dict = data['state_dict']
-                    fit_params = data['fit_params']
-                    worker_gp = GP.from_state_dict(state_dict)
-                    fit_results = worker_gp.fit(**fit_params)
-                    self.comm.send(fit_results, dest=0)
+                        # Receive payload and task_index
+                        payload = data
+                        state_dict = payload['state_dict']
+                        fit_params = payload['fit_params']
+                        use_clf = payload.get('use_clf', False)
+
+                        if use_clf:
+                            worker_gp = GPwithClassifier.from_state_dict(state_dict)
+                        else:
+                            worker_gp = GP.from_state_dict(state_dict)
+
+                        fit_results = worker_gp.fit(**fit_params)
+                        self.comm.send(fit_results, dest=0)
+
+                elif task_type == self.TASK_COBAYA_INIT:
+                    # This task type doesn't need input data, just the index
+                    _, task_index = data
+                    pt, logpost = likelihood._get_single_valid_point(rng)
+                    self.comm.send(((pt, logpost), task_index), dest=0)
 
                 elif task_type == self.TASK_EXIT:
-                    # Exit worker loop
                     log.info("Worker exiting")
                     break
                     
@@ -82,44 +96,84 @@ class MPI_Pool:
                 import traceback
                 log.info(f"Error in worker: {e}")
                 log.info(traceback.format_exc())
-                self.comm.send(("error", str(e)), dest=0)
+                # Ensure the master receives an error message tuple with the index
+                # This prevents the master from hanging while waiting for a result that will never come.
+                _, task_index = data
+                self.comm.send(("error", str(e), task_index), dest=0)
                 
         return
-    
+
+    # NEW: Centralized utility for dynamic task distribution
+    def _dynamic_distribute(self, tasks: List[Any], task_type: int) -> List[Any]:
+        """
+        MASTER-ONLY METHOD: Distributes tasks to workers using dynamic scheduling.
+
+        This is a generic utility that sends tasks one by one to available workers
+        and collects the results in order.
+        """
+        if not self.is_master or not self.is_mpi:
+            raise RuntimeError("_dynamic_distribute is designed for the master process in MPI mode.")
+
+        n_tasks = len(tasks)
+        if n_tasks == 0:
+            return []
+
+        results = [None] * n_tasks
+        task_index = 0
+        tasks_in_progress = 0
+        
+        # Initial distribution to all available workers
+        for worker_rank in range(1, self.size):
+            if task_index < n_tasks:
+                payload = (tasks[task_index], task_index)
+                self.comm.send((task_type, payload), dest=worker_rank)
+                task_index += 1
+                tasks_in_progress += 1
+        
+        # Receive results and distribute remaining tasks
+        while tasks_in_progress > 0:
+            status = MPI.Status()
+            
+            # The worker returns (result, original_index) or (error, msg, original_index)
+            response = self.comm.recv(source=MPI.ANY_SOURCE, status=status)
+            worker_rank = status.Get_source()
+
+            if len(response) == 3 and response[0] == "error":
+                _, msg, original_index = response
+                log.error(f"Worker {worker_rank} failed on task {original_index}: {msg}")
+                # Propagate the error to be handled by the caller
+                raise RuntimeError(f"Worker {worker_rank} failed: {msg}")
+
+            result, original_index = response
+            results[original_index] = result
+            tasks_in_progress -= 1
+            
+            # If there are more tasks, send one to the newly freed worker
+            if task_index < n_tasks:
+                payload = (tasks[task_index], task_index)
+                self.comm.send((task_type, payload), dest=worker_rank)
+                task_index += 1
+                tasks_in_progress += 1
+        
+        return results
+
+    # REFACTORED: Now uses the central utility
     def run_map_objective(self, function, tasks):
         """
-        MASTER METHOD: Manages task distribution, does not execute tasks itself.
+        Maps a function over a list of tasks in parallel.
         """
         if not self.is_master:
             return None
 
         if not self.is_mpi:
-            return function(tasks)
+            # Serial execution if not in MPI mode
+            results =  [function(task) for task in tasks]
 
-        # mpi specific block
-        n_tasks = len(tasks)
-        results = [None] * n_tasks
-        task_index = 0
-        
-        for worker_rank in range(1, self.size):
-            if task_index < n_tasks:
-                self.comm.send((self.TASK_OBJECTIVE_EVAL, [tasks[task_index], task_index]), dest=worker_rank)
-                task_index += 1
-        
-        for _ in range(n_tasks):
-            status = MPI.Status()
-            result, original_index = self.comm.recv(source=MPI.ANY_SOURCE, status=status)
-            worker_rank = status.Get_source()
-            
-            results[original_index] = result
-            
-            if task_index < n_tasks:
-                # since the worker is free send it another task
-                self.comm.send((self.TASK_OBJECTIVE_EVAL, [tasks[task_index], task_index]), dest=worker_rank)
-                task_index += 1
-        
+        else:
+            results = self._dynamic_distribute(tasks, self.TASK_OBJECTIVE_EVAL)
+
         return np.array(results)
-    
+
     def gp_fit(self, gp: GP, maxiters=1000, n_restarts=8, rng=None):
         """
         Orchestrates a parallel GP hyperparameter fit, ensuring at least one
@@ -127,81 +181,70 @@ class MPI_Pool:
         """
         if self.is_worker:
             return None
-        
-        # Adjust n_restarts to match the number of processes, cap to 2 restarts per process
-        # print(f"Original n_restarts: {n_restarts}, MPI size: {self.size}")
+
+        # Adjust n_restarts to be at least equal to the number of processes and cap to 2 restarts per process
         if self.is_mpi:
             n_restarts = max(self.size, n_restarts)
             n_restarts = min(n_restarts, 2 * self.size)
 
-        # print(f"Adjusted n_restarts: {n_restarts}, MPI size: {self.size}")
-
-
         rng = np.random.default_rng() if rng is None else rng
-        n_params = gp.hyperparam_bounds.shape[1] # (2, n_params)
-
-        # Prepare initial parameters for all restarts. This now uses the adjusted n_restarts.
-        init_params = jnp.array(gp.lengthscales)
-        if not gp.fixed_kernel_variance:
-            init_params = jnp.concatenate([init_params, jnp.array([gp.kernel_variance])])
-        if 'tausq' in gp.param_names:
-            init_params = jnp.concatenate([init_params, jnp.array([gp.tausq])])
-
+        n_params = gp.hyperparam_bounds.shape[1]  # hp boundsa are (2, n_params) shaped
+ 
+        # Prepare initial parameters for all restarts.
+        init_params = jnp.log(gp.get_hyperparams())
         if n_restarts > 1:
             x0_random = rng.uniform(gp.hyperparam_bounds[0], gp.hyperparam_bounds[1], size=(n_restarts - 1, n_params))
             x0 = np.vstack([init_params, x0_random])
         else:
             x0 = np.atleast_2d(init_params)
 
-        # print(f'GP fit with x0 shape: {x0.shape}')
-
         # If not running in MPI, call the GP's local fit method and return
         if not self.is_mpi:
-            # The n_restarts value might have been adjusted, which is fine.
+            log.info(f"Running serial GP fit with {n_restarts} restarts.")
             results = gp.fit(x0=x0, maxiter=maxiters)
             gp.update_hyperparams(results['params'])
+        else:
+            # MPI Specific Block
+            x0_chunks = np.array_split(x0, self.size)
+            state_dict = gp.state_dict()
+            log.info(f"Running parallel GP fit with {n_restarts} restarts across {self.size} MPI processes.")
 
-        
-        # MPI Specific Block 
+            for i in range(1, self.size):
+                worker_x0 = x0_chunks[i]
+                fit_params = {'x0': worker_x0, 'maxiter': maxiters}
+                payload = {'state_dict': state_dict, 'fit_params': fit_params, 'use_clf': isinstance(gp, GPwithClassifier)}
+                self.comm.send((self.TASK_GP_FIT, payload), dest=i)
 
-        # Split the restart starting points
-        x0_chunks = np.array_split(x0, self.size)
-        
-        
-        state_dict = gp.state_dict()
+            master_x0 = x0_chunks[0]
+            master_result = gp.fit(x0=master_x0, maxiter=maxiters)
 
-        for i in range(1, self.size):
-            worker_x0 = x0_chunks[i]
-            # print(f"Master sending GP fit task to worker {i} with {worker_x0.shape} restarts")
-            fit_params = {'x0': worker_x0, 'maxiter': maxiters}
-            payload = {'state_dict': state_dict, 'fit_params': fit_params}
-            self.comm.send((self.TASK_GP_FIT, payload), dest=i)
+            all_results = [master_result]
+            for i in range(1, self.size):
+                worker_result = self.comm.recv(source=i)
+                all_results.append(worker_result)
 
-        # 4. Master processes its own chunk
-        master_x0 = x0_chunks[0]
-        # print(f"Master processing GP fit with {master_x0.shape} restarts")
-        master_result = gp.fit(x0=master_x0, maxiter=maxiters)
+            best_result = max(all_results, key=lambda r: r['mll'])
+            best_params = best_result['params']
+            gp.update_hyperparams(best_params)
 
-        # 5. Gather results from all workers
-        all_results = [master_result]
-        for i in range(1, self.size):
-            worker_result = self.comm.recv(source=i)
-            # print(f"Master received GP fit result from worker {i}: {worker_result}")
-            all_results.append(worker_result)
-            
-        best_result = max(all_results, key=lambda r: r['mll'])
-        best_params = best_result['params']
+    def get_cobaya_initial_points(self, n_points: int) -> np.ndarray:
+        """
+        Gets initial points from the Cobaya reference prior in parallel.
+        """
+        if not self.is_master:
+            return None
 
-        log.info(f"[Master] GP fit complete. Best MLL {-best_result['mll']:.4f} found.")
+        # The payload for this task is trivial; we just need to send n_points signals.
+        tasks = [None] * n_points
+        results_tuples = self._dynamic_distribute(tasks, self.TASK_COBAYA_INIT)
 
-        gp.update_hyperparams(best_params)
+        # The worker returns a list of tuples [(point, logpost)]
+        return results_tuples
 
     def close(self):
         """Shut down the pool by telling all workers to exit"""
         if self.is_worker:
             return
-
         if self.is_mpi and self.size > 1:
             for i in range(1, self.size):
                 self.comm.send((self.TASK_EXIT, None), dest=i)
-    

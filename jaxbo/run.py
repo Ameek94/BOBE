@@ -25,6 +25,7 @@ def run_bobe(likelihood: Union[Callable, str],
              resume: bool = False,
              resume_file: Optional[str] = None,
              convergence_n_iters=1,
+             seed=0,
              **sampler_kwargs):
     """
     High-level wrapper to run the BOBE sampler.
@@ -94,6 +95,7 @@ def run_bobe(likelihood: Union[Callable, str],
             clf_type=clf_type,
             clf_nsigma_threshold=clf_nsigma_threshold,
             convergence_n_iters=convergence_n_iters,
+            seed=seed,
             **sampler_kwargs
         )
         results = sampler.run(acq)
@@ -102,5 +104,5 @@ def run_bobe(likelihood: Union[Callable, str],
     else:
         print(f"Rank {pool.rank} running only likelihood evaluations")
         # Workers wait for tasks
-        pool.worker_wait(My_Likelihood)
+        pool.worker_wait(My_Likelihood,seed=seed)
         return None

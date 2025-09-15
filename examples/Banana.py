@@ -61,7 +61,7 @@ def main():
         mc_points_size=128,
         thinning=4,
         num_chains=4,
-        use_clf=False,
+        use_clf=True,
         minus_inf=-1e5,
         logz_threshold=1e-3,
         seed=42,

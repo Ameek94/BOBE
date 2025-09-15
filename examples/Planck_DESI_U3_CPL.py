@@ -69,9 +69,9 @@ def main():
         
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=12000,
+        num_hmc_samples=15000,
         mc_points_size=512,
-        num_chains=12,
+        num_chains=num_devices,
         
         # GP settings
         gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None,

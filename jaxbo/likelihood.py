@@ -89,11 +89,13 @@ class BaseLikelihood:
 
         return np.array(vals).reshape(len(vals), 1)
 
-    def get_initial_points(self, n_sobol_init=8, rng=None):
+    def get_initial_points(self, n_sobol_init=8, rng=None, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get initial points for the optimization process using Sobol quasi-random sampling.
         """
-        from scipy.stats import qmc
+        
+        n_sobol_init = max(2, n_sobol_init)  # Ensure at least 2 points for Sobol
+
         sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=rng).random(n_sobol_init)
         sobol_points = scale_from_unit(sobol, self.param_bounds)
         
@@ -101,13 +103,13 @@ class BaseLikelihood:
         # to get the values, which works in both modes. Initial points are always generated on the master when going through run.py.
         
         if self.pool.is_master:
-             log.info(f"Evaluating Likelihood at initial points")
+             log.info(f"Evaluating Likelihood at initial Sobol points")
              vals = self.pool.run_map_objective(self.__call__, sobol_points)
         else:
             # Workers don't generate initial points
             vals = np.empty((n_sobol_init, 1))
 
-        return sobol_points, vals
+        return np.array(sobol_points), np.array(vals).reshape(n_sobol_init, 1)
 
 
 class ExternalLikelihood(BaseLikelihood):
@@ -169,22 +171,101 @@ class CobayaLikelihood(BaseLikelihood):
         vals = np.where(vals <= self.minus_inf, self.minus_inf, vals + self.logprior_vol) # add logprior volume  
         return vals
 
-    def get_initial_points(self, n_cobaya_init=4, n_sobol_init=16, rng=None):
-        # Can do further parallelization here by getting valid points from the pool.
-        points, logpost = [], []
-        if self.pool.is_master:
-            for _ in range(n_cobaya_init):
-                pt, res = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False,
-                                                            logposterior_as_dict=True, random_state=rng)
-                points.append(pt)
-                lp = res["logpost"]
-                logpost.append(self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol)
+    def _get_single_valid_point(self, rng: np.random.Generator) -> tuple:
+        """
+        WORKER METHOD: Gets a single valid point from the Cobaya model.
+        This is the task that will be executed in parallel by each worker.
+        """
+        
+        pt, res = self.cobaya_model.get_valid_point(
+            max_tries=100, 
+            ignore_fixed_ref=False,
+            logposterior_as_dict=True, 
+            random_state=rng
+        )
+        
+        lp = res["logpost"]
+        logpost = self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol
+        
+        # Return a tuple of the point and its log-posterior
+        return (pt, logpost)
 
-            sobol_points, sobol_vals = super().get_initial_points(n_sobol_init, rng=rng)
-            points.extend(sobol_points)
-            logpost.extend(sobol_vals.flatten())
+    def get_initial_points(self, n_cobaya_init=4, n_sobol_init=16, rng=None, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Generates initial points from both the Cobaya reference prior (in parallel)
+        and a Sobol sequence. This method is the orchestrator.
+        """
 
-            return np.array(points), np.array(logpost).reshape(len(points), 1)
+        # Sobol point generation from base class 
+        points, vals = super().get_initial_points(n_sobol_init, rng=rng)
+        
+
+        # This entire method is master-only logic
+        if not self.pool.is_master:
+            # Workers should not call this directly; they return empty arrays to
+            # prevent errors in the main script's initialization flow.
+            return np.empty((n_cobaya_init + n_sobol_init, self.ndim)), \
+                   np.empty((n_cobaya_init + n_sobol_init, 1))
+        
+        if n_cobaya_init > 0:
+            # The pool commands the workers to run '_get_single_valid_point' on their pre-initialized 'likelihood' object.
+            if self.pool.is_mpi:
+                log.info(f"Evaluating {n_cobaya_init} initial Cobaya points in parallel...")
+                cobaya_results = self.pool.get_cobaya_initial_points(n_points=n_cobaya_init)
+            else:
+                log.info(f"Evaluating {n_cobaya_init} initial Cobaya points in serial...")
+                cobaya_results = [self._get_single_valid_point(rng=rng) for _ in range(n_cobaya_init)]
+            if cobaya_results:
+                cobaya_points, cobaya_logpost = zip(*cobaya_results)
+                cobaya_points = np.array(cobaya_points)
+                cobaya_logpost = np.array(cobaya_logpost).reshape(len(cobaya_logpost), 1)
+                points = np.vstack([points, cobaya_points])
+                vals = np.vstack([vals, cobaya_logpost])
+
+        
+        # 2. Find the indices of the unique points (rows)
+        unique_points, unique_indices = np.unique(
+            points, axis=0, return_index=True
+        )
+        
+        # 3. Check if any duplicates were found
+        num_original = len(points)
+        num_unique = len(unique_points)
+        
+        if num_unique < num_original:
+            log.warning(
+                f"Found and removed {num_original - num_unique} duplicate points "
+                f"from the initial set. Final set size: {num_unique}."
+            )
+            # 4. Filter both arrays using the same unique indices
+            final_points = points[unique_indices]
+            final_logpost = vals[unique_indices]
         else:
-            # Workers return empty arrays of the correct shape to avoid errors
-            return np.empty((n_cobaya_init + n_sobol_init, self.ndim)), np.empty((n_cobaya_init + n_sobol_init, 1))
+            # No duplicates found, use the original arrays
+            final_points = points
+            final_logpost = vals
+
+        return final_points, final_logpost.reshape(-1, 1)
+
+
+
+
+    # def get_initial_points(self, n_cobaya_init=4, n_sobol_init=16, rng=None):
+    #     # Can do further parallelization here by getting valid points from the pool.
+    #     points, logpost = [], []
+    #     if self.pool.is_master:
+    #         for _ in range(n_cobaya_init):
+    #             pt, res = self.cobaya_model.get_valid_point(100, ignore_fixed_ref=False,
+    #                                                         logposterior_as_dict=True, random_state=rng)
+    #             points.append(pt)
+    #             lp = res["logpost"]
+    #             logpost.append(self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol)
+
+    #         sobol_points, sobol_vals = super().get_initial_points(n_sobol_init, rng=rng)
+    #         points.extend(sobol_points)
+    #         logpost.extend(sobol_vals.flatten())
+
+    #         return np.array(points), np.array(logpost).reshape(len(points), 1)
+    #     else:
+    #         # Workers return empty arrays of the correct shape to avoid errors
+    #         return np.empty((n_cobaya_init + n_sobol_init, self.ndim)), np.empty((n_cobaya_init + n_sobol_init, 1))

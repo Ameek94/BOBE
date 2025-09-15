@@ -168,9 +168,9 @@ class GP:
         optimizer_options : dict, optional
             Keyword arguments for the optimizer. Defaults to {'lr': 1e-3, 'name': 'adam'}.
         kernel_variance_bounds : list, optional
-            Bounds for the kernel variance (in log10 space). Defaults to [-4, 8].
+            Bounds for the kernel variance (in log space). Defaults to [-4, 8].
         lengthscale_bounds : list, optional
-            Bounds for the lengthscales (in log10 space). Defaults to [log10(0.05), 2].
+            Bounds for the lengthscales (in log space). Defaults to [log(0.05), 2].
         lengthscales : jnp.ndarray, optional
             Initial lengthscale values. If None, defaults to ones. Defaults to None.
         kernel_variance : float, optional
@@ -189,12 +189,12 @@ class GP:
             Initial tausq parameter for SAAS prior. Only used when lengthscale_prior='SAAS'. 
             If None, defaults to 1.0. Defaults to None.
         tausq_bounds : list, optional
-            Bounds for the tausq parameter (in log10 space). Only used when lengthscale_prior='SAAS'.
+            Bounds for the tausq parameter (in log space). Only used when lengthscale_prior='SAAS'.
             Defaults to [-4, 4].
         """
         # Setup and validate training data
         self._setup_training_data(train_x, train_y)
-        # print(f"shapes train_x: {self.train_x.shape}, train_y: {self.train_y.shape}")
+        self.param_names = param_names if param_names is not None else ['x_'+str(i) for i in range(self.ndim)]
 
         # Setup kernel and initial hyperparameters
         self.kernel_name = kernel if kernel == "rbf" else "matern"
@@ -220,7 +220,7 @@ class GP:
         # Store bounds
         self.lengthscale_bounds = lengthscale_bounds
         self.kernel_variance_bounds = kernel_variance_bounds
-        # Always store tausq for convenience even though it is only used for SAAS
+        # Can store tausq for convenience even though it is only used for SAAS
         self.tausq = tausq if tausq is not None else 1.0
         self.tausq_bounds = tausq_bounds
 
@@ -266,7 +266,6 @@ class GP:
         if not self.fixed_kernel_variance:
             self.kernel_variance_prior_dist = make_distribution(self.kernel_variance_prior_spec)
         else:
-            # Use dummy distribution that always returns log_prob = 0
             self.kernel_variance_prior_dist = DummyDistribution()
 
     def _setup_lengthscale_prior(self, lengthscale_prior):
@@ -289,18 +288,18 @@ class GP:
     def _setup_optimization_parameters(self):
         """Setup parameter names and bounds for optimization."""
         # Build parameter names and bounds based on what's being optimized
-        self.param_names = ['lengthscales']
+        self.hyperparam_names = ['lengthscales']
         self.hyperparam_bounds = [self.lengthscale_bounds] * self.ndim
         
         if not self.fixed_kernel_variance:
-            self.param_names.append('kernel_variance')
+            self.hyperparam_names.append('kernel_variance')
             self.hyperparam_bounds.append(self.kernel_variance_bounds)
             
         if self.lengthscale_prior_spec == 'SAAS':
-            self.param_names.append('tausq')
+            self.hyperparam_names.append('tausq')
             self.hyperparam_bounds.append(self.tausq_bounds)
 
-        self.hyperparam_bounds = jnp.log10(jnp.array(self.hyperparam_bounds).T)
+        self.hyperparam_bounds = jnp.log(jnp.array(self.hyperparam_bounds).T)
         self.num_hyperparams = self.hyperparam_bounds.shape[1]
         log.debug(f" Hyperparameter bounds =  {self.hyperparam_bounds}")
 
@@ -315,14 +314,14 @@ class GP:
         """SAAS prior log probability."""
         return saas_prior_logprob(lengthscales, kernel_variance, tausq)
     
-    def _parse_hyperparams(self, log10_params):
-        """Parse log10 parameters into lengthscales, kernel_variance, and optionally tausq."""
-        hyperparams = 10**log10_params
+    def _parse_hyperparams(self, log_params):
+        """Parse log parameters into lengthscales, kernel_variance, and optionally tausq."""
+        hyperparams = jnp.exp(log_params)
         lengthscales = hyperparams[:self.ndim]
         
         if self.fixed_kernel_variance:
             kernel_variance = self.kernel_variance  # Use fixed value
-            if 'tausq' in self.param_names:
+            if 'tausq' in self.hyperparam_names:
                 tausq = hyperparams[self.ndim] if len(hyperparams) > self.ndim else self.tausq
             else:
                 tausq = self.tausq
@@ -332,11 +331,11 @@ class GP:
             
         return lengthscales, kernel_variance, tausq
 
-    def neg_mll(self, log10_params):
+    def neg_mll(self, log_params):
         """
         Computes the negative log marginal likelihood for the GP with given hyperparameters.
         """
-        lengthscales, kernel_variance, tausq = self._parse_hyperparams(log10_params)
+        lengthscales, kernel_variance, tausq = self._parse_hyperparams(log_params)
         
         # Compute kernel matrix and MLL
         K = self.kernel(self.train_x, self.train_x, lengthscales, kernel_variance, noise=self.noise, include_noise=True)
@@ -351,11 +350,23 @@ class GP:
         """
         Performs a serial fit for a given batch of starting points (x0).
         This method is called by each MPI process on its assigned chunk.
+
+        Arguments
+        ---------
+        x0 : np.ndarray
+            Array of shape (n_restarts_chunk, n_params) containing starting points for optimization (in log space).
+        maxiter : int
+            Maximum number of iterations for the optimizer. Defaults to 500.
+
+        Returns
+        -------
+        result : dict
+            Dictionary containing the best 'mll' and corresponding 'params' (log space) found.
         """
 
         optimizer_options = self.optimizer_options.copy()
 
-        best_params_log10, best_loss = self.mll_optimize(
+        best_params_log, best_loss = self.mll_optimize(
             fun=self.neg_mll,
             num_params=self.num_hyperparams,
             bounds=self.hyperparam_bounds,
@@ -368,7 +379,7 @@ class GP:
         # Return the result in the format the pool expects
         return {
             'mll': -best_loss,
-            'params': best_params_log10 # Optionally return the raw params
+            'params': best_params_log # Optionally return the raw params
         }
 
     def update_hyperparams(self, hyperparams):
@@ -470,12 +481,8 @@ class GP:
                 self.y_std = 1.0
             
             self.train_y = (train_y_original - self.y_mean) / self.y_std
-        
-        if refit:
-            self.fit(maxiter=maxiter,n_restarts=n_restarts)
-        else:
+
             self.recompute_cholesky()
-        # print(f"shapes train_x: {self.train_x.shape}, train_y: {self.train_y.shape}")
 
 
     def recompute_cholesky(self):
@@ -513,6 +520,7 @@ class GP:
         """
         Returns a random point in the unit cube.
         """
+        log.debug(f"Getting random point in unit cube")
         rng = rng if rng is not None else get_numpy_rng()
         pt = rng.uniform(0, 1, size=self.train_x.shape[1])
         return pt
@@ -757,3 +765,21 @@ class GP:
     @property
     def npoints(self):
         return self.train_x.shape[0]
+    
+    def get_hyperparams(self):
+        hp = self.lengthscales
+        if not self.fixed_kernel_variance:
+            hp = jnp.hstack([hp, self.kernel_variance])
+        if self.lengthscale_prior_spec == 'SAAS':
+            hp = jnp.hstack([hp, self.tausq])
+        return hp
+    
+    def hyperparams_dict(self):
+        ls_str = {name: f"{float(val):.4f}" for name, val in zip(self.param_names, self.lengthscales)}
+        param_dict = {
+            'lengthscales': ls_str,
+            'kernel_variance': f"{float(self.kernel_variance):.4f}",
+        }
+        if 'tausq' in self.hyperparam_names:
+            param_dict['tausq'] = f"{float(self.tausq):.4f}"
+        return param_dict
