@@ -79,6 +79,7 @@ def prior_transform(x):
     return x
         
 
+
 def nested_sampling_Dy(gp: GP,
                        mode: str = 'acq',
                        ndim: int = 1,
@@ -140,46 +141,55 @@ def nested_sampling_Dy(gp: GP,
 
     start = time.time()
 
-    if mode == 'acq': # override for acquisition
-        nlive = max(100, min(500, 16 * ndim))
+    if mode == 'acq': # a bit lower precision settings for acquisition
+        nlive = max(100, min(500, 20 * ndim))
         dlogz = 0.1
         maxcall = int(2e6)
         equal_weights = True
     else:
-        nlive = 500 if ndim <= 15 else 750
+        nlive = max(250, 25 * ndim)
 
+    rng = rng if rng is not None else get_numpy_rng()
+
+    if isinstance(gp, GPwithClassifier):
+        maxtries = 1000
+        nlogl = 5000 * ndim
+        x = rng.uniform(low=0., high=1., size=(nlogl, ndim))
+        logl = jax.lax.map(loglike,x,batch_size=200)
+        logl = np.asarray(logl)
+        success = False
+        for i in range(maxtries):
+            live_indices = np.random.choice(nlogl, size=nlive, replace=False)
+            live_logl = logl[live_indices]
+            if np.all(live_logl == live_logl[0]):
+                log.debug(f" All logl values are the same on try {i+1}/{maxtries}. Retrying...")
+            else:
+                log.info(f" Successful live points on try {i+1}/{maxtries}.")
+                success = True
+                break
+        live_points = x[live_indices]
+        live_logl = logl[live_indices]
+        if not success:
+            valid_point = gp.get_random_point(rng=rng,nstd=1.0)
+            valid_logl = float(loglike(valid_point))
+            live_points[0] = valid_point
+            live_logl[0] = valid_logl
+    else:
+        live_points = rng.uniform(low=0., high=1., size=(nlive, ndim))
+        live_logl = jax.lax.map(loglike,live_points,batch_size=200)
+        live_logl = np.asarray(live_logl)
     
-    success = False
-    max_tries = 1000 # we can do lots since this is very fast in case of failure
-    n_tried = 0
-    while not success:  # loop in case of failure
-        if dynamic:
-            sampler = DynamicNestedSampler(loglike, prior_transform, ndim=ndim, blob=False,
-                                       sample=sample_method, nlive=nlive, rstate=rng)
-            sampler.run_nested(print_progress=print_progress, dlogz_init=dlogz, maxcall=maxcall)
-        else:
-            sampler = StaticNestedSampler(loglike, prior_transform, ndim=ndim, blob=False,
-                                      sample=sample_method, nlive=nlive, rstate=rng)
-            sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
-        res = sampler.results  # type: ignore # grab our results
-        logl = res['logl']
-        n_tried += 1
-        # add check for all same logl values in case of initial plateau
-        if np.all(logl == logl[0]):
-            success = False
-            log.debug(f" All logl values are the same on try {n_tried+1}/{max_tries}. Retrying...")
-        else:
-            success = True
-            log.info(f" Successful result on try {n_tried}/{max_tries}.")
-        if n_tried >= max_tries:
-            log.warning("Nested sampling failed after maximum retries. Exiting.")
-            break
-        if n_tried==50 or n_tried==100 or n_tried==500:
-            nlive = 2*nlive
-            log.warning(f"Unable to get non-constant logl values in {n_tried} tries. Retrying with increased nlive.")
+    # if dynamic:
+    #     sampler = DynamicNestedSampler(loglike, prior_transform, ndim=ndim, blob=False,
+    #                                    sample=sample_method, nlive=nlive, rstate=rng)
+    #     sampler.run_nested(print_progress=print_progress, dlogz_init=dlogz, maxcall=maxcall)
+    # else:
 
-        #   need a better method to guarantee that at least one finite logl present, can we give the live points directly?
-        
+    sampler = StaticNestedSampler(loglike, prior_transform, ndim=ndim, blob=False
+                                  ,live_points=[live_points,live_points,live_logl]
+                                  ,sample=sample_method, nlive=nlive, rstate=rng)
+    sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
+    
     res = sampler.results
     mean = res['logz'][-1]
     logz_err = res['logzerr'][-1]
@@ -224,3 +234,35 @@ def nested_sampling_Dy(gp: GP,
     samples_dict['logvol'] = logvol
     samples_dict['method']= 'nested'
     return (samples_dict, logz_dict, success)
+
+
+    # success = False
+    # max_tries = 1000 # we can do lots since this is very fast in case of failure
+    # n_tried = 0
+    # while not success:  # loop in case of failure
+    #     if dynamic:
+    #         sampler = DynamicNestedSampler(loglike, prior_transform, ndim=ndim, blob=False,
+    #                                    sample=sample_method, nlive=nlive, rstate=rng)
+    #         sampler.run_nested(print_progress=print_progress, dlogz_init=dlogz, maxcall=maxcall)
+    #     else:
+    #         sampler = StaticNestedSampler(loglike, prior_transform, ndim=ndim, blob=False,
+    #                                   sample=sample_method, nlive=nlive, rstate=rng)
+    #         sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
+    #     res = sampler.results  # type: ignore # grab our results
+    #     logl = res['logl']
+    #     n_tried += 1
+    #     # add check for all same logl values in case of initial plateau
+    #     if np.all(logl == logl[0]):
+    #         success = False
+    #         log.debug(f" All logl values are the same on try {n_tried+1}/{max_tries}. Retrying...")
+    #     else:
+    #         success = True
+    #         log.info(f" Successful result on try {n_tried}/{max_tries}.")
+    #     if n_tried >= max_tries:
+    #         log.warning("Nested sampling failed after maximum retries. Exiting.")
+    #         break
+    #     if n_tried==50 or n_tried==100 or n_tried==500:
+    #         nlive = 2*nlive
+    #         log.warning(f"Unable to get non-constant logl values in {n_tried} tries. Retrying with increased nlive.")
+
+        #   need a better method to guarantee that at least one finite logl present, can we give the live points directly?

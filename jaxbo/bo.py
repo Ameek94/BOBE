@@ -585,15 +585,14 @@ class BOBE:
             if ns_flag:
                 log.info("Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
-                self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
+                ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
                     gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01, equal_weights=False,
                     rng=self.np_rng
                 )
                 self.results_manager.end_timing('Nested Sampling')
-
-                log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
-
                 if ns_success:
+                    self.ns_samples = ns_samples
+                    log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
                     equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
                     self.mc_samples = {
                         'x': equal_samples,
@@ -654,8 +653,8 @@ class BOBE:
                 gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01, rng=self.np_rng
             )
             self.results_manager.end_timing('Nested Sampling')
-            log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
             if ns_success:
+                log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
                 equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
                 log.info(f"Using nested sampling results")
                 self.check_convergence_WIPV(ii+1, logz_dict, equal_samples, equal_logl)
