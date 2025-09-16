@@ -271,7 +271,7 @@ class BOBE:
             train_y = jnp.array(init_vals)
         
 
-            gp_kwargs.update({'train_x': train_x, 'train_y': train_y, 'param_names': self.loglikelihood.param_list})
+            gp_kwargs.update({'train_x': train_x, 'train_y': train_y, 'param_names': self.loglikelihood.param_list, 'optimizer': optimizer})
             if use_clf:
                 # Add clf specific parameters to gp_init_kwargs
                 clf_threshold = max(100,get_threshold_for_nsigma(clf_nsigma_threshold,self.ndim))
