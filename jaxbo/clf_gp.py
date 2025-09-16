@@ -124,9 +124,20 @@ class GPwithClassifier(GP):
 
         if self.use_clf:
              if train_clf_on_init:
-                 self._train_classifier()
+                 self.train_classifier()
         else:
              log.info(f"Not enough data ({self.clf_data_size}) to use classifier (need {self.clf_use_size} points), or classifier type not set.")
+
+    def train_classifier(self):
+        """Public method to train/retrain the classifier."""
+        # Check if classifier data size has reached the threshold
+        if not self.use_clf:
+            if self.clf_data_size >= self.clf_use_size:
+                log.info(f"Classifier data size ({self.clf_data_size}) reached use size ({self.clf_use_size}). Will start using classifier.")
+                self.use_clf = True
+
+        if self.use_clf: 
+            self._train_classifier()
 
     def _train_classifier(self):
         """Trains the classifier based on clf_type."""
@@ -237,16 +248,6 @@ class GPwithClassifier(GP):
             self.recompute_cholesky()
 
             log.info(f"Classifier data size: {self.train_y_clf.shape[0]},  GP data size: {self.train_y.shape[0]}")
-
-            # Check if classifier data size has reached the threshold
-            if not self.use_clf:
-                if self.clf_data_size >= self.clf_use_size:
-                    log.info(f"Classifier data size ({self.clf_data_size}) reached use size ({self.clf_use_size}). Will start using classifier.")
-                    self.use_clf = True
-
-            # Retrain classifier if conditions are met
-            if self.use_clf: 
-                self._train_classifier()
 
     def kernel(self,x1,x2,lengthscales,kernel_variance,noise,include_noise=True):
         """

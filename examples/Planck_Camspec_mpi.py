@@ -31,8 +31,6 @@ def main():
     """
     Main function to configure and run the Bayesian optimization.
     """
-    # Determine classifier update step based on type
-    clf_update_step = 1 if clf_type == 'svm' else 2
 
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/LCDM_Planck_DESIDr2.yaml'

@@ -55,6 +55,8 @@ class BOBE:
                  min_evals=200,
                  max_evals=1500,
                  max_gp_size=1200,
+                 pool: MPI_Pool = None,
+                 use_gp_pool=True,
                  resume=False,
                  resume_file=None,
                  save_dir='.',
@@ -81,9 +83,6 @@ class BOBE:
                  logz_threshold=0.01,
                  convergence_n_iters=1,
                  minus_inf=-1e5,
-                 pool: MPI_Pool = None,
-                 use_pool_likelihood: bool = True,
-                 use_pool_gp_fit: bool = True,
                  do_final_ns=False,
                  seed: Optional[int] = None,
                  ):
@@ -156,6 +155,7 @@ class BOBE:
         """
 
         self.pool = pool
+        self.use_gp_pool = use_gp_pool
 
 
         set_global_seed(seed)
@@ -223,8 +223,6 @@ class BOBE:
             resume_from_existing=resume
         )
 
-        self.use_pool_likelihood = use_pool_likelihood #
-        self.use_pool_gp_fit = use_pool_gp_fit #
         self.fresh_start = not resume  # Flag to indicate if we are starting fresh or resuming
         
         if resume and resume_file is not None:
@@ -291,7 +289,7 @@ class BOBE:
                 self.gp = GP(**gp_kwargs)
             self.results_manager.start_timing('GP Training')
             log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
-            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500)
+            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500,use_pool=self.use_gp_pool,rng=self.np_rng)
             log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
             self.results_manager.end_timing('GP Training')
 
@@ -349,7 +347,7 @@ class BOBE:
         self.gp.update(new_pts_u, new_vals) # add verbose
         if refit:
             log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
-            self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
+            self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter,rng=self.np_rng,use_pool=self.use_gp_pool)
             log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
         self.results_manager.end_timing('GP Training')
 
@@ -357,6 +355,13 @@ class BOBE:
         lengthscales = list(self.gp.lengthscales)
         kernel_variance = float(self.gp.kernel_variance)
         self.results_manager.update_gp_hyperparams(step, lengthscales, kernel_variance)
+
+        if isinstance(self.gp, GPwithClassifier):
+            self.results_manager.start_timing('Classifier Training')
+            self.gp.train_classifier()
+            self.results_manager.end_timing('Classifier Training')
+
+        
 
     def get_next_batch(self, acq_kwargs, n_batch, n_restarts, maxiter, early_stop_patience, step, verbose=True):
         """

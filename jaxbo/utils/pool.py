@@ -1,11 +1,7 @@
+import time
 import numpy as np
 import jax.numpy as jnp
-import sys
-import os
 from typing import Callable, Dict, List, Any, Union, Optional, Tuple
-import importlib
-import pickle
-import inspect
 from jaxbo.utils.seed_utils import set_global_seed, get_numpy_rng, get_new_jax_key
 from jaxbo.utils.logging_utils import get_logger
 from jaxbo.gp import GP
@@ -69,6 +65,7 @@ class MPI_Pool:
                     
                 elif task_type == self.TASK_GP_FIT:
                         # Receive payload and task_index
+                        start = time.time()
                         payload = data
                         state_dict = payload['state_dict']
                         fit_params = payload['fit_params']
@@ -78,9 +75,13 @@ class MPI_Pool:
                             # worker_gp = GPwithClassifier.from_state_dict(state_dict)
                         # else:
                         worker_gp = GP.from_state_dict(state_dict)
+                        end = time.time()
+                        print(f"[{self.rank}]: Worker received GP fit task and initialised GP in {end - start:.2f} seconds.")
 
                         fit_results = worker_gp.fit(**fit_params)
                         self.comm.send(fit_results, dest=0)
+                        end = time.time()
+                        print(f"[{self.rank}]: Worker completed GP fit task in {end - start:.2f} seconds.")
 
                 elif task_type == self.TASK_COBAYA_INIT:
                     # This task type doesn't need input data, just the index
@@ -174,7 +175,7 @@ class MPI_Pool:
 
         return np.array(results)
 
-    def gp_fit(self, gp: GP, maxiters=1000, n_restarts=8, rng=None):
+    def gp_fit(self, gp: GP, maxiters=1000, n_restarts=8, rng=None, use_pool=True):
         """
         Orchestrates a parallel GP hyperparameter fit, ensuring at least one
         restart per MPI process.
@@ -199,7 +200,7 @@ class MPI_Pool:
             x0 = np.atleast_2d(init_params)
 
         # If not running in MPI, call the GP's local fit method and return
-        if not self.is_mpi:
+        if not self.is_mpi or not use_pool:
             log.info(f"Running serial GP fit with {n_restarts} restarts.")
             results = gp.fit(x0=x0, maxiter=maxiters)
             gp.update_hyperparams(results['params'])

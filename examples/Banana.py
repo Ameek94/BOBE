@@ -46,6 +46,7 @@ def main():
             'minus_inf': -1e5,
         },
         verbosity='INFO',
+        use_gp_pool=True,
         n_cobaya_init=4,
         n_sobol_init=8,
         min_evals=18,

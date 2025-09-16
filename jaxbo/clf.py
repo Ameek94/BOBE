@@ -111,6 +111,12 @@ def train_ellipsoid_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     d = X.shape[1]
     mu = kwargs.get('best_pt', 0.5*jnp.ones(d))
     
+    # label_size = X.shape[0]
+    # if label_size < 500:
+    #     settings.update({'batch_size': 64})
+    # else:
+    #     settings.update({'batch_size': 128})    
+
     # Create model with settings
     model = EllipsoidClassifier(d=d, mu=mu, **settings)
     
@@ -410,9 +416,9 @@ class EllipsoidClassifier(nn.Module):
     init_scale: float = 0.1
     lr: float = 1e-2
     weight_decay: float = 1e-4
-    n_epochs: int = 500
+    n_epochs: int = 1000
     batch_size: int = 64
-    patience: int = 50
+    patience: int = 25
     n_restarts: int = 2
     val_frac: float = 0.1
     seed_offset: int = 0
