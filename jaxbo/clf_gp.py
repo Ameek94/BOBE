@@ -92,9 +92,13 @@ class GPwithClassifier(GP):
 
 
         # Prepare GP Data
-        mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
-        train_x_gp = self.train_x_clf[mask_gp]
-        train_y_gp = self.train_y_clf[mask_gp] 
+        if self.train_y_clf.size > 0:
+            mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
+            train_x_gp = self.train_x_clf[mask_gp]
+            train_y_gp = self.train_y_clf[mask_gp] 
+        else:
+            train_x_gp = self.train_x_clf
+            train_y_gp = self.train_y_clf
 
         # Initialize GP using inheritance
         gp_init_kwargs = {

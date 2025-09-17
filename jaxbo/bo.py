@@ -291,10 +291,14 @@ class BOBE:
             self.results_manager.start_timing('GP Training')
             self.gp.fit(maxiter=500,n_restarts=4)
             self.results_manager.end_timing('GP Training')
-
-        idx_best = jnp.argmax(self.gp.train_y)
-        self.best_pt = scale_from_unit(self.gp.train_x[idx_best], self.loglikelihood.param_bounds).flatten()
-        best_f_from_gp = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
+            
+        if self.gp.train_y.size > 0: 
+            idx_best = jnp.argmax(self.gp.train_y) 
+            self.best_pt = scale_from_unit(self.gp.train_x[idx_best], self.loglikelihood.param_bounds).flatten()
+            best_f_from_gp = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
+        else:
+            best_f_from_gp = -np.inf
+            self.best_pt = None
 
         # Use restored best_f if available and better, otherwise use GP's best
         if not hasattr(self, 'best_f') or best_f_from_gp > getattr(self, 'best_f', -np.inf):
@@ -303,8 +307,9 @@ class BOBE:
             if not hasattr(self, 'best_pt_iteration'):
                 self.best_pt_iteration = self.start_iteration
 
-        self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
-        log.info(f" Initial best point {self.best} with value = {self.best_f:.6f}")
+        if self.best_pt != None:
+            self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
+            log.info(f" Initial best point {self.best} with value = {self.best_f:.6f}")
 
         # Store remaining settings
         self.min_evals = min_evals
@@ -712,7 +717,7 @@ class BOBE:
             cov1 = np.cov(prev_samples_x, rowvar=False)
             mu2 = np.mean(equal_samples, axis=0)
             cov2 = np.cov(equal_samples, rowvar=False)
-            successive_kl = kl_divergence_gaussian(mu1, cov1, mu2, cov2)
+            successive_kl = kl_divergence_gaussian(mu1, np.atleast_2d(cov1), mu2, np.atleast_2d(cov2))
 
             log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
             # Store KL divergences if computed
