@@ -1,18 +1,13 @@
 # Class for implementing external loglikelihoods
 from .utils.core_utils import scale_to_unit, scale_from_unit
-from typing import Any, Callable, List,Optional, Tuple, Union, Dict
+from typing import Any, Callable, List, Optional, Tuple, Union, Dict
 import numpy as np
 from functools import partial
 from scipy.stats import qmc
 from .utils.logging_utils import get_logger
 from .utils.seed_utils import get_numpy_rng
-from .utils.pool import MPI_Pool
 import logging
-import numpy as np
 import tqdm
-from typing import Any, Callable, List, Optional, Union, Dict
-from .utils.core_utils import scale_from_unit
-from .utils.logging_utils import get_logger
 
 log = get_logger("likelihood")
 
@@ -29,8 +24,7 @@ class BaseLikelihood:
                  param_bounds: Optional[Union[List, np.ndarray]] = None,
                  noise_std: float = 0.,
                  name: Optional[str] = None,
-                 minus_inf: float = -1e5,
-                 pool: MPI_Pool = None):
+                 minus_inf: float = -1e5):
         
         if logp_args or logp_kwargs:
             self.logp = partial(loglikelihood, *(logp_args or ()), **(logp_kwargs or {}))
@@ -53,14 +47,11 @@ class BaseLikelihood:
         self.name = name or "loglikelihood"
         self.minus_inf = minus_inf
         self.logprior_vol = np.log(np.prod(self.param_bounds[1] - self.param_bounds[0]))
-        self.pool = pool if pool is not None else MPI_Pool()
 
         log.info(f"Initialized {self.name} with {self.ndim} params")
-
-        if self.pool.is_master:
-            log.info(f"Param list: {self.param_list}")
-            log.info(f"Param lower bounds: {self.param_bounds[0]}")
-            log.info(f"Param upper bounds: {self.param_bounds[1]}")
+        log.info(f"Param list: {self.param_list}")
+        log.info(f"Param lower bounds: {self.param_bounds[0]}")
+        log.info(f"Param upper bounds: {self.param_bounds[1]}")
 
     def _safe_eval(self, x: np.ndarray) -> float:
         """Helper method to safely evaluate a single point."""
@@ -98,25 +89,17 @@ class BaseLikelihood:
 
         sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=rng).random(n_sobol_init)
         sobol_points = scale_from_unit(sobol, self.param_bounds)
-        
-        # The master process calls this method. It then calls pool.run_map(self, sobol_points)
-        # to get the values, which works in both modes. Initial points are always generated on the master when going through run.py.
-        
-        if self.pool.is_master:
-             log.info(f"Evaluating Likelihood at initial Sobol points")
-             vals = self.pool.run_map_objective(self.__call__, sobol_points)
-        else:
-            # Workers don't generate initial points
-            vals = np.empty((n_sobol_init, 1))
 
+        # Evaluate Sobol points serially (bo.py will handle multi-process orchestration)
+        vals = self.__call__(sobol_points)
         return np.array(sobol_points), np.array(vals).reshape(n_sobol_init, 1)
 
 
 class ExternalLikelihood(BaseLikelihood):
     """Wrapper around a user-provided log-likelihood function."""
 
-    def __init__(self, loglikelihood: Callable, pool: MPI_Pool, **kwargs):
-        super().__init__(loglikelihood=loglikelihood, pool=pool, **kwargs)
+    def __init__(self, loglikelihood: Callable, **kwargs):
+        super().__init__(loglikelihood=loglikelihood, **kwargs)
 
 class CobayaLikelihood(BaseLikelihood):
     """Likelihood wrapper for Cobaya models."""
@@ -127,7 +110,7 @@ class CobayaLikelihood(BaseLikelihood):
                  noise_std: float = 0,
                  minus_inf: float = -1e5,
                  name: str = "cobaya_model",
-                 pool: MPI_Pool = None):
+                 **kwargs):
         
         try:
             from cobaya.yaml import yaml_load
@@ -159,7 +142,7 @@ class CobayaLikelihood(BaseLikelihood):
                          noise_std=noise_std,
                          name=name,
                          minus_inf=minus_inf,
-                         pool=pool)
+                         **kwargs)
 
         self.cobaya_model = cobaya_model
         log.info(f"Logprior volume = {self.logprior_vol:.4f}")
@@ -196,25 +179,12 @@ class CobayaLikelihood(BaseLikelihood):
         and a Sobol sequence. This method is the orchestrator.
         """
 
-        # Sobol point generation from base class 
+        # Sobol point generation from base class (serial)
         points, vals = super().get_initial_points(n_sobol_init, rng=rng)
-        
 
-        # This entire method is master-only logic
-        if not self.pool.is_master:
-            # Workers should not call this directly; they return empty arrays to
-            # prevent errors in the main script's initialization flow.
-            return np.empty((n_cobaya_init + n_sobol_init, self.ndim)), \
-                   np.empty((n_cobaya_init + n_sobol_init, 1))
-        
         if n_cobaya_init > 0:
-            # The pool commands the workers to run '_get_single_valid_point' on their pre-initialized 'likelihood' object.
-            if self.pool.is_mpi:
-                log.info(f"Evaluating {n_cobaya_init} initial Cobaya points in parallel...")
-                cobaya_results = self.pool.get_cobaya_initial_points(n_points=n_cobaya_init)
-            else:
-                log.info(f"Evaluating {n_cobaya_init} initial Cobaya points in serial...")
-                cobaya_results = [self._get_single_valid_point(rng=rng) for _ in range(n_cobaya_init)]
+            log.info(f"Evaluating {n_cobaya_init} initial Cobaya points (serial)")
+            cobaya_results = [self._get_single_valid_point(rng=rng) for _ in range(n_cobaya_init)]
             if cobaya_results:
                 cobaya_points, cobaya_logpost = zip(*cobaya_results)
                 cobaya_points = np.array(cobaya_points)

@@ -183,8 +183,8 @@ class MPI_Pool:
         if self.is_worker:
             return None
 
-        # Adjust n_restarts to be at least equal to the number of processes and cap to 2 restarts per process
-        if self.is_mpi:
+        # Adjust n_restarts to be at least equal to the number of processes and cap to 2 restarts per process if using pool
+        if self.is_mpi and use_pool:
             n_restarts = max(self.size, n_restarts)
             n_restarts = min(n_restarts, 2 * self.size)
 

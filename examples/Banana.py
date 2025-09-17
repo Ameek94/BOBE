@@ -63,6 +63,7 @@ def main():
         thinning=4,
         num_chains=4,
         use_clf=True,
+        clf_type='nn',
         minus_inf=-1e5,
         logz_threshold=1e-3,
         seed=42,
