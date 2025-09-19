@@ -339,13 +339,21 @@ class BOBE:
         """
         self.results_manager.start_timing('GP Training')
         if self.gp.train_x.shape[0] < 200:
-            # Override refit for small training sets
-            refit = True
+            # Override refit for small training sets to do more frequent fitting
+            override_fit_step = min(2, self.fit_step)
+            refit = (step % override_fit_step == 0)
             maxiter = 1000
             n_restarts = 8
-        else:
+        elif 200 < self.gp.train_x.shape[0] < 800:
+            # for moderate size training sets
             n_restarts = 4
             maxiter = 500
+        else:
+            # for large training sets we don't need to do too many restarts or frequent fitting
+            n_restarts = 4
+            maxiter = 200
+            override_fit_step = max(10, self.fit_step)
+            refit = (step % override_fit_step == 0)  
         self.gp.update(new_pts_u, new_vals, refit=refit, n_restarts=n_restarts, maxiter=maxiter) # add verbose
         self.results_manager.end_timing('GP Training')
 
@@ -478,7 +486,7 @@ class BOBE:
                 print("\n")
                 log.info(f" Iteration {ii} of {self.acquisition.name}, objective evals {current_evals}/{self.max_evals}, refit={refit}")
 
-            acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten())}
+            acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten()) if self.gp.train_y.size > 0 else 0.}
             n_batch = 1
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = n_batch, n_restarts = 50, maxiter = 1000, early_stop_patience = 50, step = ii, verbose=verbose)
             new_pts_u = jnp.atleast_2d(new_pts_u)

@@ -28,7 +28,6 @@ extensions = [
     "sphinx.ext.coverage",
     "sphinx.ext.mathjax",
     "sphinx_autodoc_typehints",
-    "myst_nb",      # For both Markdown and Jupyter notebook support
 ]
 
 # Autodoc settings
