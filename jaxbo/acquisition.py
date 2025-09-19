@@ -400,6 +400,68 @@ class WIPV(AcquisitionFunction):
                                   n_restarts=1,
                                   verbose=verbose)
 
+class WIPStd(AcquisitionFunction):
+    """Weighted Integrated Posterior Standard Deviation acquisition function"""
+
+    name: str = "WIPV"
+
+    def __init__(self,
+                 optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {}):
+
+        super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
+
+    def fun(self, x, gp,  mc_points=None, k_train_mc = None):
+        std = jnp.sqrt(gp.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc)) #change this for testing WIPstd
+        return jnp.mean(std)
+
+
+    def get_next_point(self, gp,
+                 acq_kwargs,
+                 maxiter: int = 100,
+                 n_restarts: int = 1,
+                 verbose: bool = True,
+                 early_stop_patience: int = 25,
+                 rng=None):
+        
+        mc_samples = acq_kwargs.get('mc_samples')
+        mc_points_size = acq_kwargs.get('mc_points_size', 128)
+        mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
+        k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.kernel_variance, gp.noise, include_noise=False)
+        # print(f"Using {mc_points_size} MC points for WIPV acquisition, shapes: mc_points {mc_points.shape}, k_train_mc {k_train_mc.shape}")
+
+
+
+        @jax.jit
+        def mapped_fn(x):
+            return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
+        # acq_vals = []
+        # for i in range(mc_points.shape[0]):
+        #     acq_vals.append(mapped_fn(mc_points[i]))
+        # acq_vals = jnp.array(acq_vals)
+        acq_vals = lax.map(mapped_fn, mc_points)
+        acq_val_min = jnp.min(acq_vals)
+        log.info(f"WIPStd acquisition min value on MC points: {float(acq_val_min):.4e}")
+        best_x = mc_points[jnp.argmin(acq_vals)]
+        # print(f'WIPV best_x from MC points: {best_x}')
+        x0_acq = best_x
+
+        # print(f'shape x0_acq: {x0_acq.shape}, best_x shape: {best_x.shape}, nrestarts: {n_restarts}, acq_vals shape: {acq_vals.shape}')
+
+        if gp.train_x.shape[0] > 750:
+            return x0_acq, float(acq_val_min)
+        else:
+            return self.acq_optimize(fun=self.fun,
+                                  fun_args=(gp,),
+                                  fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
+                                  num_params=gp.ndim,
+                                  x0=x0_acq,
+                                  bounds = [0,1],
+                                  optimizer_options=self.optimizer_options,
+                                  maxiter=maxiter,
+                                  n_restarts=1,
+                                  verbose=verbose)
+
+
 def get_mc_samples(gp: GP,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",num_chains=4,np_rng=None,rng_key=None):
     if method=='NUTS':
         try:

@@ -21,7 +21,7 @@ from .utils.pool import MPI_Pool
 log = get_logger("bo")
 log.info(f'JAX using {jax.device_count()} devices.')
 
-_acq_funcs = {"wipv": WIPV, "ei": EI, "logei": LogEI}
+_acq_funcs = {"wipv": WIPV, "ei": EI, "logei": LogEI, 'wipstd': WIPStd}
 
 
 
@@ -443,6 +443,8 @@ class BOBE:
             self.acquisition = _acq_funcs[acq.lower()](optimizer=self.optimizer)  # Set acquisition function
             if acq.lower() == 'wipv':
                 self.run_WIPV(ii=self.current_iteration)
+            elif acq.lower() == 'wipstd':
+                self.run_WIPStd(ii=self.current_iteration)
             else:
                 self.run_EI(ii=self.current_iteration)
 
@@ -540,6 +542,153 @@ class BOBE:
         else:
             self.convergence_counter = 0  # Reset counter if not converged
             return False
+
+
+    def run_WIPStd(self, ii = 0):
+        """
+        Run the optimization loop for WIPV acquisition function.
+        """
+        self.acquisition = WIPStd(optimizer=self.optimizer)  # Set acquisition function to WIPV
+        current_evals = self.gp.npoints
+        self.results_manager.start_timing('MCMC Sampling')
+        self.mc_samples = get_mc_samples(
+            self.gp,
+            warmup_steps=self.num_hmc_warmup,
+            num_samples=self.num_hmc_samples,
+            thinning=self.hmc_thinning,
+            num_chains=self.hmc_num_chains,
+            np_rng=self.np_rng,
+            rng_key=get_jax_key(),
+            method=self.mc_points_method,
+        )
+        self.results_manager.end_timing('MCMC Sampling')
+        self.ns_samples = None
+
+        while not self.converged:
+            ii += 1
+            refit = (ii % self.fit_step == 0)
+            ns_flag = (ii % self.ns_step == 0) and current_evals >= self.min_evals
+            verbose = True
+
+            if verbose:
+                print("\n")
+                log.info(f" Iteration {ii} of WIPStd, objective evals {current_evals}/{self.max_evals}, refit={refit}, ns={ns_flag}")
+
+            acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
+            new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
+            new_pts_u = jnp.atleast_2d(new_pts_u)
+            new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
+            current_evals += self.wipv_batch_size
+
+
+            self.update_gp(new_pts_u, new_vals, step = ii, refit=refit)
+            self.results_manager.update_best_loglike(ii, self.best_f)
+
+            # Check convergence and update MCMC samples
+            if ns_flag:
+                log.info("Running Nested Sampling")
+                self.results_manager.start_timing('Nested Sampling')
+                self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
+                    gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01, equal_weights=False,
+                    rng=self.np_rng
+                )
+                self.results_manager.end_timing('Nested Sampling')
+
+                log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
+
+                if ns_success:
+                    equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
+                    self.mc_samples = {
+                        'x': equal_samples,
+                        'logl': equal_logl,
+                        'weights': np.ones(equal_samples.shape[0]),
+                        'method': 'NS',
+                        'best': self.ns_samples['best']
+                    }
+                    self.converged = self.check_convergence_WIPV(ii, logz_dict, equal_samples, equal_logl)
+                    if self.converged:
+                        self.termination_reason = "LogZ converged"
+                        self.results_dict['logz'] = logz_dict
+                        self.results_dict['termination_reason'] = self.termination_reason
+            else:
+                self.results_manager.start_timing('MCMC Sampling')
+                self.mc_samples = get_mc_samples(
+                        self.gp,
+                        warmup_steps=self.num_hmc_warmup,
+                        num_samples=self.num_hmc_samples,
+                        thinning=self.hmc_thinning,
+                        num_chains=self.hmc_num_chains,
+                        method=self.mc_points_method,
+                        np_rng=self.np_rng,
+                        rng_key=get_jax_key()
+                    )
+                self.results_manager.end_timing('MCMC Sampling')
+            
+            if verbose:
+                log.info(f" Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
+
+            # Update results manager with iteration info, also save results and gp if save_step
+            if ii % self.save_step == 0:
+                self.results_manager.save_intermediate(gp=self.gp)
+
+            if self.converged:
+                break
+            
+            jax.clear_caches()
+
+            max_evals_or_gpsize_reached = self.check_max_evals_and_gpsize(current_evals)
+            if max_evals_or_gpsize_reached:
+                break
+
+
+        # End of main BO loop for WIPV
+        self.current_iteration = ii
+
+        # Final nested sampling if not yet converged and do_final_ns is True
+        if self.do_final_ns and not self.converged:
+            
+            self.results_manager.start_timing('GP Training')
+            self.gp.fit()
+            self.results_manager.end_timing('GP Training')
+
+            log.info(" Final Nested Sampling")
+            self.results_manager.start_timing('Nested Sampling')
+            self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
+                gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01, rng=self.np_rng
+            )
+            self.results_manager.end_timing('Nested Sampling')
+            log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
+            if ns_success:
+                equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
+                log.info(f"Using nested sampling results")
+                self.check_convergence_WIPV(ii+1, logz_dict, equal_samples, equal_logl)
+                if self.converged:
+                    self.termination_reason = "LogZ converged"
+                    self.results_dict['logz'] = logz_dict
+                    self.results_dict['termination_reason'] = self.termination_reason
+
+        if (self.ns_samples is not None) and ns_success:
+            samples = self.ns_samples['x']
+            weights = self.ns_samples['weights']
+            loglikes = self.ns_samples['logl']
+        else:
+            log.info("No nested sampling results found or nested sampling unsuccessful, MC samples from HMC/MCMC will be used instead.")
+            self.results_manager.start_timing('MCMC Sampling')
+            mc_samples = get_mc_samples(
+                    self.gp, warmup_steps=512, num_samples=2000*self.ndim,
+                    thinning=4, method="NUTS")
+            self.results_manager.end_timing('MCMC Sampling')
+            samples = mc_samples['x']
+            weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
+            loglikes = mc_samples['logp']
+                
+        samples = scale_from_unit(samples, self.loglikelihood.param_bounds)
+
+        self.samples_dict = {
+            'x': samples,
+            'weights': weights,
+            'logl': loglikes
+        }
 
     def run_WIPV(self, ii = 0):
         """
