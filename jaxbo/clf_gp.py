@@ -278,12 +278,17 @@ class GPwithClassifier(GP):
             pt = super().get_random_point(rng=rng, nstd=nstd)
 
         return pt
-    
-    def state_dict(self):
+
+    def state_dict(self, include_clf=False):
         """
         Returns a dictionary containing the complete state of the GPwithClassifier.
         This can be used for saving, loading, or copying the GPwithClassifier.
-        
+
+        Arguments
+        ---------
+        include_clf: bool
+            Whether to include classifier-specific state information.
+
         Returns
         -------
         state: dict
@@ -291,11 +296,12 @@ class GPwithClassifier(GP):
         """
         # Start with the base GP state
         state = super().state_dict()
-        
-        # Add classifier-specific data
-        classifier_state = {
-            # Classifier training data
-            'train_x_clf': np.array(self.train_x_clf),
+
+        if include_clf:
+            # Add classifier-specific data
+            classifier_state = {
+                # Classifier training data
+                'train_x_clf': np.array(self.train_x_clf),
             'train_y_clf': np.array(self.train_y_clf),
             
             # Classifier configuration
@@ -315,10 +321,9 @@ class GPwithClassifier(GP):
             
             # Class identifier
             'gp_class': 'GPwithClassifier'
-        }
-        
-        # Update the state with classifier-specific data
-        state.update(classifier_state)
+            } 
+            # Update the state with classifier-specific data
+            state.update(classifier_state)
         
         return state
     
@@ -363,13 +368,7 @@ class GPwithClassifier(GP):
             tausq_bounds=state.get('tausq_bounds', [-4, 4]),
             train_clf_on_init=state.get('train_clf_on_init', True),
         )
-        
-        # # Restore computed state if available
-        # if state.get('cholesky') is not None:
-        #     gp_clf.cholesky = jnp.array(state['cholesky'])
-        # if state.get('alphas') is not None:
-        #     gp_clf.alphas = jnp.array(state['alphas'])
-        
+                
         # Restore classifier state
         gp_clf.use_clf = state['use_clf']
         gp_clf.clf_params = state.get('clf_params')
@@ -401,7 +400,7 @@ class GPwithClassifier(GP):
         if not filename.endswith('.npz'):
             filename += '.npz'
         
-        state = self.state_dict()
+        state = self.state_dict(include_clf=True)
         np.savez(filename, **state)
         log.info(f"Saved GPwithClassifier state to {filename}")
 
@@ -454,7 +453,6 @@ class GPwithClassifier(GP):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
-        Optionally restarts MCMC if all logp values are the same or if HMC fails. (RESTART LOGIC TO BE IMPLEMENTED)
         """        
 
         rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()

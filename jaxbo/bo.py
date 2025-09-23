@@ -46,7 +46,7 @@ def load_gp(filename: str, clf: bool) -> Union[GP, GPwithClassifier]:
 class BOBE:
 
     def __init__(self,
-                loglikelihood=None,
+                 loglikelihood: Union[BaseLikelihood, CobayaLikelihood] = None,
                  gp_kwargs: Dict[str, Any] = {},
                  n_cobaya_init=4,
                  n_sobol_init=32,
@@ -152,162 +152,26 @@ class BOBE:
             - kernel_variance: Initial kernel variance value (float)
         """
 
-        # self.pool = pool
-        # self.use_gp_pool = use_gp_pool
-
         if is_main_process():
-            set_global_seed(seed)
+            seed = set_global_seed(seed)
         else:
             local_seed = seed + get_mpi_rank()
         set_global_seed(local_seed)
+
         self.np_rng = get_numpy_rng()
 
         if not isinstance(loglikelihood, BaseLikelihood):
-            raise ValueError("loglikelihood must be an instance of ExternalLikelihood")
-
-        self.loglikelihood = loglikelihood
-        self.ndim = len(self.loglikelihood.param_list)
-
-        # Store basic settings needed for results manager early
-        self.output_file = self.loglikelihood.name
-        self.save_dir = save_dir
-        if self.save:
-            os.makedirs(self.save_dir, exist_ok=True)
-        self.save_path = os.path.join(self.save_dir, self.output_file)
-        self.do_final_ns = do_final_ns
-        self.logz_threshold = logz_threshold
-        self.convergence_n_iters = convergence_n_iters
-        self.converged = False
-        self.prev_converged = False
-        self.convergence_counter = 0  # Track successive convergence iterations
-        self.min_delta_seen = np.inf  # Track minimum delta for checkpoint saving
-        self.termination_reason = "Max evaluation budget reached"
-        self.ei_goal_log = np.log(ei_goal)
-
+            raise ValueError("loglikelihood must be an instance of BaseLikelihood")
         if optimizer.lower() not in ['optax', 'scipy']:
             raise ValueError("optimizer must be either 'optax' or 'scipy'")
-        self.optimizer = optimizer
-        
-        # Initialize results manager BEFORE any timing operations
-        self.results_manager = BOBEResults(
-            output_file=self.output_file,
-            save_dir=self.save_dir,
-            param_names=self.loglikelihood.param_list,
-            param_labels=self.loglikelihood.param_labels,
-            param_bounds=self.loglikelihood.param_bounds,
-            settings={
-                'n_cobaya_init': n_cobaya_init,
-                'n_sobol_init': n_sobol_init,
-                'min_evals': min_evals,
-                'max_evals': max_evals,
-                'max_gp_size': max_gp_size,
-                'fit_step': fit_step,
-                'wipv_batch_size': wipv_batch_size,
-                'ns_step': ns_step,
-                'num_hmc_warmup': num_hmc_warmup,
-                'num_hmc_samples': num_hmc_samples,
-                'mc_points_size': mc_points_size,
-                'mc_points_method': mc_points_method,
-                'acq': acq,
-                'use_clf': use_clf,
-                'clf_type': clf_type,
-                'clf_nsigma_threshold': clf_nsigma_threshold,
-                'logz_threshold': logz_threshold,
-                'convergence_n_iters': convergence_n_iters,
-                'minus_inf': minus_inf,
-                'do_final_ns': do_final_ns,
-                'seed': seed
-            },
-            likelihood_name=self.loglikelihood.name,
-            resume_from_existing=resume
-        )
 
-        self.fresh_start = not resume  # Flag to indicate if we are starting fresh or resuming
-        
-        if resume and resume_file is not None:
-            # Resume from explicit file
-            try:
-                log.info(f" Attempting to resume from file {resume_file}")
-                gp_file = resume_file+'_gp'
-                self.gp = load_gp(gp_file, use_clf)
-                                            
-                # Test a simple prediction to ensure everything works
-                test_point = self.gp.train_x[0]  # Use first training point as test
-                _ = self.gp.predict_mean_single(test_point)
-                log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
-                                    
-                # Check if resuming and adjust starting iteration
-                if self.results_manager.is_resuming() and not self.fresh_start:
-                    self.start_iteration = self.results_manager.get_last_iteration()
-                    log.info(f"Resuming from iteration {self.start_iteration}")
-                    log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
-                    # If we have previous best loglikelihood data, restore the best point info
-                    if self.results_manager.best_loglike_values:
-                        self.best_f = max(self.results_manager.best_loglike_values)
-                        best_loglike_idx = self.results_manager.best_loglike_values.index(self.best_f)
-                        self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_loglike_idx]
-                        log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
-                    if self.results_manager.converged:
-                        self.prev_converged = True
-                        self.convergence_counter = 1
-                        log.info(" Previous run had converged.")
-                else:
-                    self.start_iteration = 0
-                    log.info("Starting fresh optimization")
-            except Exception as e:
-                log.error(f" Failed to load GP from file {gp_file}: {e}")
-                log.info(" Starting a fresh run instead.")
-                self.fresh_start = True
-
-        if self.fresh_start:
-            # Defer detailed fresh-start logic to helper methods for clarity
-            self.start_iteration = 0
-            self.best_pt_iteration = 0
-            init_points, init_vals = self._init_generate_initial_points(n_sobol_init, n_cobaya_init)
-
-            # Convert to jax arrays and construct the GP
-            train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
-            train_y = jnp.array(init_vals)
-
-            gp_kwargs.update({'train_x': train_x, 'train_y': train_y, 'param_names': self.loglikelihood.param_list, 'optimizer': optimizer})
-            if use_clf:
-                # Add clf specific parameters to gp_init_kwargs
-                clf_threshold = max(100, get_threshold_for_nsigma(clf_nsigma_threshold, self.ndim))
-                gp_kwargs.update({
-                    'clf_type': clf_type,
-                    'clf_use_size': clf_use_size,
-                    'clf_update_step': clf_update_step,
-                    'probability_threshold': 0.5,
-                    'minus_inf': minus_inf,
-                    'clf_threshold': clf_threshold,
-                    'gp_threshold': 2 * clf_threshold
-                })
-                self.gp = GPwithClassifier(**gp_kwargs)
-            else:
-                self.gp = GP(**gp_kwargs)
-            if is_main_process():
-                self.results_manager.start_timing('GP Training')
-                log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
-            self.gp.fit(n_restarts=4, maxiters=500, rng=self.np_rng)
-            if is_main_process():
-                log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
-                self.results_manager.end_timing('GP Training')
-
-        idx_best = jnp.argmax(self.gp.train_y)
-        self.best_pt = scale_from_unit(self.gp.train_x[idx_best], self.loglikelihood.param_bounds).flatten()
-        best_f_from_gp = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
-
-        # Use restored best_f if available and better, otherwise use GP's best
-        if not hasattr(self, 'best_f') or best_f_from_gp > getattr(self, 'best_f', -np.inf):
-            self.best_f = best_f_from_gp
-            # Also update best_pt_iteration if we're using the GP's best point
-            if not hasattr(self, 'best_pt_iteration'):
-                self.best_pt_iteration = self.start_iteration
-
-        self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
-        log.info(f" Initial best point {self.best} with value = {self.best_f:.6f}")
-
-        # Store remaining settings
+        # Store all parameters as instance attributes
+        self.loglikelihood = loglikelihood
+        self.n_sobol_init = n_sobol_init
+        self.n_cobaya_init = n_cobaya_init
+        self.ndim = len(self.loglikelihood.param_list)
+        self.save = save
+        self.save_step = save_step
         self.min_evals = min_evals
         self.max_evals = max_evals
         self.max_gp_size = max_gp_size
@@ -322,52 +186,369 @@ class BOBE:
         self.minus_inf = minus_inf
         self.mc_points_method = mc_points_method
         self.zeta_ei = zeta_ei
-
-        self.gp.save(filename=f"{self.save_path}_gp")
-        log.info(f" Saving GP to file {self.save_path}_gp")
-
-        # Initialize KL divergence tracking
+        self.optimizer = optimizer
+        self.do_final_ns = do_final_ns
+        self.logz_threshold = logz_threshold
+        self.convergence_n_iters = convergence_n_iters
+        self.ei_goal_log = np.log(ei_goal)
+        
+        # Initialize state variables
+        self.converged = False
+        self.prev_converged = False
+        self.convergence_counter = 0
+        self.min_delta_seen = np.inf
+        self.termination_reason = "Max evaluation budget reached"
         self.prev_samples = None
-    
-    def update_gp(self, new_pts_u, new_vals, step = 0, verbose=True):
-        """
-        Update the GP with new points and values, and track hyperparameters.
-        """
-        refit = (step % self.fit_step == 0)
-        if self.gp.train_x.shape[0] < 200:
-            # Override refit for small training sets to do more frequent fitting
-            override_fit_step = min(2, self.fit_step)
-            refit = (step % override_fit_step == 0)
-            maxiter = 1000
-            n_restarts = 8
-        elif 200 < self.gp.train_x.shape[0] < 800:
-            # for moderate size training sets
-            n_restarts = 4
-            maxiter = 500
+        self.fresh_start = not resume
+
+        # Initialize results manager and file paths on main process only
+        if is_main_process():
+            self.output_file = self.loglikelihood.name
+            self.save_dir = save_dir
+            if save:
+                os.makedirs(self.save_dir, exist_ok=True)
+            self.save_path = os.path.join(self.save_dir, self.output_file)
+            
+            self.results_manager = BOBEResults(
+                output_file=self.output_file,
+                save_dir=self.save_dir,
+                param_names=self.loglikelihood.param_list,
+                param_labels=self.loglikelihood.param_labels,
+                param_bounds=self.loglikelihood.param_bounds,
+                settings={k: v for k, v in locals().items() 
+                        if k not in ['self', 'loglikelihood', 'gp_kwargs']},
+                likelihood_name=self.loglikelihood.name,
+                resume_from_existing=resume
+            )
+
+        # Handle resume vs fresh start
+        if resume and resume_file is not None:
+            self._try_resume(resume_file, use_clf, gp_kwargs, optimizer)
         else:
-            # for large training sets we don't need to do too many restarts or frequent fitting
-            n_restarts = 4
-            maxiter = 200
-            override_fit_step = max(10, self.fit_step)
-            refit = (step % override_fit_step == 0)            
+            self._fresh_start(n_sobol_init, n_cobaya_init, use_clf, clf_nsigma_threshold, 
+                                clf_type, clf_use_size, clf_update_step, minus_inf, 
+                                gp_kwargs, optimizer)
+
+        # Extract best point info and finalize
+        self._finalize_initialization()
+
+    def _try_resume(self, resume_file, use_clf, gp_kwargs, optimizer):
+        """Try to resume from existing run."""
+        # Main process loads GP and resume data
+        if is_main_process():
+            try:
+                log.info(f"Attempting to resume from file {resume_file}")
+                gp_file = resume_file + '_gp'
+                self.gp = load_gp(gp_file, use_clf)
+                
+                # Test GP functionality
+                _ = self.gp.predict_mean_single(self.gp.train_x[0])
+                log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
+                
+                # Handle resume iteration and best point info
+                if self.results_manager.is_resuming():
+                    self.start_iteration = self.results_manager.get_last_iteration()
+                    log.info(f"Resuming from iteration {self.start_iteration}")
+                    
+                    if self.results_manager.best_loglike_values:
+                        self.best_f = max(self.results_manager.best_loglike_values)
+                        best_idx = self.results_manager.best_loglike_values.index(self.best_f)
+                        self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_idx]
+                        log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
+                    
+                    if self.results_manager.converged:
+                        self.prev_converged = True
+                        self.convergence_counter = 1
+                        log.info("Previous run had converged.")
+                else:
+                    self.start_iteration = 0
+                    
+                gp_state_data = self.gp.state_dict()
+
+            except Exception as e:
+                log.error(f"Failed to load GP from file {gp_file}: {e}")
+                log.info("Starting a fresh run instead.")
+                self.fresh_start = True
+                gp_state_data = None
+        else:
+            gp_state_data = None
+        
+        # Share GP state and initialize on workers
+        gp_state_data = share(gp_state_data, root=0)
+        if not is_main_process() and gp_state_data is not None:
+            self.gp = GP.from_state_dict(gp_state_data)
+        
+        # If resume failed, handle as fresh start
+        if self.fresh_start:
+            self._fresh_start(self.n_sobol_init, self.n_cobaya_init, use_clf, 20, "svm", 10, 1, -1e5, gp_kwargs, optimizer)
+
+    def _fresh_start(self, n_sobol_init, n_cobaya_init, use_clf, clf_nsigma_threshold,
+                        clf_type, clf_use_size, clf_update_step, minus_inf, gp_kwargs, optimizer):
+        """Handle fresh start initialization."""
+        self.start_iteration = 0
+        self.best_pt_iteration = 0
+        
+        # Generate initial points in parallel
+        init_points, init_vals = self._generate_initial_points(n_sobol_init, n_cobaya_init)
+        
+        # Main process creates GP initialization data
+        if is_main_process():
+            train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
+            train_y = jnp.array(init_vals)
+            
+            # Prepare GP kwargs with classifier settings if needed
+            full_gp_kwargs = gp_kwargs.copy()
+            full_gp_kwargs.update({
+                'train_x': train_x, 'train_y': train_y, 
+                'param_names': self.loglikelihood.param_list, 'optimizer': optimizer
+            })
+            
+            if use_clf:
+                clf_threshold = max(100, get_threshold_for_nsigma(clf_nsigma_threshold, self.ndim))
+                full_gp_kwargs.update({
+                    'clf_type': clf_type, 'clf_use_size': clf_use_size, 'clf_update_step': clf_update_step,
+                    'probability_threshold': 0.5, 'minus_inf': minus_inf,
+                    'clf_threshold': clf_threshold, 'gp_threshold': 2 * clf_threshold
+                })
+            
+            # Create GP and prepare sharing data
+            self.gp = GPwithClassifier(**full_gp_kwargs) if use_clf else GP(**full_gp_kwargs)
+            gp_state_data = self.gp.state_dict()
+        else:
+            gp_state_data = None
+        
+        # Share and initialize GP on all processes
+        gp_state_data = share(gp_state_data, root=0)
+        if not is_main_process():
+            self.gp = GP.from_state_dict(gp_state_data)
+
+        # Distributed GP fitting
         if is_main_process():
             self.results_manager.start_timing('GP Training')
-        self.gp.update(new_pts_u, new_vals) # add verbose
-        if refit:
-            if is_main_process():
-                log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
-            self.distributed_gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
-            if is_main_process():
-                log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
+            log.info(f"Hyperparameters before refit: {self.gp.hyperparams_dict()}")
+        
+        self.distributed_gp_fit(self.gp, n_restarts=4, maxiters=500)
+        
         if is_main_process():
+            log.info(f"Hyperparameters after refit: {self.gp.hyperparams_dict()}")
             self.results_manager.end_timing('GP Training')
 
-        # Extract GP hyperparameters for tracking
-        lengthscales = list(self.gp.lengthscales)
-        kernel_variance = float(self.gp.kernel_variance)
-        if is_main_process():
-            self.results_manager.update_gp_hyperparams(step, lengthscales, kernel_variance)
+    def _finalize_initialization(self):
+        """Extract best point info and save initial state."""
+        idx_best = jnp.argmax(self.gp.train_y)
+        self.best_pt = scale_from_unit(self.gp.train_x[idx_best], self.loglikelihood.param_bounds).flatten()
+        best_f_from_gp = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
 
+        if not hasattr(self, 'best_f') or best_f_from_gp > getattr(self, 'best_f', -np.inf):
+            self.best_f = best_f_from_gp
+            if not hasattr(self, 'best_pt_iteration'):
+                self.best_pt_iteration = self.start_iteration
+
+        self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
+        
+        if is_main_process():
+            log.info(f"Initial best point {self.best} with value = {self.best_f:.6f}")
+            if self.save:
+                self.gp.save(filename=f"{self.save_path}_gp")
+                log.info(f"Saving GP to file {self.save_path}_gp")
+
+    def _generate_initial_points(self, n_sobol_init: int, n_cobaya_init: int):
+        """
+        Generate and evaluate initial points in parallel using MPI utilities.
+        Returns (init_points, init_vals) on main rank; workers return empty arrays.
+        """
+
+        if n_sobol_init + n_cobaya_init == 0:
+            raise ValueError("At least one of n_sobol_init or n_cobaya_init must be greater than zero.")
+
+        # Generate Sobol points in parallel
+        init_points, init_vals = self._generate_sobol_points(n_sobol_init) # this generates a minimum of 2 points
+        
+        # Generate Cobaya points if needed
+        if isinstance(self.loglikelihood, CobayaLikelihood) and n_cobaya_init > 0:
+            cobaya_points, cobaya_vals = self._generate_cobaya_points(n_cobaya_init)
+            if is_main_process() and cobaya_points.size > 0:
+                init_points = np.vstack([init_points, cobaya_points])
+                init_vals = np.vstack([init_vals, cobaya_vals])
+
+        return init_points, init_vals
+    
+        #     # Find the indices of the unique points (rows)
+        #     unique_points, unique_indices = np.unique(
+        #         init_points, axis=0, return_index=True
+        #     )
+        
+        #     # Check if any duplicates were found
+        #     num_original = len(init_points)
+        #     num_unique = len(unique_points)
+        
+        #     if num_unique < num_original:
+        #         # 4. Filter both arrays using the same unique indices
+        #         final_points = init_points[unique_indices]
+        #         final_logpost = init_vals[unique_indices]
+        #     else:
+        #         # No duplicates found, use the original arrays
+        #         final_points = init_points
+        #         final_logpost = init_vals
+
+        # return final_points, final_logpost.reshape(-1, 1)
+
+    def _generate_sobol_points(self, n_sobol_init: int):
+        """Generate Sobol initial points on main rank and evaluate them in parallel."""
+        from scipy.stats import qmc
+        
+        n_sobol = max(2, n_sobol_init)
+        
+        # Main process generates Sobol points
+        if is_main_process():
+            self.results_manager.start_timing('True Objective Evaluations')
+            sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=self.np_rng).random(n_sobol)
+            sobol_points = scale_from_unit(sobol, self.loglikelihood.param_bounds)
+            # Convert to list for scatter
+            points_list = [sobol_points[i] for i in range(len(sobol_points))]
+        else:
+            points_list = None
+
+        # Scatter points across processes
+        local_points = scatter(points_list, root=0)
+        
+        # Each process evaluates its assigned points
+        if local_points is not None and len(local_points) > 0:
+            local_points = np.atleast_2d(local_points)
+            local_vals = np.array([self.loglikelihood._safe_eval(pt) for pt in local_points]).reshape(-1, 1)
+        else:
+            local_points = np.empty((0, self.ndim))
+            local_vals = np.empty((0, 1))
+
+        # Gather results back to main process
+        gathered_points = gather(local_points, root=0)
+        gathered_vals = gather(local_vals, root=0)
+
+        if is_main_process():
+            # Reconstruct full arrays from gathered results
+            all_points = np.vstack([pts for pts in gathered_points if len(pts) > 0])
+            all_vals = np.vstack([vals for vals in gathered_vals if len(vals) > 0])
+            return all_points, all_vals
+        else:
+            return np.empty((0, self.ndim)), np.empty((0, 1))
+
+    def _generate_cobaya_points(self, n_cobaya_init: int):
+        """Generate Cobaya initial points in parallel across ranks."""
+
+        if n_cobaya_init <= 0:
+            raise ValueError("n_cobaya_init must be greater than zero to generate Cobaya points.")
+
+        # Distribute requests across processes
+        if is_main_process():
+            inits_per_process = np.array_split(np.arange(n_cobaya_init), get_mpi_size())
+        else:
+            inits_per_process = None
+
+        local_inits = scatter(inits_per_process, root=0)
+
+        # Each process generates its assigned points
+        local_points = []
+        local_vals = [] 
+        for _ in range(len(local_inits)):
+            pt, lp = self.loglikelihood._get_single_valid_point(rng=self.np_rng)
+            local_points.append(pt)
+            local_vals.append(lp)
+
+        # Gather all results
+        gathered_points = gather(local_points, root=0)
+        gathered_vals = gather(local_vals, root=0)
+
+        if is_main_process():
+            # Reconstruct full arrays from gathered results
+            all_points = np.vstack([pts for pts in gathered_points if len(pts) > 0])
+            all_vals = np.vstack([vals for vals in gathered_vals if len(vals) > 0])
+            return all_points, all_vals
+        else:
+            return np.empty((0, self.ndim)), np.empty((0, 1))
+
+    def evaluate_likelihood(self, new_pts_u, step, verbose=True):
+        """Evaluate likelihood for new points in parallel."""
+        new_pts_u = jnp.atleast_2d(new_pts_u)
+        new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
+        
+        # Distribute points and evaluate
+        if is_main_process():
+            pts_list = [np.asarray(pt) for pt in new_pts]
+            self.results_manager.start_timing('True Objective Evaluations')
+        else:
+            pts_list = None
+
+        local_pts = scatter(pts_list, root=0)
+        local_vals = np.array([self.loglikelihood(pt) for pt in (local_pts or [])]).reshape(-1, 1)
+        gathered_vals = gather(local_vals, root=0)
+
+        # Main process: process results and update tracking
+        if is_main_process():
+            all_vals = np.vstack([vals for vals in gathered_vals if len(vals) > 0])
+            new_vals = jnp.array(all_vals)
+            self.results_manager.end_timing('True Objective Evaluations')
+
+            # Update best point if improved
+            best_idx = int(np.argmax(all_vals))
+            best_val = float(all_vals[best_idx])
+            if best_val > self.best_f:
+                self.best_f = best_val
+                self.best_pt = new_pts[best_idx]
+                self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt.flatten())}
+                self.best_pt_iteration = step
+
+            # Log results
+            if verbose:
+                for k, (pt, val) in enumerate(zip(new_pts, all_vals)):
+                    pt_dict = {name: f"{float(v):.4f}" for name, v in zip(self.loglikelihood.param_list, pt.flatten())}
+                    predicted_val = self.gp.predict_mean_single(new_pts_u[k])
+                    log.info(f" Point {k+1}/{len(new_pts)}: {pt_dict}")
+                    log.info(f" Objective = {float(val):.4f}, GP predicted = {predicted_val.item():.4f}")
+            
+            return new_vals
+        return None
+
+    def update_gp(self, new_pts_u, new_vals, step=0, verbose=True):
+        """Update GP with new points and perform distributed fitting."""
+        # Determine fitting schedule
+        training_size = self.gp.train_x.shape[0]
+        if training_size < 200:
+            fit_freq, n_restarts, maxiter = min(2, self.fit_step), 8, 1000
+        elif training_size < 800:
+            fit_freq, n_restarts, maxiter = self.fit_step, 4, 500
+        else:
+            fit_freq, n_restarts, maxiter = max(10, self.fit_step), 4, 200
+
+        refit = (step % fit_freq == 0)
+        
+        if is_main_process():
+            self.results_manager.start_timing('GP Training')
+            if refit and verbose:
+                log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
+
+        # Update GP and fit if needed
+        if is_main_process():
+            self.gp.update(new_pts_u, new_vals)
+            gp_state_data = self.gp.state_dict()
+        else:
+            gp_state_data = None
+        
+        # Share updated GP state
+        gp_state_data = share(gp_state_data, root=0)
+        if not is_main_process():
+            self.gp = GP.from_state_dict(gp_state_data)
+
+        if refit:
+            self.distributed_gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
+            if is_main_process() and verbose:
+                log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
+
+        if is_main_process():
+            self.results_manager.end_timing('GP Training')
+            # Track hyperparameters
+            self.results_manager.update_gp_hyperparams(step, list(self.gp.lengthscales), float(self.gp.kernel_variance))
+
+        # Train classifier if needed
         if isinstance(self.gp, GPwithClassifier):
             if is_main_process():
                 self.results_manager.start_timing('Classifier Training')
@@ -375,7 +556,48 @@ class BOBE:
             if is_main_process():
                 self.results_manager.end_timing('Classifier Training')
 
+    def distributed_gp_fit(self, gp: GP, n_restarts: int = 4, maxiters: int = 500):
+        """Distribute GP fitting across MPI processes."""
+        # Generate starting points
+        init_params = jnp.log(gp.get_hyperparams())
+        n_params = init_params.shape[0]
         
+        if is_main_process():
+            if n_restarts > 1:
+                x0_random = self.np_rng.uniform(gp.hyperparam_bounds[0], gp.hyperparam_bounds[1], 
+                                            size=(n_restarts - 1, n_params))
+                x0 = np.vstack([np.array(init_params), x0_random])
+            else:
+                x0 = np.atleast_2d(np.array(init_params))
+            x0_list = [x0[i] for i in range(len(x0))]
+        else:
+            x0_list = None
+
+        # Distribute work and fit
+        local_x0 = scatter(x0_list, root=0)
+        local_result = {'mll': -np.inf, 'params': None}
+        
+        if local_x0 and len(local_x0) > 0:
+            result = gp.fit(x0=np.array(local_x0), maxiter=maxiters)
+            local_result = result if result else local_result
+
+        # Gather and select best result
+        all_results = gather(local_result, root=0)
+        
+        if is_main_process():
+            valid_results = [r for r in all_results if r.get('mll', -np.inf) > -np.inf]
+            best_result = max(valid_results, key=lambda r: r.get('mll', -np.inf)) if valid_results else {'params': None}
+            best_params = best_result.get('params')
+        else:
+            best_params = None
+            best_result = None
+
+        # Share and update
+        best_params = share(best_params, root=0)
+        if best_params is not None:
+            gp.update_hyperparams(best_params)
+
+        return best_result if is_main_process() else None
 
     def get_next_batch(self, acq_kwargs, n_batch, n_restarts, maxiter, early_stop_patience, step, verbose=True):
         """
@@ -401,204 +623,6 @@ class BOBE:
             self.results_manager.update_acquisition(step, acq_val, self.acquisition.name)
 
         return new_pts_u, acq_vals
-
-    def distributed_gp_fit(self, gp: GP, n_restarts: int = 4, maxiters: int = 500):
-        """
-        Distribute GP hyperparameter restarts across MPI ranks.
-
-        Each rank receives a chunk of starting points x0 (in log space), runs
-        gp.fit on its chunk, and returns its best result. The main rank
-        collects results and updates the GP hyperparameters to the best found.
-        """
-        # Build x0 restarts (same logic as earlier in pool.gp_fit)
-        rng = np.random.default_rng() if self.np_rng is None else self.np_rng
-        init_params = jnp.log(gp.get_hyperparams())
-        n_params = init_params.shape[0]
-        if n_restarts > 1:
-            x0_random = rng.uniform(gp.hyperparam_bounds[0], gp.hyperparam_bounds[1], size=(n_restarts - 1, n_params))
-            x0 = np.vstack([np.array(init_params), x0_random])
-        else:
-            x0 = np.atleast_2d(np.array(init_params))
-
-        # Split x0 across ranks using numpy array split and scatter/gather
-        x0_chunks = np.array_split(x0, get_mpi_size())
-
-        # Scatter chunks - simpler to use share/gather helpers
-        local_chunk = scatter(x0_chunks)
-        # Ensure numpy array
-        local_chunk = np.atleast_2d(np.array(local_chunk))
-
-        # Each rank runs gp.fit on its local chunk
-        try:
-            local_result = gp.fit(x0=local_chunk, maxiter=maxiters)
-        except Exception as e:
-            # On error, send an indicator that this rank failed
-            local_result = {'mll': -np.inf, 'params': None, 'error': str(e)}
-
-        # Gather results on main rank
-        gathered = gather(local_result)
-
-        if is_main_process():
-            # gathered is a list of result dicts
-            valid_results = [r for r in gathered if r is not None]
-            # Choose best by mll
-            best_result = max(valid_results, key=lambda r: r.get('mll', -np.inf))
-            best_params = best_result.get('params') if best_result.get('params') is not None else None
-        else:
-            best_params = None
-
-        # Broadcast best_params from main to all ranks
-        best_params = share(best_params, root=0)
-
-        # Update GP on every rank with the received best_params (if available)
-        if best_params is not None:
-            try:
-                gp.update_hyperparams(best_params)
-            except Exception:
-                # If update fails on worker, log locally
-                log.warning("Failed to update GP hyperparameters on this rank")
-
-        if is_main_process():
-            return best_result
-        else:
-            return None
-
-    def _init_generate_initial_points(self, n_sobol_init: int, n_cobaya_init: int):
-        """
-        Helper to generate and evaluate initial points for a fresh start.
-
-        Returns (init_points, init_vals) on main rank; workers return empty arrays.
-        """
-        # Orchestrate Sobol + Cobaya initial points
-        init_points, init_vals = self._init_generate_sobol_points(n_sobol_init)
-        if isinstance(self.loglikelihood, CobayaLikelihood) and n_cobaya_init > 0:
-            cobaya_points, cobaya_vals = self._init_generate_cobaya_points(n_cobaya_init)
-            if is_main_process() and cobaya_points.size > 0:
-                if init_points.size == 0:
-                    init_points = cobaya_points
-                    init_vals = cobaya_vals
-                else:
-                    init_points = np.vstack([init_points, cobaya_points])
-                    init_vals = np.vstack([init_vals, cobaya_vals])
-
-        return init_points, init_vals
-
-    def _init_generate_sobol_points(self, n_sobol_init: int):
-        """Generate Sobol initial points on main rank and evaluate them across MPI ranks."""
-        from scipy.stats import qmc
-        n_sobol = max(2, n_sobol_init)
-        if is_main_process():
-            self.results_manager.start_timing('True Objective Evaluations')
-            sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=self.np_rng).random(n_sobol)
-            sobol_points = scale_from_unit(sobol, self.loglikelihood.param_bounds)
-            chunks = np.array_split(np.asarray(sobol_points), get_mpi_size())
-        else:
-            chunks = None
-
-        local_chunk = scatter(chunks)
-        # ensure shape (n_local, dim) or empty
-        if isinstance(local_chunk, np.ndarray) and local_chunk.size != 0:
-            local_chunk = np.atleast_2d(local_chunk)
-            try:
-                local_vals = self.loglikelihood(local_chunk)
-            except Exception:
-                local_vals = np.array([self.loglikelihood._safe_eval(x) for x in local_chunk]).reshape(-1, 1)
-        else:
-            local_vals = np.empty((0, 1))
-
-        gathered = gather(local_vals)
-
-        if is_main_process():
-            init_points = np.vstack(gathered) if len(gathered) > 0 else np.empty((0, self.ndim))
-            init_vals = np.vstack(gathered) if len(gathered) > 0 else np.empty((0, 1))
-        else:
-            init_points = np.empty((0, self.ndim))
-            init_vals = np.empty((0, 1))
-
-        return init_points, init_vals
-
-    def _init_generate_cobaya_points(self, n_cobaya_init: int):
-        """Request initial points from the likelihood's Cobaya sampler in parallel across ranks."""
-        if is_main_process():
-            counts = np.array_split(np.arange(n_cobaya_init), get_mpi_size())
-        else:
-            counts = None
-        local_req = scatter(counts)
-        local_results = []
-        for _ in range(len(local_req)):
-            try:
-                pt, lp = self.loglikelihood._get_single_valid_point(rng=self.np_rng)
-                local_results.append((pt, lp))
-            except Exception:
-                continue
-        gathered_cobaya = gather(local_results)
-        if is_main_process():
-            cobaya_results = []
-            for part in gathered_cobaya:
-                if part:
-                    cobaya_results.extend(part)
-            if cobaya_results:
-                cobaya_points, cobaya_logpost = zip(*cobaya_results)
-                cobaya_points = np.array(cobaya_points)
-                cobaya_logpost = np.array(cobaya_logpost).reshape(len(cobaya_logpost), 1)
-                return cobaya_points, cobaya_logpost
-            else:
-                return np.empty((0, self.ndim)), np.empty((0, 1))
-        else:
-            return np.empty((0, self.ndim)), np.empty((0, 1))
-
-    def evaluate_likelihood(self, new_pts_u, step, verbose=True):
-        """
-        Evaluate the likelihood for new points.
-        """
-        new_pts_u = jnp.atleast_2d(new_pts_u)
-        new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
-        # Convert to numpy for MPI scatter/gather
-        pts_np = np.asarray(new_pts)
-
-        # Only main process records timing
-        if is_main_process():
-            self.results_manager.start_timing('True Objective Evaluations')
-
-        # Scatter points across MPI ranks. Each rank receives its chunk (as numpy array)
-        local_pts = scatter(pts_np)
-        # Ensure shape is (n_local, dim)
-        local_pts = np.atleast_2d(local_pts)
-
-        # Each rank evaluates its local chunk
-        local_vals = [self.loglikelihood(pt) for pt in local_pts]
-        local_vals = np.asarray(local_vals).reshape(-1, 1)
-
-        # Gather results back to main process
-        gathered = gather(local_vals)
-
-        # Main process: concatenate and convert to jax array
-        if is_main_process():
-            # gathered is a list of arrays (one per rank)
-            new_vals_np = np.vstack(gathered)
-            new_vals = jnp.array(new_vals_np)
-            # End timing
-            self.results_manager.end_timing('True Objective Evaluations')
-
-            # Update best point info and logging on main process only
-            best_new_idx = int(np.argmax(new_vals_np))
-            best_new_val = float(np.max(new_vals_np))
-            best_new_pt = new_pts[best_new_idx]
-            if float(best_new_val) > self.best_f:
-                self.best_f = float(best_new_val)
-                self.best_pt = best_new_pt
-                self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt.flatten())}
-                self.best_pt_iteration = step
-
-            for k, new_pt in enumerate(new_pts):
-                new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pt.flatten())}
-                log.info(f" New point {new_pt_vals}, {k+1}/{len(new_pts)}")
-                predicted_val = self.gp.predict_mean_single(new_pts_u[k])
-                log.info(f" Objective function value = {float(new_vals_np[k]):.4f}, GP predicted value = {predicted_val.item():.4f}")
-            return new_vals
-        else:
-            # Worker ranks return None but have participated in the gather
-            return None
 
     def check_max_evals_and_gpsize(self,current_evals):
         """

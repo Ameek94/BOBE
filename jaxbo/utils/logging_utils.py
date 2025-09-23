@@ -5,7 +5,6 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 
-# ⭐ 1. Add MPI awareness at the top of the module.
 # This block will determine the process rank, defaulting to 0 for serial runs.
 try:
     from mpi4py import MPI
@@ -83,9 +82,9 @@ def setup_logging(verbosity='INFO', log_file=None):
     # All processes log to a file, but to rank-specific files
     if log_file:
         if is_mpi:
-            # Create rank-specific log files, e.g., 'my_run_master.log', 'my_run_rank_1.log'
+            # Create rank-specific log files, e.g., 'my_run_0.log', 'my_run_rank_1.log'
             base, ext = os.path.splitext(log_file)
-            rank_str = "master" if rank == 0 else f"rank_{rank}"
+            rank_str = "0" if rank == 0 else f"rank_{rank}"
             final_log_file = f"{base}_{rank_str}{ext}"
         else:
             final_log_file = log_file
@@ -102,17 +101,6 @@ def setup_logging(verbosity='INFO', log_file=None):
 def get_logger(name):
     """Gets a logger. The root logger should be configured first via setup_logging."""
     return logging.getLogger(name)
-
-# def get_logger(name):
-#     """
-#     Get a logger with the specified name
-    
-#     Args:
-#         name: Logger name (typically __name__ from the calling module)
-#     """
-#     logger = logging.getLogger(name)
-#     logger.propagate = True
-#     return logger
 
 def update_verbosity(verbosity):
     """Update the logging verbosity at runtime"""
