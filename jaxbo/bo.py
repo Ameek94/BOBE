@@ -742,7 +742,7 @@ class BOBE:
             if ns_flag:
                 log.info("Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
-                self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
+                ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
                     gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01, equal_weights=False,
                     rng=self.np_rng
                 )
@@ -750,14 +750,16 @@ class BOBE:
 
                 log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
 
+                if logz_dict['std'] < 0.5:
+                    self.ns_samples = ns_samples
                 if ns_success:
-                    equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
+                    equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
                     self.mc_samples = {
                         'x': equal_samples,
                         'logl': equal_logl,
                         'weights': np.ones(equal_samples.shape[0]),
                         'method': 'NS',
-                        'best': self.ns_samples['best']
+                        'best': ns_samples['best']
                     }
                     self.converged = self.check_convergence_WIPV(ii, logz_dict, equal_samples, equal_logl)
                     if self.converged:
