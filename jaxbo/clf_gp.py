@@ -92,9 +92,13 @@ class GPwithClassifier(GP):
 
 
         # Prepare GP Data
-        mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
-        train_x_gp = self.train_x_clf[mask_gp]
-        train_y_gp = self.train_y_clf[mask_gp] 
+        if self.train_y_clf.size > 0:
+            mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
+            train_x_gp = self.train_x_clf[mask_gp]
+            train_y_gp = self.train_y_clf[mask_gp] 
+        else:
+            train_x_gp = self.train_x_clf
+            train_y_gp = self.train_y_clf
 
         # Initialize GP using inheritance
         gp_init_kwargs = {
@@ -461,8 +465,8 @@ class GPwithClassifier(GP):
         prob = rng_mcmc.uniform(0, 1)
         high_temp = rng_mcmc.uniform(1.5,4.)  # 6
         # high_temp = rng_mcmc.uniform(1.,2.) ** 2
-        temp = np.where(prob < 1/2, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        # temp=1. # For now always use temp=1
+        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
+        temp=1. # For now always use temp=1
         seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 

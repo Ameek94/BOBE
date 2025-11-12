@@ -240,9 +240,9 @@ class GP:
 
         self.ndim = train_x.shape[1]
         
-        # Compute standardization parameters
-        self.y_mean = jnp.mean(train_y)
-        self.y_std = jnp.std(train_y)
+        # Compute standardization parameters (and handle the case of 0 initialisation points)
+        self.y_mean = jnp.mean(train_y) if train_y.size > 0 else 0 
+        self.y_std = jnp.std(train_y) if train_y.size > 0 else 1.0
         
         # Handle edge case where std is zero (all values identical or only 1 point)
         if self.y_std == 0:
@@ -398,7 +398,7 @@ class GP:
         """
         x = jnp.atleast_2d(x)
         k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False) # shape (N,1)
-        mean = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean 
+        mean = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean
         return mean 
     
     def predict_var_single(self,x):

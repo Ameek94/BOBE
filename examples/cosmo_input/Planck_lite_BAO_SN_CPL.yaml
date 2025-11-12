@@ -14,7 +14,7 @@ likelihood:
   planck_2018_lowl.EE: null
   planck_2018_highl_plik.TTTEEE_lite_native: null
   planck_2018_lensing.native: null
-  bao.desi_2024_bao_all: null
+  bao.desi_dr2.desi_bao_all: null
   sn.pantheonplus: null
 params:
   w:
@@ -45,8 +45,8 @@ params:
      loc: 0
      scale: 0.0001   
    prior:
-     min: -0.0075 # prev 0.005
-     max: 0.0075 # prev 0.005
+     min: -0.01 # prev 0.005
+     max: 0.01 # prev 0.005
    proposal: 0.0001     
   omch2:
    latex: \Omega_\mathrm{c} h^2

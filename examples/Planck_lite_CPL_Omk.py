@@ -1,71 +1,59 @@
-from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter 
-from jaxbo.utils.logging_utils import get_logger
-from jaxbo.utils.core_utils import renormalise_log_weights
-from jaxbo.run import run_bobe
-import matplotlib.pyplot as plt
-import time
+import os
 import sys
-from getdist import MCSamples
-from dynesty import DynamicNestedSampler
-import numpy as np
+num_devices = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+   num_devices
+)
+clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
+from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
+import time
+import matplotlib.pyplot as plt
 import seaborn as sns
-
-afac= 0.1
-
-def prior_transform(x):
-    return 8*x - 4
-
-def loglike(X, slow=False):
-    r1 = (X[0] + X[1]**2 -7)**2
-    r2 = (X[0]**2 + X[1]-11)**2
-    if slow:
-        time.sleep(2)
-    return -0.5*(afac*r1 + r2)
+from jaxbo.utils.logging_utils import get_logger
+from jaxbo.run import run_bobe
 
 def main():
-    # Problem setup (moved from module scope to match Banana.py input structure)
-    ndim = 4
-    param_bounds = np.array([[-4,4],[-4,4], [-4,4], [-4,4]]).T
-    param_list = ['x1','x2', 'x3', 'x4']
-    param_labels = ['x_1','x_2', 'x_3', 'x_4']
-    likelihood_name = 'Himmelblau_4D'
+    # Set up the cosmological likelihood
+    cobaya_input_file = './cosmo_input/Planck_lite_BAO_SN_CPL.yaml'
+    ls_priors = 'uniform'  # Options: 'uniform' or 'log_uniform'
+    likelihood_name = f'Planck_lite_CPL_{ls_priors}_{clf_type}'
 
     start = time.time()
     print("Starting BOBE run...")
 
-    # Run BOBE with the new interface
-    # Prepare gp_kwargs for parameters intended for the GP constructor
-    gp_kwargs = {'lengthscale_prior': 'SAAS'}
-
     results = run_bobe(
-        likelihood=loglike,
+        likelihood=cobaya_input_file,
         likelihood_kwargs={
-            'param_list': param_list,
-            'param_bounds': param_bounds,
-            'param_labels': param_labels,
-            'name': likelihood_name,
+            'confidence_for_unbounded': 0.9999995,
             'minus_inf': -1e5,
+            'noise_std': 0.0,
+            'name': likelihood_name,
         },
-        optimizer='scipy',
+        resume=False,
+        resume_file=f'{likelihood_name}',
+        save_dir='./results/',
+        save=True,
         verbosity='INFO',
-        n_cobaya_init=4,
-        n_sobol_init=16,
-        min_evals=25,
-        max_evals=250,
-        max_gp_size=250,
-        fit_step=4,
-        wipv_batch_size=2,
-        ns_step=4,
-        num_hmc_warmup=256,
-        num_hmc_samples=2048,
-        mc_points_size=256,
-        num_chains=4,
-        gp_kwargs=gp_kwargs,
-        use_clf=False,
+        n_cobaya_init=4, 
+        n_sobol_init=16, 
+        min_evals=100, 
+        max_evals=1000,
+        max_gp_size=900,
+        fit_step=5, 
+        ns_step=5,
+        wipv_batch_size=4,
+        num_hmc_warmup=512,
+        num_hmc_samples=5000, 
+        mc_points_size=360,
+        num_chains=6,
+        gp_kwargs={'lengthscale_prior': None, 'lengthscale_bounds': (1e-2, 5.)}, 
+        use_clf=True,
+        clf_type=clf_type,
         minus_inf=-1e5,
         logz_threshold=0.001,
-        seed=42,
-        do_final_ns=True,
+        convergence_n_iters=1,
+        seed=10,
+        do_final_ns=False,
     )
 
     end = time.time()
@@ -95,33 +83,17 @@ def main():
         sample_array = samples['x']
         weights_array = samples['weights']
 
-        dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,
-                                               sample='rwalk',logl_kwargs={'slow': False})
-
-        dns_sampler.run_nested(print_progress=True,dlogz_init=0.01) 
-        res = dns_sampler.results  
-        mean = res['logz'][-1]
-        logz_err = res['logzerr'][-1]
-        print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
-
-        dns_samples = res['samples']
-        weights = renormalise_log_weights(res['logwt'])
-
-        reference_samples = MCSamples(samples=dns_samples, names=param_list, labels=param_labels,
-                                    weights=weights, 
-                                    ranges= dict(zip(param_list,param_bounds.T)))      
-
         plot_final_samples(
-            gp,
+            gp, 
             {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
             param_list=likelihood.param_list,
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
-            output_file=likelihood.name,
             output_dir='./results/',
-            reference_samples=reference_samples,
-            reference_file=None,
-            reference_label='Dynesty',
+            output_file=f'{likelihood.name}',
+            reference_file='./cosmo_input/chains/Planck_lite_BAO_SN_mcmc',
+            reference_ignore_rows=0.3,
+            reference_label='MCMC',
             scatter_points=True
         )
 
@@ -194,39 +166,6 @@ def main():
             timing_data=timing_data,
             save_path=f"./results/{likelihood.name}_dashboard.pdf"
         )
-        # plt.show()
-
-        # # Create individual timing plot
-        # log.info("Creating detailed timing plot...")
-        # fig_timing, ax_timing = plt.subplots(1, 1, figsize=(10, 6))
-        # plotter.plot_timing_breakdown(timing_data=timing_data, ax=ax_timing)
-        # ax_timing.set_title(f"Timing Breakdown - {likelihood.name}")
-        # plt.tight_layout()
-        # plt.savefig(f"{likelihood.name}_timing_detailed.pdf", bbox_inches='tight')
-        # # plt.show()
-
-        # # Create evidence evolution plot if available
-        # if comprehensive_results.get('logz_history'):
-        #     log.info("Creating evidence evolution plot...")
-        #     fig_evidence, ax_evidence = plt.subplots(1, 1, figsize=(10, 6))
-        #     plotter.plot_evidence_evolution(ax=ax_evidence)
-        #     ax_evidence.set_title(f"Evidence Evolution - {likelihood.name}")
-        #     plt.tight_layout()
-        #     plt.savefig(f"{likelihood.name}_evidence.pdf", bbox_inches='tight')
-        #     # plt.show()
-
-        # # Create acquisition function evolution plot
-        # log.info("Creating acquisition function evolution plot...")
-        # acquisition_data = results['results_manager'].get_acquisition_data()
-        # if acquisition_data and acquisition_data.get('iterations'):
-        #     fig_acquisition, ax_acquisition = plt.subplots(1, 1, figsize=(10, 6))
-        #     plotter.plot_acquisition_evolution(acquisition_data=acquisition_data, ax=ax_acquisition)
-        #     ax_acquisition.set_title(f"Acquisition Function Evolution - {likelihood.name}")
-        #     plt.tight_layout()
-        #     plt.savefig(f"{likelihood.name}_acquisition_evolution.pdf", bbox_inches='tight')
-        #     # plt.show()
-        # else:
-        #     log.info("No acquisition function data available for plotting.")
 
         # Save comprehensive results
         log.info("\n" + "="*60)
@@ -248,7 +187,6 @@ def main():
         log.info("="*60)
         log.info("Check the generated plots and saved files for detailed analysis.")
 
-
-
 if __name__ == "__main__":
+    # Run the analysis
     main()
