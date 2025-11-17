@@ -18,8 +18,6 @@ try:
 except ImportError:
     log.warning("Flax is not available. Only SVM classifier will be available.")
 
-# Need to make generic classifier class with a method to get the predict function from the clf_params
-
 
 # -----------------------------------------------------------------------------
 # Standalone training and prediction functions for classifiers

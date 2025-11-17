@@ -15,8 +15,6 @@ clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 # Arg 3: Random seed
 seed = int(sys.argv[3]) if len(sys.argv) > 3 else 42
 
-
-
 # # Arg 4: LS priors
 # ls_priors = str(sys.argv[4]) if len(sys.argv) > 4 else 'SAAS'
 
@@ -49,7 +47,7 @@ def main():
             'name': likelihood_name,
         },
         # resume
-        resume=False,
+        resume=True,
         resume_file=f'./results/{likelihood_name}',
         save=True,
         save_dir='./results/',
@@ -67,7 +65,7 @@ def main():
         fit_step=5,
         wipv_batch_size=5,
         ns_step=5,
-        optimizer='optax',
+        optimizer='scipy',
         
         # Acquisition function settings
         zeta_ei=0.1,

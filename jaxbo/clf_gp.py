@@ -461,13 +461,6 @@ class GPwithClassifier(GP):
         Optionally restarts MCMC if all logp values are the same or if HMC fails. (RESTART LOGIC TO BE IMPLEMENTED)
         """        
 
-        rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
-        prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1.5,4.)  # 6
-        # high_temp = rng_mcmc.uniform(1.,2.) ** 2
-        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        temp=1. # For now always use temp=1
-        seed_int = rng_mcmc.integers(0, 2**31 - 1)
         log.info(f"Running MCMC chains with temperature {temp:.4f}")
 
         def model():

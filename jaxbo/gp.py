@@ -345,7 +345,7 @@ class GP:
         
         return -mll
 
-    def fit(self, x0: np.ndarray, maxiter: int = 500) -> dict:
+    def fit(self, x0: np.ndarray = None, maxiter: int = 500) -> dict:
         """
         Performs a serial fit for a given batch of starting points (x0).
         This method is called by each MPI process on its assigned chunk.
@@ -362,6 +362,9 @@ class GP:
         result : dict
             Dictionary containing the best 'mll' and corresponding 'params' (log space) found.
         """
+
+        if x0 is None: # set to current hyperparameters
+            x0 = jnp.log(self.get_hyperparams())[None, :]
 
         optimizer_options = self.optimizer_options.copy()
 

@@ -177,7 +177,7 @@ def nested_sampling_Dy(gp: GP,
     else:
         live_points = rng.uniform(low=0., high=1., size=(nlive, ndim))
         live_logl = jax.lax.map(loglike,live_points,batch_size=200)
-        live_logl = np.asarray(live_logl)
+        live_logl = np.array(live_logl)
     
     # if dynamic:
     #     sampler = DynamicNestedSampler(loglike, prior_transform, ndim=ndim, blob=False,
@@ -209,8 +209,8 @@ def nested_sampling_Dy(gp: GP,
     upper = compute_integrals(logl=logl_upper,logvol=logvol)
     lower = compute_integrals(logl=logl_lower,logvol=logvol)
 
-    var = np.clip(var,a_min=1e-8,a_max=1e6)
-    varintegrand = 2*logl + np.log(var) #+ np.log1p(var)
+    var = np.clip(var,a_min=1e-12,a_max=1e12)
+    varintegrand = 2*logl + np.log(var)
     log_var_delta = compute_integrals(logl=varintegrand,logvol=logvol,squared=True)[-1]
     log_var_logz = log_var_delta - 2*mean 
     log_var_logz = np.clip(log_var_logz, a_min=-100, a_max=100)  # Avoid numerical issues with very small or large variances

@@ -339,6 +339,7 @@ class BOBE:
         Update the GP with new points and values, and track hyperparameters.
         """
         self.results_manager.start_timing('GP Training')
+        refit = (step % self.fit_step == 0)
         if self.gp.train_x.shape[0] < 200:
             # Override refit for small training sets to do more frequent fitting
             override_fit_step = min(2, self.fit_step)
@@ -355,7 +356,9 @@ class BOBE:
             maxiter = 200
             override_fit_step = max(10, self.fit_step)
             refit = (step % override_fit_step == 0)  
-        self.gp.update(new_pts_u, new_vals, refit=refit, n_restarts=n_restarts, maxiter=maxiter) # add verbose
+        self.gp.update(new_pts_u, new_vals, n_restarts=n_restarts, maxiter=maxiter) # add verbose
+        if refit:
+            self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
         self.results_manager.end_timing('GP Training')
 
         # Extract GP hyperparameters for tracking
@@ -559,9 +562,9 @@ class BOBE:
 
     def run_WIPStd(self, ii = 0):
         """
-        Run the optimization loop for WIPV acquisition function.
+        Run the optimization loop for WIPStd acquisition function.
         """
-        self.acquisition = WIPStd(optimizer=self.optimizer)  # Set acquisition function to WIPV
+        self.acquisition = WIPStd(optimizer=self.optimizer)  # Set acquisition function to WIPStd   
         current_evals = self.gp.npoints
         self.results_manager.start_timing('MCMC Sampling')
         self.mc_samples = get_mc_samples(
@@ -738,7 +741,7 @@ class BOBE:
             current_evals += self.wipv_batch_size
 
 
-            self.update_gp(new_pts_u, new_vals, step = ii, refit=refit)
+            self.update_gp(new_pts_u, new_vals, step = ii)
             self.results_manager.update_best_loglike(ii, self.best_f)
 
             # Check convergence and update MCMC samples
