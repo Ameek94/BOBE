@@ -25,6 +25,7 @@ def run_bobe(likelihood: Union[Callable, str],
              resume: bool = False,
              resume_file: Optional[str] = None,
              convergence_n_iters=1,
+             seed=0,
              **sampler_kwargs):
     """
     High-level wrapper to run the BOBE sampler.
@@ -70,9 +71,10 @@ def run_bobe(likelihood: Union[Callable, str],
 
     My_Likelihood.pool = pool
 
-    if pool.is_master():
+    if pool.is_master:
 
-        print(f"Rank {pool.rank} running BOBE with likelihood: {My_Likelihood.name}")
+        print(f"\nRunning BOBE with likelihood: {My_Likelihood.name}")
+        print(f"MPI mode: {pool.is_mpi}, Number of processes: {pool.size}\n")
         # here should setup default arguments for all necessary parameters
 
         # Master creates the sampler and runs it
@@ -94,6 +96,7 @@ def run_bobe(likelihood: Union[Callable, str],
             clf_type=clf_type,
             clf_nsigma_threshold=clf_nsigma_threshold,
             convergence_n_iters=convergence_n_iters,
+            seed=seed,
             **sampler_kwargs
         )
         results = sampler.run(acq)
@@ -102,5 +105,5 @@ def run_bobe(likelihood: Union[Callable, str],
     else:
         print(f"Rank {pool.rank} running only likelihood evaluations")
         # Workers wait for tasks
-        pool.worker_wait(My_Likelihood)
+        pool.worker_wait(My_Likelihood,seed=seed)
         return None

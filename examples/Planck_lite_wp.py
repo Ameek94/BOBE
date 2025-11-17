@@ -1,39 +1,24 @@
 import os
-import sys
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+    os.cpu_count()
+)
+from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-# --- Command line arguments ---
-# Arg 1: Number of devices for XLA
-num_devices = int(sys.argv[1]) if len(sys.argv) > 1 else 8
-os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={num_devices}"
-
-# Arg 2: Classifier type ('svm' or 'gp')
-clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
-
-# Arg 3: Random seed
-seed = int(sys.argv[3]) if len(sys.argv) > 3 else 42
-
-
-
-# # Arg 4: LS priors
-# ls_priors = str(sys.argv[4]) if len(sys.argv) > 4 else 'SAAS'
-
-# --- Imports ---
-from jaxbo.run import run_bobe
 from jaxbo.utils.logging_utils import get_logger
-from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
+from jaxbo.run import run_bobe
 
 def main():
-
     # Set up the cosmological likelihood
-    cobaya_input_file = './cosmo_input/CPL_Planck_DESI_Union3.yaml'
-    
-    start = time.time()
-    print("Starting BOBE run with automatic timing measurement...")
+    cobaya_input_file = './cosmo_input/LCDM_6D_wide_priors.yaml'
 
-    likelihood_name = f'Planck_DESI_U3_CPL_{clf_type}_uniform_{seed}'
+    clf_type = 'ellipsoid'
+    ls_priors = None
+    likelihood_name = f'Planck_lite_uniform_wp_{clf_type}'
+
+    start = time.time()
+    print("Starting BOBE run...")
 
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -43,48 +28,29 @@ def main():
             'noise_std': 0.0,
             'name': likelihood_name,
         },
-        # resume
         resume=True,
         resume_file=f'./results/{likelihood_name}',
-        save=True,
         save_dir='./results/',
-        seed=seed,
+        save=True,
         verbosity='INFO',
-        n_cobaya_init=32,
-        n_sobol_init=64,
-        min_evals=900,
-        max_evals=3000,
-        max_gp_size=1800,
-        acq=['wipv'],
-        convergence_n_iters=1,
-
-        # Step settings
-        fit_step=5,
-        wipv_batch_size=5,
-        ns_step=5,
-        optimizer='optax',
-        
-        # Acquisition function settings
-        zeta_ei=0.1,
-        
-        # HMC/MC settings
-        num_hmc_warmup=512,
-        num_hmc_samples=15000,
-        mc_points_size=512,
-        num_chains=num_devices,
-        
-        # GP settings
-        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None,
-                   'lengthscale_bounds': [1e-2,5.]},
-        
-        # Classifier settings
+        n_cobaya_init=4, 
+        n_sobol_init=8, 
+        min_evals=25, 
+        max_evals=250,
+        max_gp_size=200,
+        fit_step=4, 
+        ns_step=4,
+        wipv_batch_size=4,
+        num_hmc_warmup=256,
+        num_hmc_samples=2048, 
+        mc_points_size=256,
+        gp_kwargs={'lengthscale_prior': ls_priors,}, 
         use_clf=True,
         clf_type=clf_type,
-        
-        # Convergence and other settings
         minus_inf=-1e5,
-        logz_threshold=0.01,
-        do_final_ns=True, 
+        logz_threshold=0.001,
+        seed=100,
+        do_final_ns=False,
     )
 
     end = time.time()
@@ -114,37 +80,18 @@ def main():
         sample_array = samples['x']
         weights_array = samples['weights']
 
-        param_list_CPL = ['w','wa','omch2','ombh2','H0','logA','ns','tau']
         plot_final_samples(
             gp, 
             {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
             param_list=likelihood.param_list,
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
-            plot_params=param_list_CPL,
-            output_dir='./results/',
-            output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/union3_CPL',
+            output_file=f'./results/{likelihood.name}',
+            reference_file='./cosmo_input/chains/Planck_lite_LCDM',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
-            scatter_points=False
+            scatter_points=True
         )
-
-
-        plot_final_samples(
-            gp, 
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            output_file=f'{likelihood.name}_full',
-            output_dir='./results/',
-            reference_file='./cosmo_input/chains/union3_CPL',
-            reference_ignore_rows=0.3,
-            reference_label='MCMC',
-            scatter_points=False
-        )
-
 
         # Print detailed timing analysis
         log.info("\n" + "="*60)
@@ -216,6 +163,26 @@ def main():
             save_path=f"./results/{likelihood.name}_dashboard.pdf"
         )
 
-if __name__ == "__main__":
-    main()
+        # Save comprehensive results
+        log.info("\n" + "="*60)
+        log.info("SAVING RESULTS")
+        log.info("="*60)
 
+        # Results are automatically saved by BOBE, but let's summarize what was saved
+        log.info(f"✓ Main results: {likelihood_name}_results.pkl")
+        log.info(f"✓ Timing data: {likelihood_name}_timing.json")
+        log.info(f"✓ Legacy samples: {likelihood_name}_samples.npz")
+        log.info(f"✓ Summary dashboard: {likelihood_name}_dashboard.pdf")
+        # log.info(f"✓ Detailed timing: {likelihood_name}_timing_detailed.pdf")
+        # log.info(f"✓ Evidence evolution: {likelihood_name}_evidence.pdf")
+        # log.info(f"✓ Acquisition evolution: {likelihood_name}_acquisition_evolution.pdf")
+        # log.info(f"✓ Parameter samples: {likelihood_name}_samples.pdf")
+
+        log.info("\n" + "="*60)
+        log.info("ANALYSIS COMPLETE")
+        log.info("="*60)
+        log.info("Check the generated plots and saved files for detailed analysis.")
+
+if __name__ == "__main__":
+    # Run the analysis
+    main()

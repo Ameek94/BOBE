@@ -12,20 +12,25 @@ os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={num_devices}
 # Arg 2: Classifier type ('svm' or 'gp')
 clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 
-# Arg 3: Number of log EI iterations
-n_log_ei_iters = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+# Arg 3: Random seed
+seed = int(sys.argv[3]) if len(sys.argv) > 3 else 42
+
+
+
+# # Arg 4: LS priors
+# ls_priors = str(sys.argv[4]) if len(sys.argv) > 4 else 'SAAS'
 
 # --- Imports ---
 from jaxbo.run import run_bobe
 from jaxbo.utils.logging_utils import get_logger
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 
+
+
 def main():
     """
     Main function to configure and run the Bayesian optimization.
     """
-    # Determine classifier update step based on type
-    clf_update_step = 1 if clf_type == 'svm' else 2
 
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/LCDM_Planck_DESIDr2.yaml'
@@ -33,11 +38,9 @@ def main():
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'LCDM_Planck_DESIDr2_{clf_type}_uniform_NSMC'
+    likelihood_name = f'Planck_DESIDR2_LCDM_{clf_type}_uniform_{seed}'
 
-    # --- Run BOBE with combined settings ---
     results = run_bobe(
-        # Likelihood settings
         likelihood=cobaya_input_file,
         likelihood_kwargs={
             'confidence_for_unbounded': 0.9999995,
@@ -45,48 +48,39 @@ def main():
             'noise_std': 0.0,
             'name': likelihood_name,
         },
-        
-        # General run settings
-        verbosity='INFO',
-        seed=1500,
-
         # resume
         resume=False,
         resume_file=f'./results/{likelihood_name}',
         save=True,
         save_dir='./results/',
-
-        
-        # Iteration and budget settings
-        n_cobaya_init=4,
-        n_sobol_init=32,
-        min_evals=600,
+        seed=seed,
+        verbosity='INFO',
+        n_cobaya_init=32,
+        n_sobol_init=64,
+        min_evals=750,
         max_evals=2500,
-        max_gp_size=1250,
-        acq = ['logei', 'wipv'],
-        ei_goal = 1e-4,
-
-        optimizer='scipy',
+        max_gp_size=1500,
+        acq=['wipv'],
+        convergence_n_iters=2,
 
         # Step settings
         fit_step=5,
-        wipv_batch_size=10,
+        wipv_batch_size=5,
         ns_step=5,
+        optimizer='optax',
         
         # Acquisition function settings
         zeta_ei=0.1,
         
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=8000,
+        num_hmc_samples=12000,
         mc_points_size=512,
-        num_chains=6,
-        thinning=8,
-        mc_points_method='NS',
-
+        num_chains=num_devices,
+        
         # GP settings
-        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None},
-
+        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None,
+                   'lengthscale_bounds': [1e-2,5.]},
         
         # Classifier settings
         use_clf=True,
@@ -124,6 +118,7 @@ def main():
         log.info("Creating parameter samples plot...")
         sample_array = samples['x']
         weights_array = samples['weights']
+
 
         param_list_LCDM = ['omch2','ombh2','H0','logA','ns','tau']
         plot_final_samples(
@@ -223,7 +218,7 @@ def main():
             acquisition_data=acquisition_data,
             best_loglike_data=best_loglike_data,
             timing_data=timing_data,
-            save_path=f"{likelihood.name}_dashboard.pdf"
+            save_path=f"./results/{likelihood.name}_dashboard.pdf"
         )
 
 if __name__ == "__main__":

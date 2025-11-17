@@ -51,16 +51,16 @@ def main():
         seed=seed,
         verbosity='INFO',
         n_cobaya_init=32,
-        n_sobol_init=32,
-        min_evals=750,
+        n_sobol_init=64,
+        min_evals=800,
         max_evals=2500,
-        max_gp_size=1250,
+        max_gp_size=1500,
         acq=['wipv'],
-        convergence_n_iters=1,
+        convergence_n_iters=2,
 
         # Step settings
-        fit_step=10,
-        wipv_batch_size=10,
+        fit_step=5,
+        wipv_batch_size=5,
         ns_step=5,
         optimizer='optax',
         
@@ -69,13 +69,13 @@ def main():
         
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=16000,
+        num_hmc_samples=12000,
         mc_points_size=512,
-        num_chains=6,
+        num_chains=num_devices,
         
         # GP settings
         gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None,
-                   'lengthscale_bounds': [1e-2,4.]},
+                   'lengthscale_bounds': [1e-2,5.]},
         
         # Classifier settings
         use_clf=True,
@@ -83,7 +83,7 @@ def main():
         
         # Convergence and other settings
         minus_inf=-1e5,
-        logz_threshold=0.02,
+        logz_threshold=0.01,
         do_final_ns=True, 
     )
 

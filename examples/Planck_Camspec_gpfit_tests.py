@@ -12,8 +12,14 @@ os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={num_devices}
 # Arg 2: Classifier type ('svm' or 'gp')
 clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 
-# Arg 3: Random seed
-seed = int(sys.argv[3]) if len(sys.argv) > 3 else 42
+# Arg 3: Use GP pool or not
+use_gp_pool = bool(int(sys.argv[3])) if len(sys.argv) > 3 else True
+
+# Arg 4: Optimizer type
+optimizer = str(sys.argv[4]) if len(sys.argv) > 4 else 'optax'
+
+
+seed = 0
 
 
 
@@ -25,15 +31,20 @@ from jaxbo.run import run_bobe
 from jaxbo.utils.logging_utils import get_logger
 from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
 
+
+
 def main():
+    """
+    Main function to configure and run the Bayesian optimization.
+    """
 
     # Set up the cosmological likelihood
-    cobaya_input_file = './cosmo_input/CPL_Planck_DESI_Union3.yaml'
+    cobaya_input_file = './cosmo_input/LCDM_Planck_DESIDr2.yaml'
     
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Planck_DESI_U3_CPL_{clf_type}_uniform_{seed}'
+    likelihood_name = f'Planck_DESIDR2_LCDM_{clf_type}_gp_pool_{int(use_gp_pool)}_{optimizer}'
 
     results = run_bobe(
         likelihood=cobaya_input_file,
@@ -44,32 +55,33 @@ def main():
             'name': likelihood_name,
         },
         # resume
-        resume=True,
+        resume=False,
         resume_file=f'./results/{likelihood_name}',
         save=True,
         save_dir='./results/',
         seed=seed,
         verbosity='INFO',
+        use_gp_pool=use_gp_pool,
         n_cobaya_init=32,
         n_sobol_init=64,
-        min_evals=900,
-        max_evals=3000,
-        max_gp_size=1800,
+        min_evals=750,
+        max_evals=2500,
+        max_gp_size=1500,
         acq=['wipv'],
-        convergence_n_iters=1,
+        convergence_n_iters=2,
 
         # Step settings
         fit_step=5,
         wipv_batch_size=5,
         ns_step=5,
-        optimizer='optax',
+        optimizer=optimizer,
         
         # Acquisition function settings
         zeta_ei=0.1,
         
         # HMC/MC settings
         num_hmc_warmup=512,
-        num_hmc_samples=15000,
+        num_hmc_samples=12000,
         mc_points_size=512,
         num_chains=num_devices,
         
@@ -114,22 +126,22 @@ def main():
         sample_array = samples['x']
         weights_array = samples['weights']
 
-        param_list_CPL = ['w','wa','omch2','ombh2','H0','logA','ns','tau']
+
+        param_list_LCDM = ['omch2','ombh2','H0','logA','ns','tau']
         plot_final_samples(
             gp, 
             {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
             param_list=likelihood.param_list,
             param_bounds=likelihood.param_bounds,
             param_labels=likelihood.param_labels,
-            plot_params=param_list_CPL,
+            plot_params=param_list_LCDM,
             output_dir='./results/',
             output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/union3_CPL',
+            reference_file='./cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
-            scatter_points=False
+            scatter_points=False,
         )
-
 
         plot_final_samples(
             gp, 
@@ -139,13 +151,13 @@ def main():
             param_labels=likelihood.param_labels,
             output_file=f'{likelihood.name}_full',
             output_dir='./results/',
-            reference_file='./cosmo_input/chains/union3_CPL',
+            reference_file='./cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
-            scatter_points=False
+            scatter_points=False,
         )
 
-
+ 
         # Print detailed timing analysis
         log.info("\n" + "="*60)
         log.info("DETAILED TIMING ANALYSIS")
@@ -218,4 +230,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

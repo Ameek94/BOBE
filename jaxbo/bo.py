@@ -55,6 +55,8 @@ class BOBE:
                  min_evals=200,
                  max_evals=1500,
                  max_gp_size=1200,
+                 pool: MPI_Pool = None,
+                 use_gp_pool=True,
                  resume=False,
                  resume_file=None,
                  save_dir='.',
@@ -81,7 +83,6 @@ class BOBE:
                  logz_threshold=0.01,
                  convergence_n_iters=1,
                  minus_inf=-1e5,
-                 pool: MPI_Pool = None,
                  do_final_ns=False,
                  seed: Optional[int] = None,
                  ):
@@ -111,7 +112,7 @@ class BOBE:
         save : bool
             If True, save the GP training data to a file so that it can be resumed from later.
         fit_step : int
-            Number of iterations between GP refits.
+            Number of iterations between GP fitting.
         ns_step : int
             Number of iterations between nested sampling runs.
         num_hmc_warmup : int
@@ -154,6 +155,7 @@ class BOBE:
         """
 
         self.pool = pool
+        self.use_gp_pool = use_gp_pool
 
 
         set_global_seed(seed)
@@ -263,16 +265,13 @@ class BOBE:
             self.best_pt_iteration = 0
             # Fresh start - evaluate initial points
             self.results_manager.start_timing('True Objective Evaluations')
-            if isinstance(self.loglikelihood, CobayaLikelihood):
-                init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,n_sobol_init=n_sobol_init,rng=self.np_rng)
-            else:
-                init_points, init_vals = self.loglikelihood.get_initial_points(n_sobol_init=n_sobol_init,rng=self.np_rng)
+            init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,n_sobol_init=n_sobol_init,rng=self.np_rng)
             self.results_manager.end_timing('True Objective Evaluations')
             train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
             train_y = jnp.array(init_vals)
         
 
-            gp_kwargs.update({'train_x': train_x, 'train_y': train_y, 'param_names': self.loglikelihood.param_list})
+            gp_kwargs.update({'train_x': train_x, 'train_y': train_y, 'param_names': self.loglikelihood.param_list, 'optimizer': optimizer})
             if use_clf:
                 # Add clf specific parameters to gp_init_kwargs
                 clf_threshold = max(100,get_threshold_for_nsigma(clf_nsigma_threshold,self.ndim))
@@ -289,7 +288,9 @@ class BOBE:
             else:
                 self.gp = GP(**gp_kwargs)
             self.results_manager.start_timing('GP Training')
-            self.gp.fit(maxiter=500,n_restarts=4)
+            log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
+            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500,use_pool=self.use_gp_pool,rng=self.np_rng)
+            log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
             self.results_manager.end_timing('GP Training')
             
         if self.gp.train_y.size > 0: 
@@ -333,7 +334,7 @@ class BOBE:
         # Initialize KL divergence tracking
         self.prev_samples = None
     
-    def update_gp(self, new_pts_u, new_vals, refit=True, step = 0, verbose=True):
+    def update_gp(self, new_pts_u, new_vals, step = 0, verbose=True):
         """
         Update the GP with new points and values, and track hyperparameters.
         """
@@ -362,6 +363,13 @@ class BOBE:
         kernel_variance = float(self.gp.kernel_variance)
         self.results_manager.update_gp_hyperparams(step, lengthscales, kernel_variance)
 
+        if isinstance(self.gp, GPwithClassifier):
+            self.results_manager.start_timing('Classifier Training')
+            self.gp.train_classifier()
+            self.results_manager.end_timing('Classifier Training')
+
+        
+
     def get_next_batch(self, acq_kwargs, n_batch, n_restarts, maxiter, early_stop_patience, step, verbose=True):
         """
         Get the next batch of points using the acquisition function, and track acquisition values.
@@ -388,13 +396,11 @@ class BOBE:
         """
         Evaluate the likelihood for new points.
         """
-
-
         new_pts_u = jnp.atleast_2d(new_pts_u)
         new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
 
         self.results_manager.start_timing('True Objective Evaluations')
-        new_vals = self.pool.run_map(self.loglikelihood, new_pts)
+        new_vals = self.pool.run_map_objective(self.loglikelihood, new_pts)
         new_vals = jnp.reshape(new_vals, (len(new_pts), 1))
         self.results_manager.end_timing('True Objective Evaluations')
 
@@ -479,7 +485,6 @@ class BOBE:
 
         while not converged:
             ii += 1
-            refit = (ii % self.fit_step == 0)
             verbose = True
 
             if verbose:
@@ -494,7 +499,7 @@ class BOBE:
             new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
             current_evals += n_batch
 
-            self.update_gp(new_pts_u, new_vals, refit=refit, step = ii, verbose=verbose)
+            self.update_gp(new_pts_u, new_vals, step = ii, verbose=verbose)
 
             self.results_manager.update_best_loglike(ii, self.best_f)
             if verbose:
@@ -574,13 +579,12 @@ class BOBE:
 
         while not self.converged:
             ii += 1
-            refit = (ii % self.fit_step == 0)
             ns_flag = (ii % self.ns_step == 0) and current_evals >= self.min_evals
             verbose = True
 
             if verbose:
                 print("\n")
-                log.info(f" Iteration {ii} of WIPStd, objective evals {current_evals}/{self.max_evals}, refit={refit}, ns={ns_flag}")
+                log.info(f" Iteration {ii} of WIPV, objective evals {current_evals}/{self.max_evals}, ns={ns_flag}")
 
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
@@ -589,22 +593,21 @@ class BOBE:
             current_evals += self.wipv_batch_size
 
 
-            self.update_gp(new_pts_u, new_vals, step = ii, refit=refit)
+            self.update_gp(new_pts_u, new_vals, step = ii)
             self.results_manager.update_best_loglike(ii, self.best_f)
 
             # Check convergence and update MCMC samples
             if ns_flag:
                 log.info("Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
-                self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
+                ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
                     gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01, equal_weights=False,
                     rng=self.np_rng
                 )
                 self.results_manager.end_timing('Nested Sampling')
-
-                log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
-
                 if ns_success:
+                    self.ns_samples = ns_samples
+                    log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
                     equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
                     self.mc_samples = {
                         'x': equal_samples,
@@ -656,7 +659,7 @@ class BOBE:
         if self.do_final_ns and not self.converged:
             
             self.results_manager.start_timing('GP Training')
-            self.gp.fit()
+            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500)
             self.results_manager.end_timing('GP Training')
 
             log.info(" Final Nested Sampling")
@@ -665,8 +668,8 @@ class BOBE:
                 gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01, rng=self.np_rng
             )
             self.results_manager.end_timing('Nested Sampling')
-            log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
             if ns_success:
+                log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
                 equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
                 log.info(f"Using nested sampling results")
                 self.check_convergence_WIPV(ii+1, logz_dict, equal_samples, equal_logl)

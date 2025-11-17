@@ -151,8 +151,12 @@ class BOBEResults:
             'Acquisition Optimization': 0.0,
             'True Objective Evaluations': 0.0,
             'Nested Sampling': 0.0,
-            'MCMC Sampling': 0.0
+            'MCMC Sampling': 0.0,
         }
+
+        if 'use_clf' in self.settings and self.settings['use_clf']:
+            self.phase_times['Classifier Training'] = 0.0
+
         self._active_timers = {}  # Track start times for active phases
         
         # GP hyperparameter tracking
