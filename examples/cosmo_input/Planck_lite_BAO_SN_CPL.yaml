@@ -86,7 +86,7 @@ params:
     latex: H_0
     prior:
       min: 64
-      max: 72 # was 70 previously
+      max: 72
     ref:
      dist: norm
      loc: 6.771234910e+01
@@ -112,19 +112,19 @@ params:
      loc: 5.546101493e-02
      scale: 0.003
     proposal: 0.003
-  A_planck:
-    latex: y_\mathrm{cal}
-    renames: calPlanck
-    value: 1.0
+  # A_planck:
+  #   latex: y_\mathrm{cal}
+  #   renames: calPlanck
+  #   value: 1.0
 sampler:
   polychord:
-    nlive: 10d
-    precision_criterion: 0.01
+    nlive: 15d
+    precision_criterion: 0.02
   # mcmc:
   #   drag: False
   #   oversample_power: 0.4
   #   proposal_scale: 1.9
-  #   covmat: auto
+  #   covmat: ./Planck_lite_BAO_SN_mcmc.covmat  # auto
   #   Rminus1_stop: 0.01
   #   Rminus1_cl_stop: 0.2   
-output: chains/Planck_lite_BAO_SN_pchord
+output: chains/Planck_lite_DESI_U3_Pchord
