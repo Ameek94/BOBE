@@ -156,10 +156,10 @@ def nested_sampling_Dy(gp: GP,
         nlogl = 5000 * ndim
         x = rng.uniform(low=0., high=1., size=(nlogl, ndim))
         logl = jax.lax.map(loglike,x,batch_size=200)
-        logl = np.asarray(logl)
+        logl = np.array(logl)
         success = False
         for i in range(maxtries):
-            live_indices = np.random.choice(nlogl, size=nlive, replace=False)
+            live_indices = rng.choice(nlogl, size=nlive, replace=False)
             live_logl = logl[live_indices]
             if np.all(live_logl == live_logl[0]):
                 log.debug(f" All logl values are the same on try {i+1}/{maxtries}. Retrying...")

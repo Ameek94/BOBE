@@ -263,7 +263,6 @@ class WIPV(AcquisitionFunction):
         var = gp.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc)
         return jnp.mean(var)
 
-
     def get_next_point(self, gp,
                  acq_kwargs,
                  maxiter: int = 100,
@@ -276,25 +275,16 @@ class WIPV(AcquisitionFunction):
         mc_points_size = acq_kwargs.get('mc_points_size', 128)
         mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
         k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.kernel_variance, gp.noise, include_noise=False)
-        # print(f"Using {mc_points_size} MC points for WIPV acquisition, shapes: mc_points {mc_points.shape}, k_train_mc {k_train_mc.shape}")
-
-
 
         @jax.jit
         def mapped_fn(x):
             return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
-        # acq_vals = []
-        # for i in range(mc_points.shape[0]):
-        #     acq_vals.append(mapped_fn(mc_points[i]))
-        # acq_vals = jnp.array(acq_vals)
+
         acq_vals = lax.map(mapped_fn, mc_points)
         acq_val_min = jnp.min(acq_vals)
         log.info(f"WIPV acquisition min value on MC points: {float(acq_val_min):.4e}")
         best_x = mc_points[jnp.argmin(acq_vals)]
-        # print(f'WIPV best_x from MC points: {best_x}')
         x0_acq = best_x
-
-        # print(f'shape x0_acq: {x0_acq.shape}, best_x shape: {best_x.shape}, nrestarts: {n_restarts}, acq_vals shape: {acq_vals.shape}')
 
         if gp.train_x.shape[0] > 750:
             return x0_acq, float(acq_val_min)
@@ -307,7 +297,7 @@ class WIPV(AcquisitionFunction):
                                   bounds = [0,1],
                                   optimizer_options=self.optimizer_options,
                                   maxiter=maxiter,
-                                  n_restarts=1,
+                                  n_restarts=n_restarts,
                                   verbose=verbose)
 
 class WIPStd(AcquisitionFunction):

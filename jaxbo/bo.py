@@ -492,7 +492,7 @@ class BOBE:
 
             if verbose:
                 print("\n")
-                log.info(f" Iteration {ii} of {self.acquisition.name}, objective evals {current_evals}/{self.max_evals}, refit={refit}")
+                log.info(f" Iteration {ii} of {self.acquisition.name}, objective evals {current_evals}/{self.max_evals}")
 
             acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten()) if self.gp.train_y.size > 0 else 0.}
             n_batch = 1
@@ -947,7 +947,7 @@ class BOBE:
             'gp_final_best_loglike': float(self.best_f),  # Best value in true physical space
         }
         
-        # Add classifier info if using GPwithClassifier
+        # Add classifier info if using GPwithClassifier, this can be done at the start since there are no results here, only settings.
         if isinstance(self.gp, GPwithClassifier):
             gp_info.update({
                 'classifier_used': bool(self.gp.use_clf),
