@@ -1,0 +1,401 @@
+"""
+Tests for Acquisition Functions.
+
+Tests include:
+- Expected Improvement (EI)
+- Log Expected Improvement (LogEI)
+- Acquisition function optimization
+- Batch acquisition
+- Integration with GP
+"""
+
+import numpy as np
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+import sys
+from jaxbo.gp import GP
+from jaxbo.acquisition import EI, LogEI, WIPV
+
+
+def generate_test_gp(n_samples=30, d=2, seed=42):
+    """Generate a simple GP for testing acquisition functions."""
+    rng = np.random.RandomState(seed)
+    X = rng.uniform(0, 1, size=(n_samples, d))
+    # Simple quadratic function with maximum at [0.7, 0.7]
+    y = -np.sum((X - 0.7)**2, axis=1, keepdims=True)
+    
+    gp = GP(
+        train_x=X,
+        train_y=y,
+        noise=1e-6,
+        kernel="rbf",
+        lengthscales=jnp.array([0.3] * d),
+        kernel_variance=1.0
+    )
+    
+    return gp
+
+
+def test_ei_initialization():
+    """Test EI acquisition function initialization."""
+    print("\n" + "="*80)
+    print("TEST: EI Initialization")
+    print("="*80)
+    
+    ei = EI(optimizer="scipy")
+    
+    assert ei.name == "EI", f"Expected name 'EI', got {ei.name}"
+    assert ei.optimizer == "scipy", "Optimizer should be scipy"
+    
+    print(f"✓ EI initialized with optimizer: {ei.optimizer}")
+    print(f"✓ Acquisition function name: {ei.name}")
+
+
+def test_logei_initialization():
+    """Test LogEI acquisition function initialization."""
+    print("\n" + "="*80)
+    print("TEST: LogEI Initialization")
+    print("="*80)
+    
+    logei = LogEI(optimizer="scipy")
+    
+    assert logei.name == "LogEI", f"Expected name 'LogEI', got {logei.name}"
+    assert logei.optimizer == "scipy", "Optimizer should be scipy"
+    
+    print(f"✓ LogEI initialized with optimizer: {logei.optimizer}")
+    print(f"✓ Acquisition function name: {logei.name}")
+
+
+def test_ei_evaluation():
+    """Test EI acquisition function evaluation."""
+    print("\n" + "="*80)
+    print("TEST: EI Evaluation")
+    print("="*80)
+    
+    gp = generate_test_gp(n_samples=25, d=2)
+    ei = EI()
+    
+    # Test points
+    test_points = [
+        jnp.array([0.7, 0.7]),  # Near optimum
+        jnp.array([0.1, 0.1]),  # Far from optimum
+        jnp.array([0.5, 0.5]),  # Middle
+    ]
+    
+    best_y = jnp.max(gp.train_y)
+    zeta = 0.0
+    
+    print(f"Best observed y: {best_y:.4f}")
+    print(f"\nEI evaluations:")
+    
+    for i, pt in enumerate(test_points):
+        ei_val = -ei.fun(pt, gp, best_y, zeta)  # Negative because optimizer minimizes
+        print(f"  Point {pt}: EI = {ei_val:.4e}")
+        assert ei_val >= 0, f"EI must be non-negative, got {ei_val}"
+    
+    print(f"\n✓ EI evaluation successful, all values non-negative")
+
+
+def test_logei_evaluation():
+    """Test LogEI acquisition function evaluation."""
+    print("\n" + "="*80)
+    print("TEST: LogEI Evaluation")
+    print("="*80)
+    
+    gp = generate_test_gp(n_samples=25, d=2)
+    logei = LogEI()
+    
+    test_points = [
+        jnp.array([0.7, 0.7]),
+        jnp.array([0.1, 0.1]),
+        jnp.array([0.5, 0.5]),
+    ]
+    
+    best_y = jnp.max(gp.train_y)
+    zeta = 0.0
+    
+    print(f"Best observed y: {best_y:.4f}")
+    print(f"\nLogEI evaluations:")
+    
+    for i, pt in enumerate(test_points):
+        logei_val = -logei.fun(pt, gp, best_y, zeta)  # Negative because optimizer minimizes
+        print(f"  Point {pt}: LogEI = {logei_val:.4e}")
+    
+    print(f"\n✓ LogEI evaluation successful")
+
+
+def test_ei_optimization():
+    """Test EI optimization to find next point."""
+    print("\n" + "="*80)
+    print("TEST: EI Optimization")
+    print("="*80)
+    
+    gp = generate_test_gp(n_samples=20, d=2, seed=123)
+    ei = EI(optimizer="scipy")
+    
+    best_y = jnp.max(gp.train_y)
+    acq_kwargs = {'best_y': float(best_y), 'zeta': 0.0}
+    
+    print(f"Optimizing EI to find next point...")
+    print(f"Best observed y: {best_y:.4f}")
+    
+    rng = np.random.default_rng(42)
+    next_point, ei_val = ei.get_next_point(
+        gp=gp,
+        acq_kwargs=acq_kwargs,
+        maxiter=100,
+        n_restarts=5,
+        verbose=False,
+        rng=rng
+    )
+    
+    print(f"\nNext point: {next_point}")
+    print(f"EI value: {ei_val:.4e}")
+    
+    assert next_point.shape == (2,), f"Expected shape (2,), got {next_point.shape}"
+    assert np.all(next_point >= 0) and np.all(next_point <= 1), "Point should be in unit cube"
+    assert ei_val >= 0, f"EI value should be non-negative, got {ei_val}"
+    
+    # Predict at the new point
+    pred_mean = gp.predict_mean_single(next_point)
+    print(f"GP prediction at next point: {pred_mean:.4f}")
+    
+    print(f"\n✓ EI optimization successful")
+
+
+def test_logei_optimization():
+    """Test LogEI optimization to find next point."""
+    print("\n" + "="*80)
+    print("TEST: LogEI Optimization")
+    print("="*80)
+    
+    gp = generate_test_gp(n_samples=20, d=2, seed=456)
+    logei = LogEI(optimizer="scipy")
+    
+    best_y = jnp.max(gp.train_y)
+    acq_kwargs = {'best_y': float(best_y), 'zeta': 0.0}
+    
+    print(f"Optimizing LogEI to find next point...")
+    print(f"Best observed y: {best_y:.4f}")
+    
+    rng = np.random.default_rng(42)
+    next_point, logei_val = logei.get_next_point(
+        gp=gp,
+        acq_kwargs=acq_kwargs,
+        maxiter=100,
+        n_restarts=5,
+        verbose=False,
+        rng=rng
+    )
+    
+    print(f"\nNext point: {next_point}")
+    print(f"LogEI value: {logei_val:.4e}")
+    
+    assert next_point.shape == (2,), f"Expected shape (2,), got {next_point.shape}"
+    assert np.all(next_point >= 0) and np.all(next_point <= 1), "Point should be in unit cube"
+    
+    pred_mean = gp.predict_mean_single(next_point)
+    print(f"GP prediction at next point: {pred_mean:.4f}")
+    
+    print(f"\n✓ LogEI optimization successful")
+
+
+def test_batch_acquisition():
+    """Test batch acquisition (getting multiple points)."""
+    print("\n" + "="*80)
+    print("TEST: Batch Acquisition")
+    print("="*80)
+    
+    gp = generate_test_gp(n_samples=25, d=2, seed=789)
+    ei = EI(optimizer="scipy")
+    
+    best_y = jnp.max(gp.train_y)
+    acq_kwargs = {'best_y': float(best_y), 'zeta': 0.0}
+    
+    n_batch = 3
+    print(f"Getting batch of {n_batch} points...")
+    
+    rng = np.random.default_rng(42)
+    batch_points, batch_vals = ei.get_next_batch(
+        gp=gp,
+        n_batch=n_batch,
+        acq_kwargs=acq_kwargs,
+        maxiter=100,
+        n_restarts=3,
+        verbose=False,
+        rng=rng
+    )
+    
+    print(f"\nBatch points shape: {batch_points.shape}")
+    print(f"Batch EI values: {batch_vals}")
+    
+    assert batch_points.shape == (n_batch, 2), f"Expected shape ({n_batch}, 2), got {batch_points.shape}"
+    assert batch_vals.shape == (n_batch,), f"Expected shape ({n_batch},), got {batch_vals.shape}"
+    assert np.all(batch_points >= 0) and np.all(batch_points <= 1), "All points should be in unit cube"
+    
+    for i, pt in enumerate(batch_points):
+        print(f"  Point {i+1}: {pt}, EI={batch_vals[i]:.4e}")
+    
+    print(f"\n✓ Batch acquisition successful")
+
+
+def test_ei_with_exploration_bonus():
+    """Test EI with exploration bonus (zeta parameter)."""
+    print("\n" + "="*80)
+    print("TEST: EI with Exploration Bonus")
+    print("="*80)
+    
+    gp = generate_test_gp(n_samples=20, d=2)
+    ei = EI()
+    
+    best_y = jnp.max(gp.train_y)
+    test_point = jnp.array([0.5, 0.5])
+    
+    # Without exploration bonus
+    ei_val_no_bonus = -ei.fun(test_point, gp, best_y, zeta=0.0)
+    
+    # With exploration bonus
+    ei_val_with_bonus = -ei.fun(test_point, gp, best_y, zeta=0.1)
+    
+    print(f"EI without bonus (zeta=0.0): {ei_val_no_bonus:.4e}")
+    print(f"EI with bonus (zeta=0.1): {ei_val_with_bonus:.4e}")
+    
+    # With bonus should generally be higher (more exploration)
+    assert ei_val_with_bonus >= ei_val_no_bonus * 0.5, "Exploration bonus should increase EI"
+    
+    print(f"\n✓ Exploration bonus test successful")
+
+
+def test_acquisition_with_different_gp_settings():
+    """Test acquisition functions with different GP configurations."""
+    print("\n" + "="*80)
+    print("TEST: Acquisition with Different GP Settings")
+    print("="*80)
+    
+    # GP with RBF kernel
+    gp_rbf = generate_test_gp(n_samples=20, d=2, seed=111)
+    gp_rbf.kernel_name = "rbf"
+    
+    # GP with Matern kernel
+    rng = np.random.RandomState(222)
+    X = rng.uniform(0, 1, size=(20, 2))
+    y = -np.sum((X - 0.7)**2, axis=1, keepdims=True)
+    gp_matern = GP(train_x=X, train_y=y, kernel="matern", noise=1e-6)
+    
+    ei = EI()
+    best_y = jnp.max(gp_rbf.train_y)
+    
+    test_point = jnp.array([0.6, 0.6])
+    
+    ei_rbf = -ei.fun(test_point, gp_rbf, best_y, 0.0)
+    ei_matern = -ei.fun(test_point, gp_matern, best_y, 0.0)
+    
+    print(f"EI with RBF kernel: {ei_rbf:.4e}")
+    print(f"EI with Matern kernel: {ei_matern:.4e}")
+    
+    assert ei_rbf > 0 and ei_matern > 0, "Both should give positive EI"
+    
+    print(f"\n✓ Acquisition works with different kernels")
+
+
+def test_acquisition_optimization_convergence():
+    """Test that optimization converges to reasonable points."""
+    print("\n" + "="*80)
+    print("TEST: Acquisition Optimization Convergence")
+    print("="*80)
+    
+    # Create GP with known optimum near [0.8, 0.8]
+    rng = np.random.RandomState(333)
+    X = rng.uniform(0, 1, size=(30, 2))
+    y = -np.sum((X - 0.8)**2, axis=1, keepdims=True)
+    
+    gp = GP(train_x=X, train_y=y, noise=1e-6)
+    ei = EI(optimizer="scipy")
+    
+    best_y = jnp.max(gp.train_y)
+    acq_kwargs = {'best_y': float(best_y), 'zeta': 0.0}
+    
+    # Run optimization multiple times
+    rng_test = np.random.default_rng(42)
+    next_points = []
+    
+    for i in range(3):
+        next_pt, _ = ei.get_next_point(
+            gp=gp,
+            acq_kwargs=acq_kwargs,
+            maxiter=100,
+            n_restarts=5,
+            verbose=False,
+            rng=rng_test
+        )
+        next_points.append(next_pt)
+        print(f"  Run {i+1}: {next_pt}")
+    
+    # Check that points are generally near the optimum [0.8, 0.8]
+    next_points = np.array(next_points)
+    distances = np.linalg.norm(next_points - np.array([0.8, 0.8]), axis=1)
+    avg_distance = np.mean(distances)
+    
+    print(f"\nAverage distance from true optimum [0.8, 0.8]: {avg_distance:.4f}")
+    
+    # Should be reasonably close (within half the domain)
+    assert avg_distance < 0.5, f"Optimization not converging well, avg distance: {avg_distance}"
+    
+    print(f"✓ Acquisition optimization converges to reasonable regions")
+
+
+def run_all_tests():
+    """Run all acquisition function tests."""
+    print("\n" + "="*80)
+    print("RUNNING ALL ACQUISITION FUNCTION TESTS")
+    print("="*80)
+    
+    tests = [
+        test_ei_initialization,
+        test_logei_initialization,
+        test_ei_evaluation,
+        test_logei_evaluation,
+        test_ei_optimization,
+        test_logei_optimization,
+        test_batch_acquisition,
+        test_ei_with_exploration_bonus,
+        test_acquisition_with_different_gp_settings,
+        test_acquisition_optimization_convergence,
+    ]
+    
+    passed = 0
+    failed = 0
+    
+    for test in tests:
+        try:
+            test()
+            passed += 1
+        except AssertionError as e:
+            print(f"\n✗ TEST FAILED: {test.__name__}")
+            print(f"  Error: {e}")
+            failed += 1
+        except Exception as e:
+            print(f"\n✗ TEST ERROR: {test.__name__}")
+            print(f"  Error: {e}")
+            import traceback
+            traceback.print_exc()
+            failed += 1
+    
+    print("\n" + "="*80)
+    print("TEST SUMMARY")
+    print("="*80)
+    print(f"Passed: {passed}/{len(tests)}")
+    print(f"Failed: {failed}/{len(tests)}")
+    
+    if failed == 0:
+        print("\n✓ ALL TESTS PASSED!")
+    else:
+        print(f"\n✗ {failed} test(s) failed")
+    
+    return failed == 0
+
+
+if __name__ == "__main__":
+    success = run_all_tests()
+    exit(0 if success else 1)

@@ -103,7 +103,7 @@ def run_bobe(likelihood: Union[Callable, str],
         pool.close()
         return results
     else:
-        print(f"Rank {pool.rank} running only likelihood evaluations")
+        print(f"Rank {pool.rank} running only likelihood evaluations and gp fitting")
         # Workers wait for tasks
         pool.worker_wait(My_Likelihood,seed=seed)
         return None

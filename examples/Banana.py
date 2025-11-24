@@ -53,7 +53,7 @@ def main():
         max_evals=100,
         max_gp_size=200,
         fit_step=1,
-        wipv_batch_size=4,
+        wipv_batch_size=2,
         ns_step=5,
         optimizer='scipy',
         mc_points_method='NUTS',

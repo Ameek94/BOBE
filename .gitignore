@@ -15,7 +15,6 @@
 mem*.ipynb
 test*.ipynb
 plots*.py
-test*.py
 test*.yaml
 *.ipynb_checkpoints
 *eggs/
