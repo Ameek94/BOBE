@@ -14,7 +14,7 @@ Results Handling
 Core Utilities
 --------------
 
-.. automodule:: jaxbo.utils.core_utils
+.. automodule:: jaxbo.utils.core
    :members:
    :undoc-members:
    :show-inheritance:
@@ -22,7 +22,7 @@ Core Utilities
 Seed Management
 ---------------
 
-.. automodule:: jaxbo.utils.seed_utils
+.. automodule:: jaxbo.utils.seed
    :members:
    :undoc-members:
    :show-inheritance:
@@ -30,15 +30,7 @@ Seed Management
 Logging Utilities
 -----------------
 
-.. automodule:: jaxbo.utils.logging_utils
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Convergence Analysis
---------------------
-
-.. automodule:: jaxbo.utils.convergence
+.. automodule:: jaxbo.utils.log
    :members:
    :undoc-members:
    :show-inheritance:
@@ -46,7 +38,7 @@ Convergence Analysis
 Plotting and Visualization
 ---------------------------
 
-.. automodule:: jaxbo.utils.summary_plots
+.. automodule:: jaxbo.utils.plot
    :members:
    :undoc-members:
    :show-inheritance:

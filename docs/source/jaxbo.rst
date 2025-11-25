@@ -20,18 +20,18 @@ bo
    :show-inheritance:
    :undoc-members:
 
-bo\_utils
-----------------------
+clf
+----------------
 
-.. automodule:: jaxbo.bo_utils
+.. automodule:: jaxbo.clf
    :members:
    :show-inheritance:
    :undoc-members:
 
-fb\_gp
--------------------
+clf\_gp
+--------------------
 
-.. automodule:: jaxbo.fb_gp
+.. automodule:: jaxbo.clf_gp
    :members:
    :show-inheritance:
    :undoc-members:
@@ -44,11 +44,10 @@ gp
    :show-inheritance:
    :undoc-members:
 
+likelihood
+-----------------------
 
-loglike
---------------------
-
-.. automodule:: jaxbo.loglike
+.. automodule:: jaxbo.likelihood
    :members:
    :show-inheritance:
    :undoc-members:
@@ -73,14 +72,6 @@ run
 ----------------
 
 .. automodule:: jaxbo.run
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-svm\_gp
---------------------
-
-.. automodule:: jaxbo.svm_gp
    :members:
    :show-inheritance:
    :undoc-members:

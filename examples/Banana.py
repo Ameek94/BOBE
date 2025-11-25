@@ -2,12 +2,12 @@ import os
 os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
-from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
+from jaxbo.utils.plot import plot_final_samples, BOBESummaryPlotter
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
-from jaxbo.utils.logging_utils import get_logger
-from jaxbo.utils.core_utils import renormalise_log_weights
+from jaxbo.utils.log import get_logger
+from jaxbo.utils.core import renormalise_log_weights
 from jaxbo.run import run_bobe
 from getdist import MCSamples
 import numpy as np

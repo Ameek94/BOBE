@@ -1,206 +1,100 @@
 Quick Start Guide
 =================
 
-This guide will help you get up and running with JaxBo quickly.
-
-Basic Concepts
---------------
-
-JaxBo implements **Bayesian Optimization for Bayesian Evidence (BOBE)**, which uses 
-Gaussian Processes to efficiently estimate the Bayesian evidence (marginal likelihood) 
-of cosmological models.
-
-Key Components:
-
-- **BOBE**: The main optimization class
-- **Likelihood**: Interface to your cosmological model
-- **Gaussian Process**: Models the log-evidence surface
-- **Acquisition Function**: Determines where to sample next
+JaxBO estimates Bayesian evidence using Gaussian Process surrogates of expensive likelihoods.
 
 Simple Example
 --------------
 
-Here's a minimal example using a toy likelihood:
+Here's a minimal example using a test function:
 
 .. code-block:: python
 
    import numpy as np
-   from jaxbo import BOBE
-   from jaxbo.likelihood import BaseLikelihood
+   from jaxbo.run import run_bobe
    
    # Define a simple 2D likelihood
-   class ToyLikelihood(BaseLikelihood):
-       def __init__(self):
-           # Define parameter bounds
-           self.bounds = np.array([[-2, 2], [-2, 2]])
-           self.param_names = ['x', 'y']
-       
-       def log_likelihood(self, theta):
-           x, y = theta
-           # Simple bivariate normal
-           return -0.5 * (x**2 + y**2)
-   
-   # Create and run BOBE
-   likelihood = ToyLikelihood()
-   bobe = BOBE(
-       loglikelihood=likelihood,
-       max_eval_budget=100,
-       acquisition_func="wipv"
-   )
-   
-   results = bobe.run()
-   print(f"Log evidence estimate: {results.log_evidence:.3f}")
-
-Cosmology Example with Cobaya
-------------------------------
-
-For real cosmological applications, JaxBo integrates with Cobaya:
-
-.. code-block:: python
-
-   from jaxbo import BOBE
-   from jaxbo.likelihood import CobayaLikelihood
-   
-   # Cobaya model configuration
-   info = {
-       'params': {
-           'omega_b': {'prior': {'min': 0.02, 'max': 0.025}},
-           'omega_cdm': {'prior': {'min': 0.10, 'max': 0.15}},
-           'H0': {'prior': {'min': 60, 'max': 80}},
-           'tau_reio': 0.06,  # Fixed parameter
-           'A_s': {'prior': {'min': 1.8e-9, 'max': 3.0e-9}},
-           'n_s': {'prior': {'min': 0.9, 'max': 1.1}},
-       },
-       'likelihood': {
-           'planck_2018_lowl.TT': None,
-           'planck_2018_lowl.EE': None,
-       },
-       'theory': {
-           'camb': {'extra_args': {'num_massive_neutrinos': 1}}
-       }
-   }
-   
-   # Create likelihood
-   likelihood = CobayaLikelihood(info)
+   def my_likelihood(X):
+       x, y = X[0], X[1]
+       return -0.5 * (x**2 + y**2)
    
    # Run BOBE
-   bobe = BOBE(
-       loglikelihood=likelihood,
-       max_eval_budget=1000,
-       acquisition_func="wipv",
-       gp_type="saas",  # Use sparse GP for high dimensions
-       verbose=True
+   results = run_bobe(
+       likelihood=my_likelihood,
+       likelihood_kwargs={
+           'param_list': ['x', 'y'],
+           'param_bounds': np.array([[-3, 3], [-3, 3]]).T,
+           'name': 'test',
+       },
+       max_evals=100,
+       seed=42,
    )
    
-   results = bobe.run()
+   # Get results
+   print(f"Log Evidence: {results['logz']['logz']:.2f}")
 
-Configuration Options
----------------------
+For detailed examples, see:
 
-The BOBE class accepts many configuration options:
+- :doc:`examples/banana` - 2D test function example
+- :doc:`examples/cosmology` - Cosmological likelihood with Cobaya
 
-Core Parameters
-~~~~~~~~~~~~~~~
+**Expected Output:**
 
-.. code-block:: python
+The code will print progress information and converge to a log-evidence estimate. 
+The banana function has a complex posterior shape, demonstrating JaxBO's ability 
+to handle non-trivial likelihood surfaces.
 
-   bobe = BOBE(
-       loglikelihood=likelihood,
-       
-       # Budget control
-       max_eval_budget=1500,      # Maximum function evaluations
-       min_evals=200,             # Minimum evaluations before stopping
-       
-       # Initialization
-       n_sobol_init=32,           # Initial Sobol sequence points
-       n_cobaya_init=4,           # Initial Cobaya samples (if using Cobaya)
-       
-       # Gaussian Process
-       gp_type="dslp",            # "dslp", "saas", or "standard"
-       max_gp_size=1200,          # Maximum GP training set size
-       
-       # Acquisition function
-       acquisition_func="wipv",    # "wipv", "ei", or "logei"
-       
-       # Optimization
-       lr_gp=0.01,               # GP learning rate
-       num_gp_epochs=500,        # GP training epochs
-       
-       # Convergence
-       convergence_check=True,    # Enable convergence checking
-       patience=50,              # Patience for early stopping
-       
-       # Output
-       verbose=True,             # Enable verbose output
-       output_dir="./results/",  # Output directory
-   )
+Understanding the Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-GP Model Types
-~~~~~~~~~~~~~~
+Key parameters to tune:
 
-- **"dslp"**: Deep Sigmoidal Location Process - Good for smooth functions
-- **"saas"**: Sparse Axis-Aligned Subspace - Better for high-dimensional problems  
-- **"standard"**: Standard GP - Simple but can be slow for large datasets
+- ``n_sobol_init``: Number of initial space-filling points (more for higher dimensions)
+- ``min_evals``, ``max_evals``: Budget for likelihood evaluations
+- ``mc_points_method``: 'NUTS' for good exploration, 'uniform' for simpler problems
+- ``use_clf``: Enable classifier for high-dimensional or expensive likelihoods
+- ``acq``: Acquisition function - 'wipv' (recommended), 'ei', or 'logei'
 
-Acquisition Functions
-~~~~~~~~~~~~~~~~~~~~~
+Example 2: Cosmological Likelihood
+-----------------------------------
 
-- **"wipv"**: Weighted Integrated Posterior Variance - Balances exploration/exploitation
-- **"ei"**: Expected Improvement - Classic acquisition function
-- **"logei"**: Log Expected Improvement - More stable for small improvements
+Now let's look at a more realistic example using a cosmological likelihood through Cobaya.
 
-Working with Results
---------------------
-
-The ``run()`` method returns a ``BOBEResults`` object:
+.. note::
+   This example requires the optional Cobaya dependency. Install with:
+   ``pip install 'jaxbo[cobaya]'``
 
 .. code-block:: python
 
-   results = bobe.run()
+   from jaxbo.run import run_bobe
    
-   # Access key results
-   print(f"Log evidence: {results.log_evidence:.3f} ± {results.log_evidence_error:.3f}")
-   print(f"Function evaluations: {results.n_evaluations}")
-   print(f"Runtime: {results.total_time:.1f} seconds")
+   # Path to Cobaya input file defining the cosmological model
+   cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_Omk.yaml'
    
-   # Access sample data
-   samples = results.get_samples()  # Parameter samples
-   log_likes = results.get_log_likelihoods()  # Log-likelihood values
-   
-   # Generate plots
-   results.plot_convergence()
-   results.plot_corner()
-   results.plot_acquisition_evolution()
+   # Run BOBE with cosmological likelihood
+   results = run_bobe(
+       likelihood=cobaya_input_file,  # Cobaya YAML file
+       likelihood_kwargs={
+           'confidence_for_unbounded': 0.9999995,
+           'minus_inf': -1e5,
+           'noise_std': 0.0,
+           'name': 'Planck_DESI_LCDM',
+       },
+       verbosity='INFO',
+       # Initial sampling
+       n_cobaya_init=32,        # Points from Cobaya reference distribution
+       n_sobol_init=64,         # Additional Sobol points
+       
+       # Budget
+       min_evals=800,
+       max_evals=2500,
+       max_gp_size=1500,
+       
+       # Acquisition settings
+       acq=['wipv'],
+       convergence_n_iters=2,   # Require 2 consecutive convergence checks
+       
+       # Step settings
+       fit_step=5,              # Fit GP every 5 evaluations
+       wipv_batch_size=5,       # Evaluate 5 points per acquisition
 
-Parallel Computing
-------------------
-
-For large problems, use MPI parallelization:
-
-.. code-block:: python
-
-   from jaxbo.utils.pool import MPI_Pool
-   
-   # In your script
-   if __name__ == "__main__":
-       with MPI_Pool() as pool:
-           bobe = BOBE(
-               loglikelihood=likelihood,
-               max_eval_budget=2000,
-               pool=pool  # Pass the MPI pool
-           )
-           results = bobe.run()
-
-Run with MPI:
-
-.. code-block:: bash
-
-   mpirun -n 4 python your_script.py
-
-Next Steps
-----------
-
-- Read the :doc:`tutorials/index` for detailed examples
-- Explore the :doc:`examples/index` for real-world applications  
-- Check the :doc:`api/core` for detailed API documentation
-- Learn about advanced features in the user guide

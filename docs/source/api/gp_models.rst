@@ -11,22 +11,6 @@ Base GP Class
    :undoc-members:
    :show-inheritance:
 
-Deep Sigmoidal Location Process (DSLP)
----------------------------------------
-
-.. autoclass:: jaxbo.gp.DSLP_GP
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Sparse Axis-Aligned Subspace (SAAS) GP
----------------------------------------
-
-.. autoclass:: jaxbo.gp.SAAS_GP
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Gaussian Process with Classifier
 ---------------------------------
 
