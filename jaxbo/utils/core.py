@@ -7,8 +7,8 @@ from jax import vmap
 from scipy.special import logsumexp, erfc
 from scipy import stats
 from scipy.stats import chi2
-from .logging_utils import get_logger
-from .seed_utils import get_numpy_rng
+from .log import get_logger
+from .seed import get_numpy_rng
 import math
 log = get_logger("utils")
 

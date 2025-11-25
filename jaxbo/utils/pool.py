@@ -2,8 +2,8 @@ import time
 import numpy as np
 import jax.numpy as jnp
 from typing import Callable, Dict, List, Any, Union, Optional, Tuple
-from jaxbo.utils.seed_utils import set_global_seed, get_numpy_rng, get_new_jax_key
-from jaxbo.utils.logging_utils import get_logger
+from jaxbo.utils.seed import set_global_seed, get_numpy_rng, get_new_jax_key
+from jaxbo.utils.log import get_logger
 from jaxbo.gp import GP
 from jaxbo.clf_gp import GPwithClassifier
 log = get_logger('pool')

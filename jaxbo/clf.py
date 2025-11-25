@@ -6,17 +6,27 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from sklearn.svm import SVC
-import optax
 from typing import Callable, Dict, Any, Union, List, Optional, Tuple
 from functools import partial
-from .utils.logging_utils import get_logger 
-from .utils.seed_utils import get_numpy_rng
+from .utils.log import get_logger 
+from .utils.seed import get_numpy_rng
 log = get_logger("clf")
 
 try:
-    from flax import linen as nn
+    import optax
+    OPTAX_AVAILABLE = True
 except ImportError:
-    log.warning("Flax is not available. Only SVM classifier will be available.")
+    OPTAX_AVAILABLE = False
+    optax = None
+    log.debug("optax is not available. NN and Ellipsoid classifiers will require it.")
+
+try:
+    from flax import linen as nn
+    FLAX_AVAILABLE = True
+except ImportError:
+    FLAX_AVAILABLE = False
+    nn = None
+    log.debug("Flax is not available. Only SVM classifier will be available.")
 
 
 # -----------------------------------------------------------------------------
@@ -69,6 +79,11 @@ def get_svm_predict_proba_fn(params):
 
 def train_nn_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     """Train neural network classifier and return parameters, metrics, and predict function."""
+    if not FLAX_AVAILABLE or not OPTAX_AVAILABLE:
+        raise ImportError(
+            "Flax and optax are required for NN classifier. "
+            "Install with: pip install 'jaxbo[nn]'"
+        )
     # Create model with settings
     label_size = X.shape[0]
     if label_size < 500:
@@ -106,6 +121,11 @@ def get_nn_predict_proba_fn(params, settings = {}, **kwargs):
 
 def train_ellipsoid_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     """Train ellipsoid classifier and return parameters, metrics, and predict function."""
+    if not FLAX_AVAILABLE or not OPTAX_AVAILABLE:
+        raise ImportError(
+            "Flax and optax are required for Ellipsoid classifier. "
+            "Install with: pip install 'jaxbo[nn]'"
+        )
     d = X.shape[1]
     mu = kwargs.get('best_pt', 0.5*jnp.ones(d))
     
@@ -159,46 +179,8 @@ CLASSIFIER_REGISTRY = {
 }
 
 # -----------------------------------------------------------------------------
-# Scikit-learn SVM Classifier using JAX for prediction.
+# SVM prediction functions
 # -----------------------------------------------------------------------------
-
-class SVMClassifier:
-
-    def __init__(self, gamma: str = "scale", C: float = 1e7, kernel: str = 'rbf'):
-        self.gamma = gamma
-        self.C = C
-        self.kernel = kernel
-
-    def train(self,X,Y,init_params=None):
-        clf = SVC(kernel=self.kernel, gamma=self.gamma, C=self.C)
-        clf.fit(X, Y) 
-        support_vectors = clf.support_vectors_
-        dual_coef = clf.dual_coef_[0]  # convert to 1D array
-        intercept = float(clf.intercept_[0])
-        gamma_eff = float(clf._gamma) # note: this is the effective gamma value used by scikit-learn
-    
-        # convert to jax arrays
-        support_vectors = jnp.array(support_vectors)
-        dual_coef = jnp.array(dual_coef)
-        metrics = {
-            'n_support_vectors': len(support_vectors),
-            'gamma': f"{gamma_eff:.2e}",
-            'C': f"{self.C:.2e}",
-            'intercept': f"{intercept:.2e}",}
-        params = {
-            'support_vectors': support_vectors,
-            'dual_coef': dual_coef,
-            'intercept': intercept,
-            'gamma_eff': gamma_eff
-        }
-        return params, metrics       
-
-    def get_predict_proba_fn(self,params):
-        support_vectors = params['support_vectors']
-        dual_coef = params['dual_coef']
-        intercept = params['intercept']
-        gamma = params['gamma_eff']
-        return jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, dual_coef=dual_coef, intercept=intercept, gamma=gamma))
 
 def svm_predict(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: jnp.ndarray, intercept: float, gamma: float):
     """
@@ -229,19 +211,10 @@ def svm_predict_proba(x: jnp.ndarray, support_vectors: jnp.ndarray, dual_coef: j
 
 
 # -----------------------------------------------------------------------------
-# Neural Network Classifiers with train/validation split
+# Neural Network Classifiers
 # -----------------------------------------------------------------------------
 
 # Common training utilities
-def create_train_val_split(x: jnp.ndarray, y: jnp.ndarray, val_frac: float, seed: int):
-    """Create fixed train/validation split"""
-    N = x.shape[0]
-    rng = np.random.RandomState(seed)
-    perm = rng.permutation(N)
-    split = int(N * (1 - val_frac))
-    train_idx, val_idx = perm[:split], perm[split:]
-    return (x[train_idx], y[train_idx]), (x[val_idx], y[val_idx])
-
 def train_with_restarts(
     train_fn: Callable,
     x: jnp.ndarray,
@@ -308,41 +281,30 @@ def train_with_restarts(
 
 
 # Neural Network Classifier
-class MLPClassifier(nn.Module):
-    hidden_dims: list = (32, 32)
-    dropout_rate: float = 0.1
-    lr: float = 1e-3
-    weight_decay: float = 1e-4
-    n_epochs: int = 1000
-    batch_size: int = 128
-    early_stop_patience: int = 50
-    n_restarts: int = 2
-    val_frac: float = 0.2
-    seed_offset: int = 0
-    split_seed: int = 42
+if FLAX_AVAILABLE:
+    class MLPClassifier(nn.Module):
+        hidden_dims: list = (32, 32)
+        dropout_rate: float = 0.1
+        lr: float = 1e-3
+        weight_decay: float = 1e-4
+        n_epochs: int = 1000
+        batch_size: int = 128
+        early_stop_patience: int = 50
+        n_restarts: int = 2
+        val_frac: float = 0.2
+        seed_offset: int = 0
+        split_seed: int = 42
 
-    @nn.compact
-    def __call__(self, x, train: bool = False):
-        for h in self.hidden_dims:
-            x = nn.Dense(h)(x)
-            x = nn.relu(x)
-            x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
-        x = nn.Dense(1)(x)
-        return x
-
-    def train(self, X, Y, init_params=None, **kwargs):
-        params, metrics = train_nn_multiple_restarts(
-            model=self,
-            x=X, y=Y,
-            init_params=init_params
-        )
-        return params, metrics
-
-    def get_predict_proba_fn(self, params):
-        def predict_proba_fn(x):
-            logits = self.apply(params, x, train=False)
-            return jax.nn.sigmoid(logits.squeeze(-1))
-        return jax.jit(predict_proba_fn)
+        @nn.compact
+        def __call__(self, x, train: bool = False):
+            for h in self.hidden_dims:
+                x = nn.Dense(h)(x)
+                x = nn.relu(x)
+                x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
+            x = nn.Dense(1)(x)
+            return x
+else:
+    MLPClassifier = None
 
 def train_nn(
     model: MLPClassifier,
@@ -408,56 +370,44 @@ def train_nn_multiple_restarts(model: MLPClassifier, x: jnp.ndarray, y: jnp.ndar
                                split_seed=model.split_seed, **kwargs)
 
 # Ellipsoid Classifier with center at best fit point
-class EllipsoidClassifier(nn.Module):
-    d: int
-    mu: jnp.ndarray
-    init_scale: float = 0.1
-    lr: float = 1e-2
-    weight_decay: float = 1e-4
-    n_epochs: int = 1000
-    batch_size: int = 64
-    patience: int = 25
-    n_restarts: int = 2
-    val_frac: float = 0.1
-    seed_offset: int = 0
-    split_seed: int = 42
+if FLAX_AVAILABLE:
+    class EllipsoidClassifier(nn.Module):
+        d: int
+        mu: jnp.ndarray
+        init_scale: float = 0.1
+        lr: float = 1e-2
+        weight_decay: float = 1e-4
+        n_epochs: int = 1000
+        batch_size: int = 64
+        patience: int = 25
+        n_restarts: int = 2
+        val_frac: float = 0.1
+        seed_offset: int = 0
+        split_seed: int = 42
 
-    def setup(self):
-        tril = self.d * (self.d + 1) // 2
-        self.flat_L = self.param("flat_L", nn.initializers.normal(self.init_scale), (tril,))
-        self.alpha = self.param("alpha", nn.initializers.ones, ())
-        self.beta = self.param("beta", nn.initializers.zeros, ())
+        def setup(self):
+            tril = self.d * (self.d + 1) // 2
+            self.flat_L = self.param("flat_L", nn.initializers.normal(self.init_scale), (tril,))
+            self.alpha = self.param("alpha", nn.initializers.ones, ())
+            self.beta = self.param("beta", nn.initializers.zeros, ())
 
-    def _unpack_L(self):
-        L_matrix = jnp.zeros((self.d, self.d))
-        tril_indices = jnp.tril_indices(self.d)
-        rows, cols = tril_indices
-        diagonal_mask = rows == cols
-        flat_L_processed = jnp.where(diagonal_mask, nn.softplus(self.flat_L) + 1e-4, self.flat_L)
-        return L_matrix.at[tril_indices].set(flat_L_processed)
+        def _unpack_L(self):
+            L_matrix = jnp.zeros((self.d, self.d))
+            tril_indices = jnp.tril_indices(self.d)
+            rows, cols = tril_indices
+            diagonal_mask = rows == cols
+            flat_L_processed = jnp.where(diagonal_mask, nn.softplus(self.flat_L) + 1e-4, self.flat_L)
+            return L_matrix.at[tril_indices].set(flat_L_processed)
 
-    @nn.compact
-    def __call__(self, x, train: bool = False):
-        L = self._unpack_L()
-        diff = x - self.mu
-        md2 = jnp.einsum("...i,ij,...j->...", diff, L @ L.T, diff)
-        logit = -self.alpha * md2 + self.beta
-        return logit
-
-    def train(self, X, Y, init_params=None, **kwargs):
-        self.mu = kwargs.get('best_pt', self.mu)
-        params, metrics = train_ellipsoid_multiple_restarts(
-            model=self,
-            x=X, y=Y,
-            init_params=init_params,
-        )
-        return params, metrics
-
-    def get_predict_proba_fn(self, params):
-        def predict_proba_fn(x):
-            logits = self.apply(params, x, train=False)
-            return jax.nn.sigmoid(logits.squeeze())
-        return jax.jit(predict_proba_fn)
+        @nn.compact
+        def __call__(self, x, train: bool = False):
+            L = self._unpack_L()
+            diff = x - self.mu
+            md2 = jnp.einsum("...i,ij,...j->...", diff, L @ L.T, diff)
+            logit = -self.alpha * md2 + self.beta
+            return logit
+else:
+    EllipsoidClassifier = None
 
 def train_ellipsoid(
     model: EllipsoidClassifier,

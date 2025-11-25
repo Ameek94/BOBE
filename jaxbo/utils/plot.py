@@ -30,8 +30,8 @@ except ImportError:
     warnings.warn("GetDist not available. Triangle plots will be limited.")
 
 from .results import BOBEResults, load_bobe_results
-from .core_utils import scale_from_unit, scale_to_unit
-from .logging_utils import get_logger
+from .core import scale_from_unit, scale_to_unit
+from .log import get_logger
 
 log = get_logger("plots")
 
@@ -41,7 +41,6 @@ plt.style.use('default')
 # Enable LaTeX rendering for mathematical expressions
 plt.rcParams['text.usetex'] = False  # Use mathtext instead of full LaTeX for compatibility
 plt.rcParams['font.family'] = 'serif'
-# plt.rcParams['mathtext.fontset'] = 'cm'  # Computer Modern font for math
 
 
 

@@ -2,16 +2,26 @@ from typing import Optional, Union, List, Tuple, Callable, Any
 import jax
 import jax.numpy as jnp
 import numpy as np
-import optax
 from scipy.optimize import minimize 
-from .utils.core_utils import scale_to_unit, scale_from_unit, split_vmap 
-from .utils.logging_utils import get_logger
-from .utils.seed_utils import get_new_jax_key, get_global_seed
+from .utils.core import scale_to_unit, scale_from_unit, split_vmap 
+from .utils.log import get_logger
+
+try:
+    import optax
+    OPTAX_AVAILABLE = True
+except ImportError:
+    OPTAX_AVAILABLE = False
+    optax = None
 
 log = get_logger("optim")
 
-def _get_optimizer(optimizer_name: str, learning_rate: float = 1e-3, optimizer_kwargs: Optional[dict] = {}) -> optax.GradientTransformation:
+def _get_optimizer(optimizer_name: str, learning_rate: float = 1e-3, optimizer_kwargs: Optional[dict] = {}):
     """Get the optax optimizer."""
+    if not OPTAX_AVAILABLE:
+        raise ImportError(
+            "optax is required for this optimizer. "
+            "Install it with: pip install 'jaxbo[nn]' or pip install optax"
+        )
     optimizer_name = optimizer_name.lower()
     if 'learning_rate' not in optimizer_kwargs:
         optimizer_kwargs['learning_rate'] = learning_rate
@@ -73,8 +83,14 @@ def optimize_optax(
     """
     SEQUENTIAL OPTIMIZER: Minimize a function using JAX + optax,
     iterating through restarts with a Python for-loop.
+    
+    Requires optax to be installed. Install with: pip install 'jaxbo[nn]' or pip install optax
     """
-
+    if not OPTAX_AVAILABLE:
+        raise ImportError(
+            "optax is required for optimize_optax. "
+            "Install it with: pip install 'jaxbo[nn]' or pip install optax"
+        )
 
     if x0 is None:
         raise ValueError("x0 must be provided (shape: (n_restarts, num_params))")
@@ -161,9 +177,15 @@ def optimize_optax_vmap(
 ) -> Tuple[jnp.ndarray, float]:
     """
     VECTORIZED OPTIMIZER: Minimize a function using JAX + optax,
-    vectorizing over restarts with jax.vmap for parallel execution. Only to be used with EI. 
+    vectorizing over restarts with jax.vmap for parallel execution. Only to be used with EI.
+    
+    Requires optax to be installed. Install with: pip install 'jaxbo[nn]' or pip install optax
     """
-
+    if not OPTAX_AVAILABLE:
+        raise ImportError(
+            "optax is required for optimize_optax_vmap. "
+            "Install it with: pip install 'jaxbo[nn]' or pip install optax"
+        )
 
     if x0 is None:
         raise ValueError("x0 must be provided (shape: (n_restarts, num_params))")
@@ -336,81 +358,3 @@ def optimize_scipy(
             f"Final best_f = {float(global_best_f):.4e}")
     
     return jnp.array(global_best_params), float(global_best_f)
-
-
-    # if global_best_params is None:
-    #     log.warning("No valid optimization results found, falling back to best initial point")
-    #     log.warning("This indicates all optimizations had serious failures (not just max iterations)")
-        
-    #     # Fallback to best initial point if all optimizations failed
-    #     best_init_idx = 0
-    #     best_init_val = np.inf
-    #     for i, x_init in enumerate(x0_list):
-    #         try:
-    #             val, _ = value_and_grad_func(x_init)
-    #             if np.isfinite(val) and val < best_init_val:
-    #                 best_init_val = val
-    #                 best_init_idx = i
-    #         except Exception:
-    #             continue
-        
-    #     if not np.isfinite(best_init_val):
-    #         log.error("All initial points have non-finite function values!")
-        
-    #     global_best_params = x0_list[best_init_idx]
-    #     global_best_f = best_init_val
-    #     log.warning(f"Using initial point {best_init_idx} with value {best_init_val:.6e}")
-
-    # # Run optimization with multiple restarts
-    # for restart_idx in range(n_restarts):
-    #     initial_x = x0_list[restart_idx]
-        
-    #     try:
-    #         # Evaluate function at initial point
-    #         initial_val, initial_grad = value_and_grad_func(initial_x)
-            
-    #         # Check for NaN/inf in initial evaluation
-    #         if not np.isfinite(initial_val) or not np.all(np.isfinite(initial_grad)):
-    #             log.warning(f"Restart {restart_idx + 1}: Initial point has non-finite values, skipping")
-    #             continue
-            
-    #         result = minimize(
-    #             value_and_grad_func,
-    #             initial_x,
-    #             method=method,
-    #             jac=True,
-    #             bounds=scipy_bounds,
-    #             options={
-    #                 'maxiter': maxiter,
-    #                 'ftol': optimizer_kwargs.get("ftol", 1e-6),
-    #                 'gtol': optimizer_kwargs.get("gtol", 1e-6),
-    #             }
-    #         )
-            
-    #         # Check final function value
-    #         if not np.isfinite(result.fun):
-    #             log.warning(f"Restart {restart_idx + 1}: Final function value is not finite")
-    #             continue  # Skip this restart if function value is not finite
-            
-    #         # Check if this is a good result even if not "successful"
-    #         # L-BFGS-B can reach max iterations but still find good solutions
-    #         is_max_iter = "TOTAL NO. OF ITERATIONS REACHED LIMIT" in result.message
-    #         is_valid_result = np.isfinite(result.fun) and np.all(np.isfinite(result.x))
-            
-    #         if (result.success or is_max_iter) and is_valid_result and result.fun < global_best_f:
-    #             global_best_f = result.fun
-    #             global_best_params = result.x
-    #             if result.success:
-    #                 log.debug(f"New best found in restart {restart_idx + 1}: {result.fun:.6e}")
-    #             else:
-    #                 log.debug(f"New best found in restart {restart_idx + 1} (max iter): {result.fun:.6e}")
-    #         elif not result.success and not is_max_iter:
-    #             # Only treat as failure if it's not just hitting max iterations
-    #             log.debug(f"Restart {restart_idx + 1} failed: {result.message}")
-    #         elif is_max_iter:
-    #             # Max iterations reached but not better than current best
-    #             log.debug(f"Restart {restart_idx + 1} reached max iterations with value {result.fun:.6e} (not better than current best {global_best_f:.6e})")
-                
-    #     except Exception as e:
-    #         log.warning(f"Restart {restart_idx + 1} failed with error: {e}")
-    #         continue

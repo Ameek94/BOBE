@@ -15,9 +15,9 @@ from .gp import GP, safe_noise_floor
 from .clf import (
     CLASSIFIER_REGISTRY
 )
-from .utils.seed_utils import get_new_jax_key, get_numpy_rng
-from .utils.logging_utils import get_logger
-from .utils.core_utils import get_threshold_for_nsigma
+from .utils.seed import get_new_jax_key, get_numpy_rng
+from .utils.log import get_logger
+from .utils.core import get_threshold_for_nsigma
 log = get_logger("clf_gp")
 
 

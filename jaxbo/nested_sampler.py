@@ -9,9 +9,9 @@ import jax
 jax.config.update("jax_enable_x64", True)
 from .gp import GP
 from .clf_gp import GPwithClassifier
-from .utils.logging_utils import get_logger
-from .utils.seed_utils import get_numpy_rng
-from .utils.core_utils import is_cluster_environment
+from .utils.log import get_logger
+from .utils.seed import get_numpy_rng
+from .utils.core import is_cluster_environment
 from scipy.special import logsumexp
 log = get_logger("ns")
 

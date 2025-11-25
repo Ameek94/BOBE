@@ -5,17 +5,17 @@ import jax.numpy as jnp
 import numpy as np
 import jax
 from jax.scipy.linalg import cho_solve, solve_triangular
-from .utils.core_utils import scale_to_unit, scale_from_unit
+from .utils.core import scale_to_unit, scale_from_unit
 jax.config.update("jax_enable_x64", True)
 import numpyro
 from numpyro.infer import MCMC, NUTS
 from numpyro.util import enable_x64
 enable_x64()
 from functools import partial
-from .utils.logging_utils import get_logger
+from .utils.log import get_logger
 log = get_logger("gp")
 from .optim import optimize_optax, optimize_scipy
-from .utils.seed_utils import get_new_jax_key, get_numpy_rng
+from .utils.seed import get_new_jax_key, get_numpy_rng
 import numpyro.distributions as dist
 
 

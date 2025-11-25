@@ -7,8 +7,8 @@ logging, timing, and other helper functions.
 
 # Import key utilities for easy access
 from .results import BOBEResults, load_bobe_results, create_resumable_results
-from .summary_plots import BOBESummaryPlotter, plot_final_samples
-from .core_utils import (
+from .plot import BOBESummaryPlotter, plot_final_samples
+from .core import (
     suppress_stdout_stderr, 
     split_vmap, 
     scale_to_unit, 
@@ -17,8 +17,8 @@ from .core_utils import (
     resample_equal,
     is_cluster_environment
 )
-from .logging_utils import get_logger, setup_logging
-from .seed_utils import get_numpy_rng, get_jax_key, set_global_seed
+from .log import get_logger, setup_logging
+from .seed import get_numpy_rng, get_jax_key, set_global_seed
 from .timing import BOBETimingCollector
 
 __all__ = [

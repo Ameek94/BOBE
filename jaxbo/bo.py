@@ -10,10 +10,10 @@ from typing import Optional, Union, Tuple, Dict, Any
 from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import BaseLikelihood, CobayaLikelihood
-from .utils.core_utils import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
-from .utils.seed_utils import set_global_seed, get_jax_key,  get_numpy_rng
+from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
+from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
-from .utils.logging_utils import get_logger
+from .utils.log import get_logger
 from .utils.results import BOBEResults
 from .acquisition import *
 from .utils.pool import MPI_Pool
@@ -491,7 +491,7 @@ class BOBE:
             verbose = True
 
             if verbose:
-                print("\n")
+                log.debug("\n")
                 log.info(f" Iteration {ii} of {self.acquisition.name}, objective evals {current_evals}/{self.max_evals}")
 
             acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten()) if self.gp.train_y.size > 0 else 0.}
@@ -586,8 +586,8 @@ class BOBE:
             verbose = True
 
             if verbose:
-                print("\n")
-                log.info(f" Iteration {ii} of WIPV, objective evals {current_evals}/{self.max_evals}, ns={ns_flag}")
+                log.debug("\n")
+                log.info(f" Iteration {ii} of WIPStd, objective evals {current_evals}/{self.max_evals}")
 
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
@@ -965,7 +965,7 @@ class BOBE:
 
         # Add evidence info if available
         samples_dict = self.samples_dict or {}
-        print(samples_dict.keys())
+        log.debug(f"Samples dict keys: {samples_dict.keys()}")
         logz_dict = self.results_dict.get('logz', {})
 
         # Finalize results with comprehensive data

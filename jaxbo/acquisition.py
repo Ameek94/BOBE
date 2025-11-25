@@ -8,8 +8,8 @@ from jax.scipy.stats import norm
 from jax import config
 import tensorflow_probability.substrates.jax as tfp
 from .optim import optimize_optax, optimize_optax_vmap, optimize_scipy
-from .utils.logging_utils import get_logger
-from .utils.seed_utils import get_numpy_rng
+from .utils.log import get_logger
+from .utils.seed import get_numpy_rng
 from .nested_sampler import nested_sampling_Dy
 from .gp import GP
 config.update("jax_enable_x64", True)
@@ -77,7 +77,22 @@ def _log_ei_helper(u):
 #------------------The acquisition function classes-------------------------
 
 class AcquisitionFunction:
-    """Base class for acquisition functions"""
+    """Base class for acquisition functions.
+    
+    Acquisition functions guide the selection of new points to evaluate by balancing
+    exploration and exploitation. Subclasses must implement the `fun` and `get_next_point` methods.
+    
+    Attributes
+    ----------
+    name : str
+        Name of the acquisition function.
+    optimizer : str
+        Optimizer to use ('scipy' or 'optax').
+    optimizer_options : dict
+        Additional options for the optimizer.
+    acq_optimize : callable
+        Optimization function (optimize_scipy or optimize_optax).
+    """
 
     name: str = "BaseAcquisitionFunction"
 
@@ -165,7 +180,23 @@ class AcquisitionFunction:
 
 
 class EI(AcquisitionFunction):
-    """Expected Improvement acquisition function"""
+    """Expected Improvement acquisition function.
+    
+    EI measures the expected improvement over the current best observed value.
+    It balances exploitation (high mean) and exploration (high uncertainty).
+    
+    The EI criterion is defined as:
+        EI(x) = E[max(f(x) - f_best - zeta, 0)]
+    
+    where f_best is the best observed value and zeta is an exploration bonus.
+    
+    Parameters
+    ----------
+    optimizer : str, optional
+        Optimizer to use ('scipy' or 'optax'). Default is 'scipy'.
+    optimizer_options : dict, optional
+        Additional options for the optimizer. Default is {}.
+    """
 
     name: str = "EI"
 
@@ -227,7 +258,24 @@ class EI(AcquisitionFunction):
         return pts, -vals # we minimize -EI so return -vals
 
 class LogEI(EI):
-    """Log Expected Improvement acquisition function. Better numerical stability compared to EI."""
+    """Log Expected Improvement acquisition function.
+    
+    LogEI computes the logarithm of the Expected Improvement, providing better 
+    numerical stability compared to EI, especially when EI values are very small.
+    Uses advanced numerical techniques for accurate computation in extreme cases.
+    
+    Parameters
+    ----------
+    optimizer : str, optional
+        Optimizer to use ('scipy' or 'optax'). Default is 'scipy'.
+    optimizer_options : dict, optional
+        Additional options for the optimizer. Default is {}.
+        
+    References
+    ----------
+    [1] Ament, S., et al. (2023). "Unexpected Improvements to Expected Improvement
+        for Bayesian Optimization." arXiv:2310.20708.
+    """
 
     name: str = "LogEI"
 
@@ -250,7 +298,25 @@ class LogEI(EI):
 
 
 class WIPV(AcquisitionFunction):
-    """Weighted Integrated Posterior Variance acquisition function"""
+    """Weighted Integrated Posterior Variance acquisition function.
+    
+    WIPV focuses on reducing uncertainty in regions weighted by posterior probability.
+    It integrates the posterior variance over MC samples drawn from the GP posterior,
+    making it particularly effective for Bayesian evidence estimation.
+    
+    The criterion is defined as:
+        WIPV(x) = E_{x' ~ p(x' | D)}[Var[f(x) | D]]
+    
+    where the expectation is over MC samples x' from the posterior.
+    
+    Parameters
+    ----------
+    optimizer : str, optional
+        Optimizer to use ('scipy' or 'optax'). Default is 'scipy'.
+    optimizer_options : dict, optional
+        Additional options for the optimizer. Default is {}.
+        
+    """
 
     name: str = "WIPV"
 
@@ -301,7 +367,21 @@ class WIPV(AcquisitionFunction):
                                   verbose=verbose)
 
 class WIPStd(AcquisitionFunction):
-    """Weighted Integrated Posterior Standard Deviation acquisition function"""
+    """Weighted Integrated Posterior Standard Deviation acquisition function.
+    
+    WIPStd is similar to WIPV but uses standard deviation instead of variance,
+    which can provide different exploration characteristics. It integrates the
+    posterior standard deviation over MC samples from the GP posterior.
+    
+    The criterion is defined as:
+        WIPStd(x) = E_{x' ~ p(x' | D)}[Std[f(x) | D]]
+    
+    Parameters
+    ----------\n    optimizer : str, optional
+        Optimizer to use ('scipy' or 'optax'). Default is 'scipy'.
+    optimizer_options : dict, optional
+        Additional options for the optimizer. Default is {}.
+    """
 
     name: str = "WIPV"
 
@@ -327,25 +407,15 @@ class WIPStd(AcquisitionFunction):
         mc_points_size = acq_kwargs.get('mc_points_size', 128)
         mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
         k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.kernel_variance, gp.noise, include_noise=False)
-        # print(f"Using {mc_points_size} MC points for WIPV acquisition, shapes: mc_points {mc_points.shape}, k_train_mc {k_train_mc.shape}")
-
-
 
         @jax.jit
         def mapped_fn(x):
             return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
-        # acq_vals = []
-        # for i in range(mc_points.shape[0]):
-        #     acq_vals.append(mapped_fn(mc_points[i]))
-        # acq_vals = jnp.array(acq_vals)
         acq_vals = lax.map(mapped_fn, mc_points)
         acq_val_min = jnp.min(acq_vals)
         log.info(f"WIPStd acquisition min value on MC points: {float(acq_val_min):.4e}")
         best_x = mc_points[jnp.argmin(acq_vals)]
-        # print(f'WIPV best_x from MC points: {best_x}')
         x0_acq = best_x
-
-        # print(f'shape x0_acq: {x0_acq.shape}, best_x shape: {best_x.shape}, nrestarts: {n_restarts}, acq_vals shape: {acq_vals.shape}')
 
         if gp.train_x.shape[0] > 750:
             return x0_acq, float(acq_val_min)

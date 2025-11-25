@@ -1,7 +1,7 @@
 from .bo import BOBE
 from .likelihood import BaseLikelihood, CobayaLikelihood, ExternalLikelihood
 from .utils.pool import MPI_Pool
-from .utils.logging_utils import setup_logging, get_logger
+from .utils.log import setup_logging, get_logger
 from typing import Union, Callable, Dict, Any, Optional
     
 
@@ -61,6 +61,8 @@ def run_bobe(likelihood: Union[Callable, str],
 
     setup_logging(verbosity=verbosity,log_file=log_file)
 
+    log = get_logger(__name__)
+
     pool = MPI_Pool()
 
     # setup likelihood
@@ -73,8 +75,8 @@ def run_bobe(likelihood: Union[Callable, str],
 
     if pool.is_master:
 
-        print(f"\nRunning BOBE with likelihood: {My_Likelihood.name}")
-        print(f"MPI mode: {pool.is_mpi}, Number of processes: {pool.size}\n")
+        log.info(f"\nRunning BOBE with likelihood: {My_Likelihood.name}")
+        log.info(f"MPI mode: {pool.is_mpi}, Number of processes: {pool.size}\n")
         # here should setup default arguments for all necessary parameters
 
         # Master creates the sampler and runs it
@@ -103,7 +105,7 @@ def run_bobe(likelihood: Union[Callable, str],
         pool.close()
         return results
     else:
-        print(f"Rank {pool.rank} running only likelihood evaluations and gp fitting")
+        log.info(f"Rank {pool.rank} running only likelihood evaluations and gp fitting")
         # Workers wait for tasks
         pool.worker_wait(My_Likelihood,seed=seed)
         return None

@@ -1,18 +1,18 @@
 # Class for implementing external loglikelihoods
-from .utils.core_utils import scale_to_unit, scale_from_unit
+from .utils.core import scale_to_unit, scale_from_unit
 from typing import Any, Callable, List,Optional, Tuple, Union, Dict
 import numpy as np
 from functools import partial
 from scipy.stats import qmc
-from .utils.logging_utils import get_logger
-from .utils.seed_utils import get_numpy_rng
+from .utils.log import get_logger
+from .utils.seed import get_numpy_rng
 from .utils.pool import MPI_Pool
 import logging
 import numpy as np
 import tqdm
 from typing import Any, Callable, List, Optional, Union, Dict
-from .utils.core_utils import scale_from_unit
-from .utils.logging_utils import get_logger
+from .utils.core import scale_from_unit
+from .utils.log import get_logger
 
 log = get_logger("likelihood")
 
@@ -80,7 +80,7 @@ class BaseLikelihood:
         """
         points = np.atleast_2d(X)
         if points.shape[1] != self.ndim:
-            print(f"Input shape: {points.shape}, ndim: {self.ndim}")
+            log.debug(f"Input shape: {points.shape}, ndim: {self.ndim}")
             raise ValueError(f"Input shape {points.shape} does not match ndim {self.ndim}")
 
         # In a serial run, it evaluates all points.
