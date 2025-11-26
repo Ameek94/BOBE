@@ -18,7 +18,32 @@ log = get_logger("likelihood")
 
 
 class BaseLikelihood:
-    """Class for log-likelihoods with common evaluation logic."""
+    """
+    Base class for log-likelihoods with common evaluation logic.
+    
+    Parameters
+    ----------
+    loglikelihood : callable
+        Log-likelihood function that takes parameter array and returns float.
+    param_list : list of str
+        List of parameter names.
+    logp_args : tuple, optional
+        Additional positional arguments for the likelihood function. Default is None.
+    logp_kwargs : dict, optional
+        Additional keyword arguments for the likelihood function. Default is None.
+    param_labels : list of str, optional
+        LaTeX labels for parameters. Default is None.
+    param_bounds : array-like, optional
+        Parameter bounds, shape (2, ndim). Default is None (unit cube).
+    noise_std : float, optional
+        Standard deviation of noise to add to observations. Default is 0.
+    name : str, optional
+        Name for this likelihood. Default is "loglikelihood".
+    minus_inf : float, optional
+        Value to return for failed evaluations. Default is -1e5.
+    pool : MPI_Pool, optional
+        MPI pool for parallel evaluation. Default is None.
+    """
 
     def __init__(self,
                  loglikelihood: Callable,
@@ -63,7 +88,19 @@ class BaseLikelihood:
             log.info(f"Param upper bounds: {self.param_bounds[1]}")
 
     def _safe_eval(self, x: np.ndarray) -> float:
-        """Helper method to safely evaluate a single point."""
+        """
+        Safely evaluate log-likelihood at a single point.
+        
+        Parameters
+        ----------
+        x : np.ndarray
+            Parameter vector to evaluate.
+            
+        Returns
+        -------
+        float
+            Log-likelihood value, or minus_inf if evaluation fails.
+        """
         try:
             val = float(self.logp(x))
         except Exception:
@@ -91,7 +128,23 @@ class BaseLikelihood:
 
     def get_initial_points(self, n_sobol_init=8, rng=None, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Get initial points for the optimization process using Sobol quasi-random sampling.
+        Generate initial points using Sobol quasi-random sampling.
+        
+        Parameters
+        ----------
+        n_sobol_init : int, optional
+            Number of Sobol points to generate. Minimum is 2. Default is 8.
+        rng : np.random.Generator, optional
+            Random number generator. Default is None.
+        **kwargs : dict
+            Additional keyword arguments (unused).
+            
+        Returns
+        -------
+        points : np.ndarray
+            Initial points in parameter space, shape (n_sobol_init, ndim).
+        values : np.ndarray
+            Log-likelihood values at initial points, shape (n_sobol_init, 1).
         """
         
         n_sobol_init = max(2, n_sobol_init)  # Ensure at least 2 points for Sobol
@@ -113,7 +166,21 @@ class BaseLikelihood:
 
 
 class ExternalLikelihood(BaseLikelihood):
-    """Wrapper around a user-provided log-likelihood function."""
+    """
+    Wrapper for user-provided log-likelihood functions.
+    
+    This class wraps a user-defined log-likelihood function to work with
+    the JaxBO framework. It inherits all functionality from BaseLikelihood.
+    
+    Parameters
+    ----------
+    loglikelihood : callable
+        User-provided log-likelihood function.
+    pool : MPI_Pool
+        MPI pool for parallel evaluation.
+    **kwargs : dict
+        Additional keyword arguments passed to BaseLikelihood.
+    """
 
     def __init__(self, loglikelihood: Callable, pool: MPI_Pool, **kwargs):
         super().__init__(loglikelihood=loglikelihood, pool=pool, **kwargs)

@@ -14,6 +14,9 @@ from typing import Dict, List, Optional, Union, Tuple, Any
 import warnings
 from pathlib import Path
 import json
+from .log import get_logger
+
+log = get_logger("plot")
 
 # try:
 #     import seaborn as sns
@@ -302,7 +305,7 @@ class BOBESummaryPlotter:
                    transform=ax.transAxes, ha='center', va='center')
             return ax
 
-        print(f"shape {lengthscales.shape}")
+        log.debug(f"shape {lengthscales.shape}")
 
         # Plot lengthscales for each parameter
         colors = plt.cm.Set1(np.linspace(0, 1, self.ndim))

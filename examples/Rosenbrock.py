@@ -1,6 +1,6 @@
 from jaxbo.bo import BOBE
 from jaxbo.utils.plot import plot_final_samples
-from jaxbo.loglike import ExternalLikelihood,CobayaLikelihood
+from jaxbo.likelihood import ExternalLikelihood, CobayaLikelihood
 from jaxbo.nested_sampler import renormalise_log_weights
 from getdist import MCSamples
 from dynesty import DynamicNestedSampler

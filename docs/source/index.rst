@@ -9,7 +9,7 @@ Key Features
 
 - **JAX-powered**: Automatic differentiation, jit compilation, and in the future GPU/TPU acceleration
 - **Bayesian inference**: Specialized for Bayesian model comparison and parameter inference
-- **Cobaya integration**: Works seamlessly with cosmological likelihoods through the cobaya interface
+- **Cobaya integration**: Works seamlessly with cosmological likelihoods through the Cobaya interface
 - **MPI support**: Parallel likelihood evaluations and gp fitting
 - **Flexible**: Works with any likelihood function that can be called from Python
 

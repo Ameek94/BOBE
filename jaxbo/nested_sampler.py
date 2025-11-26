@@ -44,42 +44,40 @@ def compute_integrals(logl=None, logvol=None, reweight=None,squared=False):
     saved_logz = np.logaddexp.accumulate(saved_logwt)
     return saved_logz
 
-def renormalise_log_weights(log_weights):
-    log_total = logsumexp(log_weights)
-    normalized_weights = np.exp(log_weights - log_total)
-    return normalized_weights
+# def renormalise_log_weights(log_weights):
+#     log_total = logsumexp(log_weights)
+#     normalized_weights = np.exp(log_weights - log_total)
+#     return normalized_weights
 
-def resample_equal(samples, aux, weights=None, logwts=None, rng = None):
-    rng = get_numpy_rng() if rng is None else rng
-    # Resample samples to obtain equal weights. Taken from jaxns
-    if logwts is not None:
-        wts = renormalise_log_weights(logwts)
-    else:
-        wts = weights
-    weights = wts / wts.sum()
-    cumulative_sum = np.cumsum(weights)
-    cumulative_sum /= cumulative_sum[-1]
-    nsamples = len(weights)
-    positions = (rng.random() + np.arange(nsamples)) / nsamples
-    idx = np.zeros(nsamples, dtype=int)
-    i, j = 0, 0
-    while i < nsamples:
-        if positions[i] < cumulative_sum[j]:
-            idx[i] = j
-            i += 1
-        else:
-            j += 1
-    perm = rng.permutation(nsamples)
-    resampled_samples = samples[idx][perm]
-    resampled_aux = aux[idx][perm]
-    return resampled_samples, resampled_aux
+# def resample_equal(samples, aux, weights=None, logwts=None, rng = None):
+#     rng = get_numpy_rng() if rng is None else rng
+#     # Resample samples to obtain equal weights. Taken from jaxns
+#     if logwts is not None:
+#         wts = renormalise_log_weights(logwts)
+#     else:
+#         wts = weights
+#     weights = wts / wts.sum()
+#     cumulative_sum = np.cumsum(weights)
+#     cumulative_sum /= cumulative_sum[-1]
+#     nsamples = len(weights)
+#     positions = (rng.random() + np.arange(nsamples)) / nsamples
+#     idx = np.zeros(nsamples, dtype=int)
+#     i, j = 0, 0
+#     while i < nsamples:
+#         if positions[i] < cumulative_sum[j]:
+#             idx[i] = j
+#             i += 1
+#         else:
+#             j += 1
+#     perm = rng.permutation(nsamples)
+#     resampled_samples = samples[idx][perm]
+#     resampled_aux = aux[idx][perm]
+#     return resampled_samples, resampled_aux
 
 
 def prior_transform(x):
     return x
         
-
-
 def nested_sampling_Dy(gp: GP,
                        mode: str = 'acq',
                        ndim: int = 1,
@@ -234,35 +232,3 @@ def nested_sampling_Dy(gp: GP,
     samples_dict['logvol'] = logvol
     samples_dict['method']= 'nested'
     return (samples_dict, logz_dict, success)
-
-
-    # success = False
-    # max_tries = 1000 # we can do lots since this is very fast in case of failure
-    # n_tried = 0
-    # while not success:  # loop in case of failure
-    #     if dynamic:
-    #         sampler = DynamicNestedSampler(loglike, prior_transform, ndim=ndim, blob=False,
-    #                                    sample=sample_method, nlive=nlive, rstate=rng)
-    #         sampler.run_nested(print_progress=print_progress, dlogz_init=dlogz, maxcall=maxcall)
-    #     else:
-    #         sampler = StaticNestedSampler(loglike, prior_transform, ndim=ndim, blob=False,
-    #                                   sample=sample_method, nlive=nlive, rstate=rng)
-    #         sampler.run_nested(print_progress=print_progress,dlogz=dlogz,maxcall=maxcall)
-    #     res = sampler.results  # type: ignore # grab our results
-    #     logl = res['logl']
-    #     n_tried += 1
-    #     # add check for all same logl values in case of initial plateau
-    #     if np.all(logl == logl[0]):
-    #         success = False
-    #         log.debug(f" All logl values are the same on try {n_tried+1}/{max_tries}. Retrying...")
-    #     else:
-    #         success = True
-    #         log.info(f" Successful result on try {n_tried}/{max_tries}.")
-    #     if n_tried >= max_tries:
-    #         log.warning("Nested sampling failed after maximum retries. Exiting.")
-    #         break
-    #     if n_tried==50 or n_tried==100 or n_tried==500:
-    #         nlive = 2*nlive
-    #         log.warning(f"Unable to get non-constant logl values in {n_tried} tries. Retrying with increased nlive.")
-
-        #   need a better method to guarantee that at least one finite logl present, can we give the live points directly?

@@ -47,7 +47,7 @@ class MPI_Pool:
         if not self.is_worker:
             return
             
-        print(f"Worker starting at rank {self.rank}")
+        log.info(f"Worker starting at rank {self.rank}")
         if seed is not None:
             seed = seed + self.rank
         set_global_seed(seed)
@@ -76,12 +76,12 @@ class MPI_Pool:
                         # else:
                         worker_gp = GP.from_state_dict(state_dict)
                         end = time.time()
-                        print(f"[{self.rank}]: Worker received GP fit task and initialised GP in {end - start:.2f} seconds.")
+                        log.debug(f"[{self.rank}]: Worker received GP fit task and initialised GP in {end - start:.2f} seconds.")
 
                         fit_results = worker_gp.fit(**fit_params)
                         self.comm.send(fit_results, dest=0)
                         end = time.time()
-                        print(f"[{self.rank}]: Worker completed GP fit task in {end - start:.2f} seconds.")
+                        log.debug(f"[{self.rank}]: Worker completed GP fit task in {end - start:.2f} seconds.")
 
                 elif task_type == self.TASK_COBAYA_INIT:
                     # This task type doesn't need input data, just the index

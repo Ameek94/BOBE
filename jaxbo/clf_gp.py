@@ -551,22 +551,3 @@ class GPwithClassifier(GP):
     @property
     def npoints(self):
         return self.train_x_clf.shape[0]
-
-
-def load_clf_gp(filename, **kwargs):
-    """
-    Utility function to load a GPwithClassifier from a file
-    
-    Arguments
-    ---------
-    filename: str
-        The name of the file to load the GP from (with or without .npz extension)
-    **kwargs: 
-        Additional keyword arguments to pass to the GPwithClassifier constructor
-        
-    Returns
-    -------
-    gp_clf: GPwithClassifier
-        The loaded GPwithClassifier object
-    """
-    return GPwithClassifier.load(filename, **kwargs)

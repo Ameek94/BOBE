@@ -87,71 +87,85 @@ class BOBE:
                  seed: Optional[int] = None,
                  ):
         """
-        Initialize the BOBE sampler class.
+        Initialize the BOBE (Bayesian Optimization for Bayesian Evidence) sampler.
 
-        Arguments
-        ---------
-        loglikelihood : external_loglike
-            The loglikelihood function to be used. Must be an instance of external_loglike.
-        n_cobaya_init : int
-            Number of initial points from the cobaya reference distirbution when starting a run. 
-            Is only used when the likelihood is an instance of cobaya_loglike, otherwise ignored.
-        n_sobol_init : int
-            Number of initial Sobol points for sobol when starting a run. 
-        min_evals : int
-            Minimum number of true objective evaluations before checking convergence.
-        max_evals : int
-            Maximum number of true objective function evaluations.
-        max_gp_size : int
-            Maximum number of points used to train the GP. 
-            If using SVM, this is not the same as the number of points used to train the SVM.
-        resume : bool
-            If True, resume from a previous run. The resume_file argument must be provided.
-        resume_file : str
-            The file to resume from. Must be a GP file (without _gp extension).
-        save : bool
-            If True, save the GP training data to a file so that it can be resumed from later.
-        fit_step : int
-            Number of iterations between GP fitting.
-        ns_step : int
-            Number of iterations between nested sampling runs.
-        num_hmc_warmup : int
-            Number of warmup steps for HMC sampling.
-        num_hmc_samples : int
-            Number of samples to draw from the GP.
-        mc_points_size : int
-            Number of points to use for the weighted integrated posterior variance acquisition function.
-        mc_points_method : str
-            Method to use for generating the MC points. Options are 'NUTS', 'NS', or 'uniform'. 
-            Recommend to use 'NUTS' for most cases, 'NS' can be a good choice if the underlying likelihood has a highly complex structure.
-        lengthscale_priors : str
-            Lengthscale priors to use. Options are 'DSLP' or 'SAAS'. See the GP class for more details.
-        use_clf : bool
-            If True, use SVM to filter the GP predictions. 
-            This is only required for high dimensional problems and when the scale of variation of the likelihood is extremely large. 
-            For cosmological likelihoods with nuisance parameters, this is highly recommended.
-        clf_use_size : int
-            Minimum size of the classifier training set before the classifier filter is used in the GP.
-        clf_update_step : int
-            Number of iterations between classifier updates.
-        logz_threshold : float
-            Threshold for convergence of the nested sampling logz. 
-            If the difference between the upper and lower bounds of logz is less than this value, the sampling will end.
-        convergence_n_iters : int
-            Number of successive iterations the logz threshold must be met for convergence to be declared. Defaults to 2.
-        minus_inf : float
-            Value to use for minus infinity. This is used to set the lower bound of the loglikelihood.
-        optimizer : str
-            Optimizer to use for both GP and acquisition function optimization. Options are 'optax' or 'scipy'.
-        gp_kwargs : Dict[str, Any], optional
-            Additional keyword arguments to pass to GP constructors. These can include:
-            - noise: Noise parameter for GP (float, default: 1e-8)
-            - kernel: Kernel type ('rbf', 'matern', etc., default: 'rbf')
-            - optimizer_kwargs: Dict for optimizer settings (e.g., {'lr': 1e-3, 'name': 'adam'})
-            - kernel_variance_bounds: List of [lower, upper] bounds for kernel variance
-            - lengthscale_bounds: List of [lower, upper] bounds for lengthscales  
-            - lengthscales: Initial lengthscale values (array-like)
-            - kernel_variance: Initial kernel variance value (float)
+        Parameters
+        ----------
+        loglikelihood : BaseLikelihood
+            Likelihood function instance. Must be an instance of BaseLikelihood or its subclasses.
+        gp_kwargs : dict, optional
+            Additional keyword arguments to pass to GP constructors. Default is {}.
+        n_cobaya_init : int, optional
+            Number of initial points from Cobaya reference distribution. 
+            Only used for CobayaLikelihood instances. Default is 4.
+        n_sobol_init : int, optional
+            Number of initial Sobol quasi-random points. Default is 32.
+        min_evals : int, optional
+            Minimum number of likelihood evaluations before checking convergence. Default is 200.
+        max_evals : int, optional
+            Maximum number of likelihood evaluations. Default is 1500.
+        max_gp_size : int, optional
+            Maximum number of points used to train the GP. Default is 1200.
+        pool : MPI_Pool, optional
+            MPI pool for parallel evaluation. Default is None.
+        use_gp_pool : bool, optional
+            Whether to use MPI pool for GP fitting. Default is True.
+        resume : bool, optional
+            If True, resume from a previous run. Default is False.
+        resume_file : str, optional
+            Path to resume from (directory containing GP file). Default is None.
+        save_dir : str, optional
+            Directory for saving results. Default is '.'.
+        save : bool, optional
+            Whether to save results periodically. Default is True.
+        save_step : int, optional
+            Save results every save_step iterations. Default is 5.
+        optimizer : str, optional
+            Optimizer for GP and acquisition function. Options: 'scipy', 'optax'. Default is 'scipy'.
+        fit_step : int, optional
+            Fit GP every fit_step iterations. Default is 10.
+        wipv_batch_size : int, optional
+            Batch size for WIPV acquisition. Default is 4.
+        ns_step : int, optional
+            Run nested sampling every ns_step iterations. Default is 10.
+        num_hmc_warmup : int, optional
+            Number of HMC warmup steps. Default is 512.
+        num_hmc_samples : int, optional
+            Number of HMC samples to draw. Default is 512.
+        mc_points_size : int, optional
+            Number of MC points for WIPV acquisition. Default is 64.
+        thinning : int, optional
+            Thinning factor for MC samples. Default is 4.
+        num_chains : int, optional
+            Number of parallel HMC chains. Default is 4.
+        mc_points_method : str, optional
+            Method for generating MC points: 'NUTS', 'NS', or 'uniform'. Default is 'NUTS'.
+        acq : str, optional
+            Acquisition function: 'WIPV', 'EI', 'LogEI', 'WIPStd'. Default is 'WIPV'.
+        zeta_ei : float, optional
+            Exploration parameter for EI acquisition. Default is 0.01.
+        ei_goal : float, optional
+            Goal value for EI acquisition. Default is 1e-10.
+        use_clf : bool, optional
+            Whether to use classifier for GP filtering. Default is True.
+        clf_type : str, optional
+            Classifier type: 'svm', 'nn', 'ellipsoid'. Default is 'svm'.
+        clf_nsigma_threshold : float, optional
+            N-sigma threshold for classifier training. Default is 20.
+        clf_use_size : int, optional
+            Minimum dataset size before using classifier. Default is 10.
+        clf_update_step : int, optional
+            Update classifier every clf_update_step iterations. Default is 1.
+        logz_threshold : float, optional
+            Convergence threshold for log evidence change. Default is 0.01.
+        convergence_n_iters : int, optional
+            Number of successive iterations meeting threshold for convergence. Default is 1.
+        minus_inf : float, optional
+            Value representing negative infinity for failed evaluations. Default is -1e5.
+        do_final_ns : bool, optional
+            Whether to run final nested sampling at convergence. Default is False.
+        seed : int, optional
+            Random seed for reproducibility. Default is None.
         """
 
         self.pool = pool
@@ -731,8 +745,7 @@ class BOBE:
             verbose = True
 
             if verbose:
-                print("\n")
-                log.info(f" Iteration {ii} of WIPV, objective evals {current_evals}/{self.max_evals}, refit={refit}, ns={ns_flag}")
+                log.info(f"\nIteration {ii} of WIPV, objective evals {current_evals}/{self.max_evals}, refit={refit}, ns={ns_flag}")
 
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)

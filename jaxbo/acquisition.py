@@ -117,11 +117,28 @@ class AcquisitionFunction:
         """
         Optimize the acquisition function to obtain the next point to sample.
 
-        Args:
-            gp: Gaussian process model
-            ndim: Number of dimensions (inferred from bounds if not provided)
-            optimizer_name: Name of optimizer to use
-            **kwargs: Additional arguments passed to optimize()
+        Parameters
+        ----------
+        gp : GP
+            Gaussian process model.
+        acq_kwargs : dict, optional
+            Additional arguments for the acquisition function. Default is {}.
+        maxiter : int, optional
+            Maximum number of optimization iterations. Default is 500.
+        n_restarts : int, optional
+            Number of random restarts for optimization. Default is 8.
+        verbose : bool, optional
+            Whether to print optimization progress. Default is True.
+        early_stop_patience : int, optional
+            Patience for early stopping. Default is 25.
+        rng : np.random.Generator, optional
+            Random number generator. Default is None.
+            
+        Returns
+        -------
+        tuple
+            (best_point, best_value) where best_point is shape (ndim,) and
+            best_value is the acquisition function value.
 
         """
 
@@ -208,7 +225,23 @@ class EI(AcquisitionFunction):
 
     def fun(self, x, gp, best_y, zeta):
         """
-        Expected Improvement.
+        Compute Expected Improvement at point x.
+        
+        Parameters
+        ----------
+        x : jnp.ndarray
+            Point at which to evaluate EI, shape (ndim,).
+        gp : GP
+            Gaussian process model.
+        best_y : float
+            Best observed function value.
+        zeta : float
+            Exploration bonus parameter.
+            
+        Returns
+        -------
+        float
+            Negative expected improvement (for minimization).
         """
         mu, var = gp.predict_single(x)
         var = jnp.clip(var, a_min=1e-20)  # prevent zero variance

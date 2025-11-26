@@ -24,7 +24,6 @@ except ImportError:
     HAS_GETDIST = False
     warnings.warn("GetDist not available. Some functionality will be limited.")
 
-from .timing import BOBETimingCollector  
 from .log import get_logger
 
 log = get_logger("results")

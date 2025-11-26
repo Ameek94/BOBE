@@ -34,10 +34,21 @@ def make_distribution(spec: dict) -> dist.Distribution:
     """
     Turn a dictionary specification into a NumPyro distribution.
     
-    Example spec:
-    {"name": "Normal", "loc": 0.0, "scale": 1.0}
-    {"name": "Gamma", "concentration": 2.0, "rate": 1.0}
-    {"name": "LogNormal", "loc": 0.0, "scale": 1.0}
+    Parameters
+    ----------
+    spec : dict
+        Dictionary with 'name' key for distribution type and additional
+        keyword arguments for the distribution parameters.
+        
+    Returns
+    -------
+    dist.Distribution
+        NumPyro distribution object.
+        
+    Examples
+    --------
+    >>> spec = {"name": "Normal", "loc": 0.0, "scale": 1.0}
+    >>> dist = make_distribution(spec)
     """
     # Ensure distribution exists
     dist_class = getattr(dist, spec["name"], None)
@@ -52,19 +63,19 @@ def saas_prior_logprob(lengthscales, kernel_variance, tausq):
     """
     Compute SAAS prior log probability.
     
-    Arguments
-    ---------
+    Parameters
+    ----------
     lengthscales : jnp.ndarray
-        Lengthscale parameters
+        Lengthscale parameters.
     kernel_variance : float
-        Kernel variance parameter  
+        Kernel variance parameter.
     tausq : float
-        SAAS tausq parameter
+        SAAS tausq parameter.
         
     Returns
     -------
-    logprob : float
-        Log probability under SAAS priors
+    float
+        Log probability under SAAS priors.
     """
     logprior = dist.LogNormal(0., 1.).log_prob(kernel_variance)
     logprior += dist.HalfCauchy(0.1).log_prob(tausq)
@@ -74,15 +85,42 @@ def saas_prior_logprob(lengthscales, kernel_variance, tausq):
 
 def dist_sq(x, y):
     """
-    Compute squared Euclidean distance between two points x, y. 
-    If x is n1 x d and y is n2 x d returns a n1 x n2 matrix of distancess.
+    Compute squared Euclidean distance between two points.
+    
+    Parameters
+    ----------
+    x : jnp.ndarray
+        Array of shape (n1, d).
+    y : jnp.ndarray
+        Array of shape (n2, d).
+        
+    Returns
+    -------
+    jnp.ndarray
+        Array of shape (n1, n2) containing squared distances.
     """
     return jnp.sum(jnp.square(x[:,None,:] - y[None,:,:]),axis=-1) 
 
 @partial(jax.jit, static_argnames='include_noise')
 def kernel_diag(x, kernel_variance, noise, include_noise=True):
     """
-    Computes only the diagonal of the kernel matrix K(x,x).
+    Compute only the diagonal of the kernel matrix K(x,x).
+    
+    Parameters
+    ----------
+    x : jnp.ndarray
+        Input points of shape (n, d).
+    kernel_variance : float
+        Kernel variance parameter.
+    noise : float
+        Noise level to add to diagonal.
+    include_noise : bool, optional
+        Whether to include noise in diagonal. Default is True.
+        
+    Returns
+    -------
+    jnp.ndarray
+        Diagonal of kernel matrix, shape (n,).
     """
     diag = kernel_variance * jnp.ones(x.shape[0]) # The diagonal is just the kernel_variance
     if include_noise:
@@ -90,9 +128,29 @@ def kernel_diag(x, kernel_variance, noise, include_noise=True):
     return diag
 
 @partial(jax.jit,static_argnames='include_noise')
-def rbf_kernel(xa,xb,lengthscales,kernel_variance,noise,include_noise=True): 
+def rbf_kernel(xa,xb,lengthscales,kernel_variance,noise,include_noise=True):
     """
-    The RBF kernel
+    Radial Basis Function (RBF) kernel.
+    
+    Parameters
+    ----------
+    xa : jnp.ndarray
+        First set of input points, shape (n1, d).
+    xb : jnp.ndarray
+        Second set of input points, shape (n2, d).
+    lengthscales : jnp.ndarray
+        Lengthscale parameters, shape (d,).
+    kernel_variance : float
+        Kernel variance parameter.
+    noise : float
+        Noise level to add to diagonal.
+    include_noise : bool, optional
+        Whether to include noise on diagonal. Default is True.
+        
+    Returns
+    -------
+    jnp.ndarray
+        Kernel matrix of shape (n1, n2).
     """
     sq_dist = dist_sq(xa/lengthscales,xb/lengthscales) 
     sq_dist = jnp.exp(-0.5*sq_dist)
@@ -150,30 +208,30 @@ class GP:
                  kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,10],lengthscales=None,kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], param_names: List[str] = None):
         """
-        Initializes the Gaussian Process model.
+        Initialize the Gaussian Process model.
 
-        Arguments
-        ---------
+        Parameters
+        ----------
         train_x : jnp.ndarray
             Training inputs, shape (N, D).
         train_y : jnp.ndarray
             Objective function values at training points, shape (N, 1).
         noise : float, optional
-            Noise parameter added to the diagonal of the kernel. Defaults to 1e-8.
+            Noise parameter added to the diagonal of the kernel. Default is 1e-8.
         kernel : str, optional
-            Kernel to use, either "rbf" or "matern". Defaults to "rbf".
+            Kernel to use, either "rbf" or "matern". Default is "rbf".
         optimizer : str, optional
-            Optimizer to use for hyperparameter tuning. Defaults to "optax".
+            Optimizer to use for hyperparameter tuning. Default is "scipy".
         optimizer_options : dict, optional
-            Keyword arguments for the optimizer. Defaults to {'lr': 1e-3, 'name': 'adam'}.
+            Keyword arguments for the optimizer. Default is {}.
         kernel_variance_bounds : list, optional
-            Bounds for the kernel variance (in log space). Defaults to [-4, 8].
+            Bounds for the kernel variance. Default is [1e-4, 1e8].
         lengthscale_bounds : list, optional
-            Bounds for the lengthscales (in log space). Defaults to [log(0.05), 2].
+            Bounds for the lengthscales. Default is [0.01, 10].
         lengthscales : jnp.ndarray, optional
-            Initial lengthscale values. If None, defaults to ones. Defaults to None.
+            Initial lengthscale values. If None, defaults to ones. Default is None.
         kernel_variance : float, optional
-            Initial kernel variance. If None, defaults to 1.0. Defaults to None.
+            Initial kernel variance. If None, defaults to 1.0. Default is None.
         kernel_variance_prior : dict or str, optional
             Specification for the kernel variance prior. 
             If None, defaults to `{'name': 'LogNormal', 'loc': 0.0, 'scale': 1.0}`.
