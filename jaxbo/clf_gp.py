@@ -11,7 +11,7 @@ import numpyro.distributions as dist
 from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
-from .gp import GP, safe_noise_floor
+from .gp import GP, safe_noise_floor, get_hmc_settings
 from .clf import (
     CLASSIFIER_REGISTRY
 )
@@ -453,15 +453,14 @@ class GPwithClassifier(GP):
         log.info(f"Loaded GPwithClassifier from {filename} with {gp_clf.train_x.shape[0]} training points")
         return gp_clf
         
-    def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,thinning=8,
-                      temp=1.,num_chains=6,np_rng=None, rng_key=None):
+    def sample_GP_NUTS(self,num_chains=6,np_rng=None, rng_key=None, temp=1., **kwargs):
         
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
-        Optionally restarts MCMC if all logp values are the same or if HMC fails. (RESTART LOGIC TO BE IMPLEMENTED)
         """        
 
-        log.info(f"Running MCMC chains with temperature {temp:.4f}")
+        warmup_steps, num_samples, thinning = get_hmc_settings(ndim=self.ndim,**kwargs)
+
 
         def model():
             x = numpyro.sample('x', dist.Uniform(
@@ -503,11 +502,9 @@ class GPwithClassifier(GP):
             # if devices present run with pmap
             pmapped = jax.pmap(run_single_chain, in_axes=(0,0),out_axes=(0,0))
             samples_x, logps = pmapped(rng_keys,inits)
-            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
             # reshape to get proper shapes
             samples_x = jnp.concatenate(samples_x, axis=0)
             logps = jnp.reshape(logps, (samples_x.shape[0],))
-            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
         else:
             # if devices not available run sequentially
             samples_x = []

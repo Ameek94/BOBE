@@ -585,19 +585,14 @@ class GP:
         pt = rng.uniform(0, 1, size=self.train_x.shape[1])
         return pt
 
-    def sample_GP_NUTS(self,warmup_steps=256,num_samples=512,thinning=8,
-                       temp=1.,num_chains=2, np_rng=None, rng_key=None):
+    def sample_GP_NUTS(self, np_rng=None, rng_key=None, num_chains=4, temp=1., **kwargs):
 
         """
         Obtain samples from the posterior represented by the GP mean as the logprob.
         Optionally restarts MCMC if all logp values are the same or if HMC fails.
         """        
 
-        rng_mcmc = np_rng if np_rng is not None else get_numpy_rng()
-        prob = rng_mcmc.uniform(0, 1)
-        high_temp = rng_mcmc.uniform(1., 2.) ** 2
-        temp = np.where(prob < 1/3, 1., high_temp) # Randomly choose temperature either 1 or high_temp
-        log.info(f"Running MCMC chains with temperature {temp:.4f}")
+        warmup_steps, num_samples, thinning = get_hmc_settings(ndim=self.ndim,**kwargs)
 
         def model():
             x = numpyro.sample('x', dist.Uniform(
@@ -621,7 +616,6 @@ class GP:
 
 
         num_devices = jax.device_count()
-        # num_parallel_chains = min(num_devices,num_chains)
 
         rng_key = rng_key if rng_key is not None else get_new_jax_key()
         rng_keys = jax.random.split(rng_key, num_chains)
@@ -843,3 +837,24 @@ class GP:
         if 'tausq' in self.hyperparam_names:
             param_dict['tausq'] = f"{float(self.tausq):.4f}"
         return param_dict
+
+
+def get_hmc_settings(ndim, warmup_steps=None, num_samples=None, thinning=None):
+    """
+    Get default HMC settings based on dimensionality if not provided.
+    
+    Parameters
+    ----------
+    ndim : int
+        Number of dimensions.
+    warmup_steps : int, optional
+        Number of warmup steps. Defaults to 256 for ndim <= 6, else 512.
+    num_samples : int, optional
+        Number of samples to draw. Defaults to 1024 for ndim <= 6, else 512 * ndim.
+    thinning : int, optional
+        Thinning factor. Defaults to 4.
+    """
+    warmup_steps = warmup_steps if warmup_steps is not None else (256 if ndim <= 6 else 512)
+    num_samples = num_samples if num_samples is not None else (1024 if ndim <= 6 else  512 * ndim)
+    thinning = thinning if thinning is not None else 4
+    return warmup_steps, num_samples, thinning
