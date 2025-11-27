@@ -10,7 +10,7 @@ import tensorflow_probability.substrates.jax as tfp
 from .optim import optimize_optax, optimize_optax_vmap, optimize_scipy
 from .utils.log import get_logger
 from .utils.seed import get_numpy_rng
-from .nested_sampler import nested_sampling_Dy
+from .sampler import nested_sampling_Dy
 from .gp import GP
 config.update("jax_enable_x64", True)
 log = get_logger("acq")

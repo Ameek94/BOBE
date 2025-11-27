@@ -1,5 +1,5 @@
-# This module manages the nested samplers used to compute the Bayesian evidence with the GP model as a surrogate for the objective function
-# The module contains two functions, one for the Dynesty sampler (preferred) and the other for the JaxNS sampler 
+# This module manages the samplers used to run HMC/Nested sampling using the GP model as a surrogate for the objective function
+# It contains two functions, one for the Dynesty nested sampler and the other for the HMC sampler using NUTS from numpyro
 import time
 from typing import Any, List, Optional, Dict, Union
 import jax.numpy as jnp
@@ -7,13 +7,18 @@ import jax.random as random
 import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
+from numpyro.util import enable_x64
+enable_x64()
+import numpyro
+import numpyro.distributions as dist
+from numpyro.infer import MCMC, NUTS
+from numpyro.infer.initialization import init_to_value
 from .gp import GP
 from .clf_gp import GPwithClassifier
 from .utils.log import get_logger
-from .utils.seed import get_numpy_rng
-from .utils.core import is_cluster_environment
-from scipy.special import logsumexp
-log = get_logger("ns")
+from .utils.seed import get_new_jax_key, get_numpy_rng
+from .utils.core import is_cluster_environment, renormalise_log_weights, resample_equal
+log = get_logger("sampler")
 
 from dynesty import NestedSampler as StaticNestedSampler, DynamicNestedSampler
 import math
@@ -176,12 +181,6 @@ def nested_sampling_Dy(gp: GP,
         live_points = rng.uniform(low=0., high=1., size=(nlive, ndim))
         live_logl = jax.lax.map(loglike,live_points,batch_size=200)
         live_logl = np.array(live_logl)
-    
-    # if dynamic:
-    #     sampler = DynamicNestedSampler(loglike, prior_transform, ndim=ndim, blob=False,
-    #                                    sample=sample_method, nlive=nlive, rstate=rng)
-    #     sampler.run_nested(print_progress=print_progress, dlogz_init=dlogz, maxcall=maxcall)
-    # else:
 
     sampler = StaticNestedSampler(loglike, prior_transform, ndim=ndim, blob=False
                                   ,live_points=[live_points,live_points,live_logl]
@@ -232,3 +231,142 @@ def nested_sampling_Dy(gp: GP,
     samples_dict['logvol'] = logvol
     samples_dict['method']= 'nested'
     return (samples_dict, logz_dict, success)
+
+def get_hmc_settings(ndim, warmup_steps=None, num_samples=None, thinning=None):
+    """
+    Get default HMC settings based on dimensionality if not provided.
+    
+    Parameters
+    ----------
+    ndim : int
+        Number of dimensions.
+    warmup_steps : int, optional
+        Number of warmup steps. Defaults to 256 for ndim <= 6, else 512.
+    num_samples : int, optional
+        Number of samples to draw. Defaults to 1024 for ndim <= 6, else 512 * ndim.
+    thinning : int, optional
+        Thinning factor. Defaults to 4.
+    """
+    warmup_steps = warmup_steps if warmup_steps is not None else (256 if ndim <= 6 else 512)
+    num_samples = num_samples if num_samples is not None else (1024 if ndim <= 6 else  512 * ndim)
+    thinning = thinning if thinning is not None else 4
+    return warmup_steps, num_samples, thinning
+
+def sample_GP_NUTS(gp: Union[GP, GPwithClassifier], 
+                   np_rng=None, 
+                   rng_key=None, 
+                   num_chains=4, 
+                   temp=1., 
+                   **kwargs):
+    """
+    Obtain samples from the posterior represented by the GP mean as the logprob.
+    This is a unified function that works for both GP and GPwithClassifier.
+    
+    Parameters
+    ----------
+    gp : Union[GP, GPwithClassifier]
+        The Gaussian Process model to sample from.
+    np_rng : np.random.Generator, optional
+        NumPy random number generator. Default is None.
+    rng_key : jax.random.PRNGKey, optional
+        JAX random key. Default is None.
+    num_chains : int, optional
+        Number of parallel HMC chains. Default is 4.
+    temp : float, optional
+        Temperature parameter for tempering. Default is 1.0.
+    **kwargs : dict
+        Additional keyword arguments. Can include:
+        - warmup_steps : int, optional
+            Number of warmup steps for HMC. If not provided, defaults based on dimensionality.
+        - num_samples : int, optional
+            Number of samples to draw from each chain. If not provided, defaults based on dimensionality.
+        - thinning : int, optional
+            Thinning factor for samples. If not provided, defaults to 4.
+        - dense_mass : bool, optional
+            Whether to use dense mass matrix in NUTS. Default is True.
+        - max_tree_depth : int, optional
+            Maximum tree depth for NUTS. Default is 6.
+            
+    Returns
+    -------
+    samples_dict : dict
+        Dictionary containing:
+        - 'x': samples array of shape (num_chains * num_samples / thinning, ndim)
+        - 'logp': log probabilities for each sample
+        - 'best': best sample found
+        - 'method': 'MCMC'
+    """
+        
+    warmup_steps, num_samples, thinning = get_hmc_settings(ndim=gp.ndim, **kwargs)
+    dense_mass = kwargs.get('dense_mass', True)
+    max_tree_depth = kwargs.get('max_tree_depth', 6)
+    
+
+    shape = gp.train_x.shape[1]
+    
+    def model():
+        x = numpyro.sample('x', dist.Uniform(
+            low=jnp.zeros(shape),
+            high=jnp.ones(shape)
+        ))
+        
+        mean = gp.predict_mean_batched(x)
+        numpyro.factor('y', mean/temp)
+        numpyro.deterministic('logp', mean)
+    
+    @jax.jit
+    def run_single_chain(rng_key,init_x):
+        init_strategy = init_to_value(values={'x': init_x})
+        kernel = NUTS(model, dense_mass=dense_mass, max_tree_depth=max_tree_depth, 
+                        init_strategy=init_strategy)
+        mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
+                    num_chains=1, progress_bar=False, thinning=thinning)
+        mcmc.run(rng_key)
+        samples_x = mcmc.get_samples()['x']
+        logps = mcmc.get_samples()['logp']
+        return samples_x, logps
+    
+    num_devices = jax.device_count()
+    
+    rng_key = rng_key if rng_key is not None else get_new_jax_key()
+    rng_keys = jax.random.split(rng_key, num_chains)
+    
+    # Generate initialization points if needed
+    if num_chains == 1: 
+        inits = jnp.array([gp.get_random_point(rng=np_rng)])
+    else:
+        inits = jnp.vstack([gp.get_random_point(rng=np_rng) for _ in range(num_chains-1)])
+        inits = jnp.vstack([inits, gp.train_x_clf[jnp.argmax(gp.train_y_clf)]])
+
+    
+    log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
+
+    if (num_devices >= num_chains) and num_chains > 1:
+        # if devices present run with pmap
+        pmapped = jax.pmap(run_single_chain, in_axes=(0,0),out_axes=(0,0))
+        samples_x, logps = pmapped(rng_keys,inits)
+        # reshape to get proper shapes
+        samples_x = jnp.concatenate(samples_x, axis=0)
+        logps = jnp.reshape(logps, (samples_x.shape[0],))
+    else:
+        # if devices not available run sequentially
+        samples_x = []
+        logps = []
+        for i in range(num_chains):
+            samples_x_i, logps_i = run_single_chain(rng_keys[i], inits[i])
+            samples_x.append(samples_x_i)
+            logps.append(logps_i)
+
+        samples_x = jnp.concatenate(samples_x)
+        logps = jnp.concatenate(logps)
+
+    samples_dict = {
+        'x': samples_x,
+        'logp': logps,
+        'best': samples_x[jnp.argmax(logps)],
+        'method': "MCMC"
+    }
+
+    log.info(f"Max logl found = {np.max(logps):.4f}")
+
+    return samples_dict

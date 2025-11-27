@@ -19,7 +19,6 @@ from .core import (
 )
 from .log import get_logger, setup_logging
 from .seed import get_numpy_rng, get_jax_key, set_global_seed
-from .timing import BOBETimingCollector
 
 __all__ = [
     # Results management
@@ -32,7 +31,5 @@ __all__ = [
     # Logging
     'get_logger', 'setup_logging',
     # Random number generation
-    'get_numpy_rng', 'get_jax_rng', 'set_global_seed',
-    # Timing
-    'TimingManager'
+    'get_numpy_rng', 'get_jax_key', 'set_global_seed',
 ]

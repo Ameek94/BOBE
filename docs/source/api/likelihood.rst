@@ -6,15 +6,7 @@ JaxBo provides interfaces for different types of likelihood functions.
 Base Likelihood
 ----------------
 
-.. autoclass:: jaxbo.likelihood.BaseLikelihood
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-External Likelihood
--------------------
-
-.. autoclass:: jaxbo.likelihood.ExternalLikelihood
+.. autoclass:: jaxbo.likelihood.Likelihood
    :members:
    :undoc-members:
    :show-inheritance:

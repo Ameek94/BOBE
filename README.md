@@ -19,7 +19,7 @@ JaxBO is a high-performance package for Bayesian model comparison using expensiv
 ## Quick Start
 
 ```python
-from jaxbo import BOBE, ExternalLikelihood
+from jaxbo import BOBE, Likelihood
 
 # Define your likelihood function
 def my_likelihood(params):
@@ -27,7 +27,7 @@ def my_likelihood(params):
     return log_likelihood
 
 # Set up the likelihood with parameter bounds
-likelihood = ExternalLikelihood(
+likelihood = Likelihood(
     loglikelihood=my_likelihood,
     bounds=[(0, 1), (-5, 5), (0, 10)],  # bounds for 3 parameters
     param_names=['x', 'y', 'z']

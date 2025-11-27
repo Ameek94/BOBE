@@ -1,5 +1,5 @@
 from .bo import BOBE
-from .likelihood import BaseLikelihood, CobayaLikelihood, ExternalLikelihood
+from .likelihood import Likelihood, CobayaLikelihood
 from .utils.pool import MPI_Pool
 from .utils.log import setup_logging, get_logger
 from typing import Union, Callable, Dict, Any, Optional
@@ -26,6 +26,8 @@ def run_bobe(likelihood: Union[Callable, str],
              resume_file: Optional[str] = None,
              convergence_n_iters=1,
              seed=0,
+             init_train_x=None,
+             init_train_y=None,
              **sampler_kwargs):
     """
     High-level wrapper to run the BOBE sampler.
@@ -33,8 +35,8 @@ def run_bobe(likelihood: Union[Callable, str],
 
     Arguments
     ----------
-    likelihood: Union[BaseLikelihood, str]
-        The log-likelihood object which inherits from the BaseLikelihood class or a string for a Cobaya model yaml file.
+    likelihood: Union[Likelihood, str]
+        The log-likelihood object which inherits from the Likelihood class or a string for a Cobaya model yaml file.
     likelihood_kwargs: Dict[str, Any]
         Additional keyword arguments to pass to the likelihood. See loglike.py for details.
     gp_kwargs: Dict[str, Any]
@@ -52,9 +54,20 @@ def run_bobe(likelihood: Union[Callable, str],
         The logging verbosity level.
     log_file: Optional[str]
         The path to a log file.
+    init_train_x: array-like, optional
+        User-provided initial training points in parameter space.
+        If provided, these will be added to the initial GP training set. Default is None.
+    init_train_y: array-like, optional
+        User-provided initial training values (log-likelihood).
+        Must be provided if init_train_x is given. Default is None.
     sampler_kwargs:
         Additional keyword arguments to pass to the sampler. These can include:
-        - optimizer: str, optimizer type ('optax', 'scipy', default: 'optax') - affects both GP and acquisition optimization
+        - num_hmc_warmup: int, number of HMC warmup steps (default: 512)
+        - num_hmc_samples: int, number of HMC samples to draw (default: 512)
+        - thinning: int, thinning factor for HMC samples (default: 4)
+        - num_chains: int, number of parallel HMC chains (default: 4)
+        - mc_points_method: str, method for generating MC points ('NUTS', 'NS', 'uniform', default: 'NUTS')
+        - mc_points_size: int, number of MC points for WIPV acquisition (default: 64)
         - All other BOBE constructor parameters. See bo.py for details.
     """
 
@@ -67,7 +80,7 @@ def run_bobe(likelihood: Union[Callable, str],
 
     # setup likelihood
     if isinstance(likelihood, Callable):
-        My_Likelihood = ExternalLikelihood(loglikelihood=likelihood, pool=pool, **likelihood_kwargs)
+        My_Likelihood = Likelihood(loglikelihood=likelihood, pool=pool, **likelihood_kwargs)
     elif isinstance(likelihood, str):
         My_Likelihood = CobayaLikelihood(input_file_dict=likelihood,pool=pool,**likelihood_kwargs)
 
@@ -99,6 +112,8 @@ def run_bobe(likelihood: Union[Callable, str],
             clf_nsigma_threshold=clf_nsigma_threshold,
             convergence_n_iters=convergence_n_iters,
             seed=seed,
+            init_train_x=init_train_x,
+            init_train_y=init_train_y,
             **sampler_kwargs
         )
         results = sampler.run(acq)

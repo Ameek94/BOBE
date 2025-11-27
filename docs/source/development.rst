@@ -105,7 +105,7 @@ To support a new likelihood interface:
 .. code-block:: python
 
    # In likelihood.py
-   class NewLikelihood(BaseLikelihood):
+   class NewLikelihood(Likelihood):
        def __init__(self, config, **kwargs):
            super().__init__(**kwargs)
            # Initialize interface

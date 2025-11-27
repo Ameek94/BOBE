@@ -11,7 +11,7 @@ Main Components:
 - BOBE: Main Bayesian Optimization class
 - GP: Gaussian Process implementation
 - GPwithClassifier: GP with SVM/NN/Ellipsoid classifier for filtering
-- Likelihood classes: BaseLikelihood, ExternalLikelihood, CobayaLikelihood
+- Likelihood classes: Likelihood, CobayaLikelihood
 - Acquisition functions: EI, LogEI, WIPV, WIPStd
 """
 
@@ -23,7 +23,7 @@ from .gp import GP
 from .clf_gp import GPwithClassifier
 
 # Likelihood interfaces
-from .likelihood import BaseLikelihood, ExternalLikelihood
+from .likelihood import Likelihood
 
 try:
     from .likelihood import CobayaLikelihood
@@ -57,8 +57,7 @@ __all__ = [
     "GPwithClassifier",
     "load_gp",
     # Likelihood classes
-    "BaseLikelihood",
-    "ExternalLikelihood",
+    "Likelihood",
     # Acquisition
     "EI",
     "LogEI",

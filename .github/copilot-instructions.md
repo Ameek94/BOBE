@@ -15,8 +15,7 @@ JaxBO is a Bayesian Optimization package for expensive likelihood functions, pri
    - `GP`: Base Gaussian Process with JAX-based kernels (RBF, Matérn) and priors (DSLP, SAAS)
    - `GPwithClassifier`: Extended GP with SVM/NN/Ellipsoid classifier to filter low-likelihood regions
 3. **Likelihood Interfaces (`jaxbo/likelihood.py`)**:
-   - `BaseLikelihood`: Abstract base for any likelihood
-   - `ExternalLikelihood`: Wraps custom Python functions
+   - `Likelihood`: Base class for any likelihood function
    - `CobayaLikelihood`: Interfaces with Cobaya for cosmological likelihoods (optional dependency)
 4. **Acquisition Functions (`jaxbo/acquisition.py`)**: EI, LogEI, WIPV (Weighted Integrated Posterior Variance), WIPStd
 5. **Nested Sampler (`jaxbo/nested_sampler.py`)**: Dynesty wrapper for evidence computation on GP surrogate

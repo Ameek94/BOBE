@@ -585,72 +585,6 @@ class GP:
         pt = rng.uniform(0, 1, size=self.train_x.shape[1])
         return pt
 
-    def sample_GP_NUTS(self, np_rng=None, rng_key=None, num_chains=4, temp=1., **kwargs):
-
-        """
-        Obtain samples from the posterior represented by the GP mean as the logprob.
-        Optionally restarts MCMC if all logp values are the same or if HMC fails.
-        """        
-
-        warmup_steps, num_samples, thinning = get_hmc_settings(ndim=self.ndim,**kwargs)
-
-        def model():
-            x = numpyro.sample('x', dist.Uniform(
-                low=jnp.zeros(self.train_x.shape[1]),
-                high=jnp.ones(self.train_x.shape[1])
-            ))
-
-            mean = self.predict_mean_single(x)
-            numpyro.factor('y', mean/temp)
-            numpyro.deterministic('logp', mean)
-
-        @jax.jit
-        def run_single_chain(rng_key):
-                kernel = NUTS(model, dense_mass=False, max_tree_depth=5,)
-                mcmc = MCMC(kernel, num_warmup=warmup_steps, num_samples=num_samples,
-                        num_chains=1, progress_bar=False, thinning=thinning)
-                mcmc.run(rng_key)
-                samples_x = mcmc.get_samples()['x']
-                logps = mcmc.get_samples()['logp']
-                return samples_x,logps
-
-
-        num_devices = jax.device_count()
-
-        rng_key = rng_key if rng_key is not None else get_new_jax_key()
-        rng_keys = jax.random.split(rng_key, num_chains)
-
-        log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
-
-        if (num_devices >= num_chains) and num_chains > 1:
-            # if devices present run with pmap
-            pmapped = jax.pmap(run_single_chain, in_axes=(0,),out_axes=(0,0))
-            samples_x, logps = pmapped(rng_keys)
-            # reshape to get proper shapes
-            samples_x = jnp.concatenate(samples_x, axis=0)
-            logps = jnp.reshape(logps, (samples_x.shape[0],))
-            # log.info(f"Xs shape: {samples_x.shape}, logps shape: {logps.shape}")
-        else:
-            # run sequentially
-            samples_x = []
-            logps = []
-            for i in range(num_chains):
-                samples_x_i, logps_i = run_single_chain(rng_keys[i])
-                samples_x.append(samples_x_i)
-                logps.append(logps_i)
-
-            samples_x = jnp.concatenate(samples_x)
-            logps = jnp.concatenate(logps)
-
-        samples_dict = {
-            'x': samples_x,
-            'logp': logps,
-            'best': samples_x[jnp.argmax(logps)],
-            'method': "MCMC"
-        }
-
-        return samples_dict
-
     def state_dict(self):
         """
         Returns a dictionary containing the complete state of the GP.
@@ -837,24 +771,3 @@ class GP:
         if 'tausq' in self.hyperparam_names:
             param_dict['tausq'] = f"{float(self.tausq):.4f}"
         return param_dict
-
-
-def get_hmc_settings(ndim, warmup_steps=None, num_samples=None, thinning=None):
-    """
-    Get default HMC settings based on dimensionality if not provided.
-    
-    Parameters
-    ----------
-    ndim : int
-        Number of dimensions.
-    warmup_steps : int, optional
-        Number of warmup steps. Defaults to 256 for ndim <= 6, else 512.
-    num_samples : int, optional
-        Number of samples to draw. Defaults to 1024 for ndim <= 6, else 512 * ndim.
-    thinning : int, optional
-        Thinning factor. Defaults to 4.
-    """
-    warmup_steps = warmup_steps if warmup_steps is not None else (256 if ndim <= 6 else 512)
-    num_samples = num_samples if num_samples is not None else (1024 if ndim <= 6 else  512 * ndim)
-    thinning = thinning if thinning is not None else 4
-    return warmup_steps, num_samples, thinning

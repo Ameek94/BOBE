@@ -3,16 +3,14 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
-from numpyro.util import enable_x64
-enable_x64()
 from typing import Optional, Union, Tuple, Dict, Any
 # from .acquisition import WIPV, EI #, logEI
 from .gp import GP
 from .clf_gp import GPwithClassifier
-from .likelihood import BaseLikelihood, CobayaLikelihood
+from .likelihood import Likelihood, CobayaLikelihood
 from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
-from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng
-from .nested_sampler import nested_sampling_Dy
+from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng, get_new_jax_key
+from .sampler import nested_sampling_Dy, sample_GP_NUTS
 from .utils.log import get_logger
 from .utils.results import BOBEResults
 from .acquisition import *
@@ -22,7 +20,6 @@ log = get_logger("bo")
 log.info(f'JAX using {jax.device_count()} devices.')
 
 _acq_funcs = {"wipv": WIPV, "ei": EI, "logei": LogEI, 'wipstd': WIPStd}
-
 
 
 def load_gp(filename: str, clf: bool) -> Union[GP, GPwithClassifier]:
@@ -52,6 +49,8 @@ class BOBE:
                  gp_kwargs: Dict[str, Any] = {},
                  n_cobaya_init=4,
                  n_sobol_init=32,
+                 init_train_x=None,
+                 init_train_y=None,
                  min_evals=200,
                  max_evals=1500,
                  max_gp_size=1200,
@@ -91,8 +90,8 @@ class BOBE:
 
         Parameters
         ----------
-        loglikelihood : BaseLikelihood
-            Likelihood function instance. Must be an instance of BaseLikelihood or its subclasses.
+        loglikelihood : Likelihood
+            Likelihood function instance. Must be an instance of Likelihood or its subclasses.
         gp_kwargs : dict, optional
             Additional keyword arguments to pass to GP constructors. Default is {}.
         n_cobaya_init : int, optional
@@ -100,6 +99,12 @@ class BOBE:
             Only used for CobayaLikelihood instances. Default is 4.
         n_sobol_init : int, optional
             Number of initial Sobol quasi-random points. Default is 32.
+        init_train_x : array-like, optional
+            User-provided initial training points in parameter space, shape (n_points, ndim).
+            If provided, these will be added to the initial GP training set. Default is None.
+        init_train_y : array-like, optional
+            User-provided initial training values (log-likelihood), shape (n_points, 1) or (n_points,).
+            Must be provided if init_train_x is given. Default is None.
         min_evals : int, optional
             Minimum number of likelihood evaluations before checking convergence. Default is 200.
         max_evals : int, optional
@@ -175,8 +180,8 @@ class BOBE:
         set_global_seed(seed)
         self.np_rng = get_numpy_rng()
 
-        if not isinstance(loglikelihood, BaseLikelihood):
-            raise ValueError("loglikelihood must be an instance of ExternalLikelihood")
+        if not isinstance(loglikelihood, Likelihood):
+            raise ValueError("loglikelihood must be an instance of Likelihood")
 
         self.loglikelihood = loglikelihood
         self.ndim = len(self.loglikelihood.param_list)
@@ -277,35 +282,28 @@ class BOBE:
         if self.fresh_start:
             self.start_iteration = 0
             self.best_pt_iteration = 0
-            # Fresh start - evaluate initial points
-            self.results_manager.start_timing('True Objective Evaluations')
-            init_points, init_vals = self.loglikelihood.get_initial_points(n_cobaya_init=n_cobaya_init,n_sobol_init=n_sobol_init,rng=self.np_rng)
-            self.results_manager.end_timing('True Objective Evaluations')
-            train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
-            train_y = jnp.array(init_vals)
-        
-
-            gp_kwargs.update({'train_x': train_x, 'train_y': train_y, 'param_names': self.loglikelihood.param_list, 'optimizer': optimizer})
-            if use_clf:
-                # Add clf specific parameters to gp_init_kwargs
-                clf_threshold = max(100,get_threshold_for_nsigma(clf_nsigma_threshold,self.ndim))
-                gp_kwargs.update({
-                    'clf_type': clf_type,
-                    'clf_use_size': clf_use_size,
-                    'clf_update_step': clf_update_step,
-                    'probability_threshold': 0.5,
-                    'minus_inf': minus_inf,
-                    'clf_threshold': clf_threshold,
-                    'gp_threshold': 2*clf_threshold
-                })
-                self.gp = GPwithClassifier(**gp_kwargs)
-            else:
-                self.gp = GP(**gp_kwargs)
-            self.results_manager.start_timing('GP Training')
-            log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
-            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500,use_pool=self.use_gp_pool,rng=self.np_rng)
-            log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
-            self.results_manager.end_timing('GP Training')
+            
+            # Step 1: Get initial training data (likelihood evaluation)
+            train_x, train_y = self._get_initial_training_data(
+                n_cobaya_init=n_cobaya_init,
+                n_sobol_init=n_sobol_init,
+                init_train_x=init_train_x,
+                init_train_y=init_train_y
+            )
+            
+            # Step 2: Initialize and train GP
+            self._initialize_gp(
+                train_x=train_x,
+                train_y=train_y,
+                use_clf=use_clf,
+                clf_type=clf_type,
+                clf_use_size=clf_use_size,
+                clf_update_step=clf_update_step,
+                clf_nsigma_threshold=clf_nsigma_threshold,
+                minus_inf=minus_inf,
+                optimizer=optimizer,
+                gp_kwargs=gp_kwargs
+            )
             
         if self.gp.train_y.size > 0: 
             idx_best = jnp.argmax(self.gp.train_y) 
@@ -347,6 +345,174 @@ class BOBE:
 
         # Initialize KL divergence tracking
         self.prev_samples = None
+    
+    def _get_initial_training_data(self, n_cobaya_init, n_sobol_init, init_train_x=None, init_train_y=None):
+        """
+        Generate and evaluate initial training points for the GP.
+        
+        This method:
+        1. Generates Sobol quasi-random points
+        2. Generates Cobaya points (if applicable)
+        3. Evaluates all points using the pool
+        4. Adds user-provided initial points (if given)
+        5. Removes duplicates
+        6. Returns points and values in both parameter and unit space
+        
+        Parameters
+        ----------
+        n_cobaya_init : int
+            Number of Cobaya initial points (only for CobayaLikelihood).
+        n_sobol_init : int
+            Number of Sobol initial points.
+        init_train_x : array-like, optional
+            User-provided initial training points in parameter space.
+        init_train_y : array-like, optional
+            User-provided initial training values.
+            
+        Returns
+        -------
+        train_x : jax.numpy.ndarray
+            Training points in unit cube space, shape (n_points, ndim).
+        train_y : jax.numpy.ndarray
+            Training values, shape (n_points, 1).
+        """
+        self.results_manager.start_timing('True Objective Evaluations')
+        
+        # Generate Sobol points
+        sobol_points = self.loglikelihood.generate_initial_points(
+            n_sobol_init=n_sobol_init, 
+            rng=self.np_rng
+        )
+        
+        # Evaluate Sobol points
+        log.info(f"Evaluating {len(sobol_points)} Sobol initial points")
+        sobol_vals = self.pool.run_map_objective(self.loglikelihood, sobol_points)
+        sobol_vals = np.array(sobol_vals).reshape(len(sobol_points), 1)
+        
+        # Handle Cobaya points if applicable
+        if isinstance(self.loglikelihood, CobayaLikelihood) and n_cobaya_init > 0:
+            cobaya_results = self.loglikelihood.generate_cobaya_points(
+                n_points=n_cobaya_init, 
+                rng=self.np_rng
+            )
+            
+            if cobaya_results:
+                cobaya_points, cobaya_logpost = zip(*cobaya_results)
+                cobaya_points = np.array(cobaya_points)
+                cobaya_logpost = np.array(cobaya_logpost).reshape(len(cobaya_logpost), 1)
+                
+                # Combine Sobol and Cobaya points
+                all_points = np.vstack([sobol_points, cobaya_points])
+                all_vals = np.vstack([sobol_vals, cobaya_logpost])
+            else:
+                all_points = sobol_points
+                all_vals = sobol_vals
+        else:
+            all_points = sobol_points
+            all_vals = sobol_vals
+        
+        # Add user-provided initial training data if available
+        if init_train_x is not None and init_train_y is not None:
+            init_train_x = np.atleast_2d(init_train_x)
+            init_train_y = np.atleast_2d(init_train_y).reshape(-1, 1)
+            
+            if init_train_x.shape[0] != init_train_y.shape[0]:
+                raise ValueError(
+                    f"init_train_x and init_train_y must have same number of points. "
+                    f"Got {init_train_x.shape[0]} and {init_train_y.shape[0]}"
+                )
+            if init_train_x.shape[1] != self.ndim:
+                raise ValueError(
+                    f"init_train_x must have {self.ndim} dimensions. "
+                    f"Got {init_train_x.shape[1]}"
+                )
+            
+            log.info(f"Adding {len(init_train_x)} user-provided initial points")
+            all_points = np.vstack([all_points, init_train_x])
+            all_vals = np.vstack([all_vals, init_train_y])
+        elif init_train_x is not None or init_train_y is not None:
+            raise ValueError("Both init_train_x and init_train_y must be provided together")
+        
+        # Remove duplicates
+        unique_points, unique_indices = np.unique(all_points, axis=0, return_index=True)
+        if len(unique_points) < len(all_points):
+            log.warning(
+                f"Found and removed {len(all_points) - len(unique_points)} duplicate points "
+                f"from the initial set. Final set size: {len(unique_points)}."
+            )
+            init_points = all_points[unique_indices]
+            init_vals = all_vals[unique_indices]
+        else:
+            init_points = all_points
+            init_vals = all_vals
+        
+        self.results_manager.end_timing('True Objective Evaluations')
+        
+        # Convert to unit space for GP
+        train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
+        train_y = jnp.array(init_vals)
+        
+        return train_x, train_y
+    
+    def _initialize_gp(self, train_x, train_y, use_clf, clf_type, clf_use_size, 
+                       clf_update_step, clf_nsigma_threshold, minus_inf, 
+                       optimizer, gp_kwargs):
+        """
+        Initialize and train the GP or GPwithClassifier.
+        
+        Parameters
+        ----------
+        train_x : jax.numpy.ndarray
+            Training points in unit cube space.
+        train_y : jax.numpy.ndarray
+            Training values.
+        use_clf : bool
+            Whether to use classifier-based GP.
+        clf_type : str
+            Type of classifier ('svm', 'nn', 'ellipsoid').
+        clf_use_size : int
+            Minimum points before using classifier.
+        clf_update_step : int
+            Frequency of classifier updates.
+        clf_nsigma_threshold : float
+            Threshold for classifier in units of sigma.
+        minus_inf : float
+            Value for failed evaluations.
+        optimizer : str
+            Optimizer type ('scipy' or 'optax').
+        gp_kwargs : dict
+            Additional GP initialization kwargs.
+        """
+        # Update GP kwargs with training data
+        gp_kwargs.update({
+            'train_x': train_x, 
+            'train_y': train_y, 
+            'param_names': self.loglikelihood.param_list, 
+            'optimizer': optimizer
+        })
+        
+        # Create GP or GPwithClassifier
+        if use_clf:
+            clf_threshold = max(100, get_threshold_for_nsigma(clf_nsigma_threshold, self.ndim))
+            gp_kwargs.update({
+                'clf_type': clf_type,
+                'clf_use_size': clf_use_size,
+                'clf_update_step': clf_update_step,
+                'probability_threshold': 0.5,
+                'minus_inf': minus_inf,
+                'clf_threshold': clf_threshold,
+                'gp_threshold': 2 * clf_threshold
+            })
+            self.gp = GPwithClassifier(**gp_kwargs)
+        else:
+            self.gp = GP(**gp_kwargs)
+        
+        # Fit GP hyperparameters
+        self.results_manager.start_timing('GP Training')
+        log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
+        self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, use_pool=self.use_gp_pool, rng=self.np_rng)
+        log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
+        self.results_manager.end_timing('GP Training')
     
     def update_gp(self, new_pts_u, new_vals, step = 0, verbose=True):
         """
