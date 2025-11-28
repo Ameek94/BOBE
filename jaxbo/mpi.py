@@ -1,4 +1,4 @@
-# Mpi utilities for JaxBo. Based on cobaya.mpi written by Jesus Torrado.
+# Simple MPI utilities, based on COBAYA MPI implementation written by Jesus Torrado
 
 import functools
 import os
@@ -14,74 +14,26 @@ import numpy as np
 T = TypeVar('T')
 
 # Vars to keep track of MPI parameters
-_mpi: Any = None if os.environ.get("JAXBO_NOMPI", False) else -1
-_mpi_size = -1
-_mpi_comm: Any = -1
-_mpi_rank: int | None = -1
-
-
-def set_mpi_disabled(disabled=True):
-    """
-    Disable MPI, e.g. for use on cluster head nodes where mpi4py may be installed
-    but no MPI functions will work.
-    """
-    global _mpi, _mpi_size, _mpi_rank, _mpi_comm
-    if disabled:
-        _mpi = None
-        _mpi_size = 0
-        _mpi_comm = None
-        _mpi_rank = None
-    else:
-        _mpi = -1
-        _mpi_size = -1
-        _mpi_comm = -1
-        _mpi_rank = -1
-
-
-def is_disabled():
-    return _mpi is None
+_mpi, _mpi_size, _mpi_comm, _mpi_rank = -1, -1, -1, -1
 
 
 def get_mpi():
     """
-    Import and returns the MPI object, or None if not running with MPI.
-
-    Can be used as a boolean test if MPI is present.
+    Get the MPI module if available, else None.
     """
     global _mpi
     if _mpi == -1:
         try:
             from mpi4py import MPI
-
             _mpi = MPI
         except ImportError:
             _mpi = None
-        else:
-            if more_than_one_process():
-                try:
-                    import dill
-                except ImportError:
-                    pass
-                else:
-                    _mpi.pickle.__init__(dill.dumps, dill.loads)
-
     return _mpi
-
-
-def get_mpi_size():
-    """
-    Returns the number of MPI processes that have been invoked,
-    or 0 if not running with MPI.
-    """
-    global _mpi_size
-    if _mpi_size == -1:
-        _mpi_size = getattr(get_mpi_comm(), "Get_size", lambda: 0)()
-    return _mpi_size
 
 
 def get_mpi_comm():
     """
-    Returns the MPI communicator, or `None` if not running with MPI.
+    Get the MPI communicator if available, else None.
     """
     global _mpi_comm
     if _mpi_comm == -1:
@@ -89,70 +41,90 @@ def get_mpi_comm():
     return _mpi_comm
 
 
+def get_mpi_size():
+    """
+    Get the size of the MPI communicator if available, else 1.
+    """
+    global _mpi_size
+    if _mpi_size == -1:
+        _mpi_size = getattr(get_mpi_comm(), "Get_size", lambda: 1)()
+    return _mpi_size
+
+
 def get_mpi_rank():
     """
-    Returns the rank of the current MPI process:
-        * None: not running with MPI
-        * Z>=0: process rank, when running with MPI
-
-    Can be used as a boolean that returns `False` for both the root process,
-    if running with MPI, or always for a single process; thus, everything under
-    `if not(get_mpi_rank()):` is run only *once*.
+    Get the rank of the current MPI process if available, else 0.
     """
     global _mpi_rank
     if _mpi_rank == -1:
-        _mpi_rank = getattr(get_mpi_comm(), "Get_rank", lambda: None)()
+        _mpi_rank = getattr(get_mpi_comm(), "Get_rank", lambda: 0)()
     return _mpi_rank
 
 
-# Aliases for simpler use
 def is_main_process():
     """
-    Returns true if primary process or MPI not available.
+    Check if the current process is the main MPI process (rank 0).
     """
-    return not bool(get_mpi_rank())
+    return get_mpi_rank() == 0
 
 
 def more_than_one_process():
+    """
+    Check if running with more than one MPI process.
+    """
     return get_mpi_size() > 1
 
 
 def sync_processes():
+    """
+    Synchronize all MPI processes with a barrier.
+    """
     if get_mpi_size() > 1:
         get_mpi_comm().barrier()
 
 
-def share_mpi(data: T = None, root=0) -> T:
+def share(data=None, root=0):
+    """
+    Share data among all MPI processes. If MPI is not available or size is 1, returns the data as is.
+    """
     if get_mpi_size() > 1:
         return get_mpi_comm().bcast(data, root=root)
-    else:
-        return data
-
-
-share = share_mpi
+    return data
 
 
 def scatter(data=None, root=0):
+    """
+    Scatter data among MPI processes. If MPI is not available or size is 1, returns the data as is.
+    """
     if get_mpi_size() > 1:
-        return get_mpi_comm().scatter(data, root=root)
-    else:
-        return data[0]
+        # Manually handle uneven splits for basic scatter
+        if is_main_process():
+            return get_mpi_comm().scatter(np.array_split(data, get_mpi_size()), root=root)
+        return get_mpi_comm().scatter(None, root=root)
+    return data
+
+
+def gather(data, root=0):
+    """
+    Gather data from all MPI processes to the root process. If MPI is not available or size is 1, returns a list with the data.
+    """
+    if get_mpi_size() > 1:
+        return get_mpi_comm().gather(data, root=root)
+    return [data]
 
 
 def size() -> int:
-    return get_mpi_size() or 1
+    """
+    Get the number of MPI processes (or 1 if not using MPI).
+    """
+    return get_mpi_size()
 
 
 def rank() -> int:
-    return get_mpi_rank() or 0
-
-
-def gather(data, root=0) -> list:
-    comm = get_mpi_comm()
-    if comm and more_than_one_process():
-        return comm.gather(data, root=root) or []
-    else:
-        return [data]
+    """
+    Get the rank of the current MPI process (or 0 if not using MPI).
+    """
+    return get_mpi_rank()
 
 
 def allgather(data) -> list:
@@ -238,7 +210,8 @@ def map_parallel(func: Callable, tasks: list, root: int = 0) -> list:
     
     # Scatter tasks to all processes
     local_tasks = scatter(split_tasks, root=root)
-    
+    print(f"[{rank_val}] Received {len(local_tasks)} tasks", flush=True)
+
     # Each process evaluates its assigned tasks
     local_results = [func(task) for task in local_tasks]
     
@@ -357,7 +330,11 @@ def gp_fit_parallel(gp, maxiters=1000, n_restarts=8, rng=None, use_parallel=True
             gp = GP.from_state_dict(state_dict)
     
     # Each process gets its chunk of initial parameters
-    local_x0 = scatter(x0_chunks, root=0)
+    # Use raw MPI scatter since data is already split
+    if get_mpi_size() > 1:
+        local_x0 = get_mpi_comm().scatter(x0_chunks, root=0)
+    else:
+        local_x0 = x0_chunks
     
     # Each process runs its optimization restarts
     local_result = gp.fit(x0=local_x0, maxiter=maxiters)

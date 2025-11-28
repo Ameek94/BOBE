@@ -34,8 +34,12 @@ MPI parallelization and logging are handled transparently - no explicit setup ne
 
 __version__ = "0.1.0"
 
+# Initialize logging before importing any modules that create loggers
+from .utils.log import setup_logging
+setup_logging(verbosity='INFO')  # Default verbosity, can be overridden in BOBE.__init__
+
 # Core classes
-from .bo import BOBE, load_gp
+from .bo import BOBE
 from .gp import GP
 from .clf_gp import GPwithClassifier
 
@@ -70,7 +74,6 @@ __all__ = [
     "BOBE",
     "GP",
     "GPwithClassifier",
-    "load_gp",
     # Likelihood classes
     "Likelihood",
     # Acquisition
