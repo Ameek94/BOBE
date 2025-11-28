@@ -219,7 +219,7 @@ class GPwithClassifier(GP):
         """
         return super().fantasy_var(new_x, mc_points,k_train_mc)
 
-    def update(self, new_x, new_y, refit=True, maxiter=500, n_restarts=6):
+    def update(self, new_x, new_y):
         """
         Updates the classifier and GP training sets.
         Retrains classifier/GP based on thresholds and steps.

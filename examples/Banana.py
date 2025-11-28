@@ -13,7 +13,7 @@ from getdist import MCSamples
 import numpy as np
 from dynesty import DynamicNestedSampler
 
-def loglike(X, slow=False):
+def loglike(X, slow=True):
     logpdf = -0.25 * (5 * (0.2 - X[0])) ** 2 - (20 * (X[1] / 4 - X[0] ** 4)) ** 2
     if slow:
         time.sleep(2)
@@ -31,7 +31,7 @@ def main():
     param_labels = ['x_1', 'x_2']
     param_bounds = np.array([[-1, 1], [-1, 2]]).T
     ls_priors = 'DSLP'
-    likelihood_name = f'banana_test_{ls_priors}'
+    likelihood_name = f'banana_slow_serial'
     
     start = time.time()
     print("Starting BOBE run...")
@@ -44,7 +44,6 @@ def main():
         param_labels=param_labels,
         likelihood_name=likelihood_name,
         verbosity='INFO',
-        use_gp_pool=True,
         n_cobaya_init=4,
         n_sobol_init=8,
         min_evals=20,

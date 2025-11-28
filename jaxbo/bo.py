@@ -81,7 +81,6 @@ class BOBE:
                  min_evals=200,
                  max_evals=1500,
                  max_gp_size=1200,
-                 use_gp_pool=True,
                  resume=False,
                  resume_file=None,
                  save_dir='.',
@@ -160,8 +159,6 @@ class BOBE:
             Maximum number of likelihood evaluations. Default is 1500.
         max_gp_size : int, optional
             Maximum number of points used to train the GP. Default is 1200.
-        use_gp_pool : bool, optional
-            Whether to use MPI pool for GP fitting. Default is True.
         resume : bool, optional
             If True, resume from a previous run. Default is False.
         resume_file : str, optional
@@ -226,8 +223,9 @@ class BOBE:
         MPI parallelization is handled automatically and transparently. Users do not
         need to manage MPI processes explicitly in their scripts. When running with
         MPI (e.g., `mpirun -n 4 python script.py`), worker processes automatically
-        participate in parallel likelihood evaluations via the `mpi` module, while
-        only the main process (rank 0) runs the optimization loop and manages results.
+        participate in parallel likelihood evaluations and GP hyperparameter optimization
+        via the `mpi` module, while only the main process (rank 0) runs the optimization
+        loop and manages results.
         """
 
         # Update logging verbosity if different from default
@@ -245,14 +243,14 @@ class BOBE:
         # WORKER PROCESS MINIMAL SETUP
         # ============================================================================
         if not self.is_main:
-            self._setup_worker(seed, use_gp_pool, optimizer, resume)
+            self._setup_worker(seed, optimizer, resume)
         
         # ============================================================================
         # MAIN PROCESS FULL SETUP
         # ============================================================================
         else:
             self._setup_main_process(
-                seed, use_gp_pool, optimizer, save, save_dir, save_step,
+                seed, optimizer, save, save_dir, save_step,
                 do_final_ns, logz_threshold, convergence_n_iters, ei_goal,
                 n_cobaya_init, n_sobol_init, min_evals, max_evals, max_gp_size,
                 fit_step, wipv_batch_size, ns_step, num_hmc_warmup, num_hmc_samples,
@@ -526,18 +524,83 @@ class BOBE:
             else:
                 self.gp = GP.from_state_dict(gp_state)
         
-        # ALL processes participate in parallel GP fitting
-        mpi.gp_fit_parallel(self.gp, n_restarts=4, maxiters=500, use_parallel=self.use_gp_pool, rng=self.np_rng)
+        # ALL processes participate in distributed GP fitting
+        self.distributed_gp_fit(self.gp, n_restarts=4, maxiters=500)
         
         if self.is_main:
             log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
             self.results_manager.end_timing('GP Training')
     
+    def distributed_gp_fit(self, gp, n_restarts: int = 4, maxiters: int = 500):
+        """
+        Distribute GP fitting across MPI processes.
+        
+        Parameters
+        ----------
+        gp : GP or GPwithClassifier
+            Gaussian Process model to fit.
+        n_restarts : int, optional
+            Number of random restarts for optimization. Default is 4.
+        maxiters : int, optional
+            Maximum iterations for each optimization. Default is 500.
+            
+        Returns
+        -------
+        dict or None
+            Best fit result for main process, None for workers.
+        """
+        # Generate starting points
+        init_params = jnp.log(gp.get_hyperparams())
+        n_params = init_params.shape[0]
+        
+        if mpi.is_main_process():
+            if n_restarts > 1:
+                x0_random = self.np_rng.uniform(
+                    gp.hyperparam_bounds[0], 
+                    gp.hyperparam_bounds[1], 
+                    size=(n_restarts - 1, n_params)
+                )
+                x0 = np.vstack([np.array(init_params), x0_random])
+            else:
+                x0 = np.atleast_2d(np.array(init_params))
+            x0_list = [x0[i] for i in range(len(x0))]
+        else:
+            x0_list = None
+
+        # Distribute work and fit
+        local_x0 = mpi.scatter(x0_list, root=0)
+        local_result = {'mll': -np.inf, 'params': None}
+        
+        if local_x0 is not None and len(local_x0) > 0:
+            result = gp.fit(x0=np.array(local_x0), maxiter=maxiters)
+            local_result = result if result else local_result
+
+        # Gather and select best result
+        all_results = mpi.gather(local_result, root=0)
+        
+        if mpi.is_main_process():
+            valid_results = [r for r in all_results if r.get('mll', -np.inf) > -np.inf]
+            best_result = max(valid_results, key=lambda r: r.get('mll', -np.inf)) if valid_results else {'params': None}
+            best_params = best_result.get('params')
+        else:
+            best_params = None
+            best_result = None
+
+        # Share and update
+        best_params = mpi.share(best_params, root=0)
+        if best_params is not None:
+            gp.update_hyperparams(best_params)
+
+        return best_result if mpi.is_main_process() else None
+    
     def update_gp(self, new_pts_u, new_vals, step = 0, verbose=True):
         """
         Update the GP with new points and values, and track hyperparameters.
+        
+        Main process updates GP with new data, broadcasts state to workers,
+        then all processes participate in parallel fitting if needed.
         """
-        # Workers participate in gp_fit_parallel but don't update GP
+        # Main process updates GP and determines refit parameters
         if self.is_main:
             self.results_manager.start_timing('GP Training')
             refit = (step % self.fit_step == 0)
@@ -557,17 +620,29 @@ class BOBE:
                 maxiter = 200
                 override_fit_step = max(10, self.fit_step)
                 refit = (step % override_fit_step == 0)
-            self.gp.update(new_pts_u, new_vals, n_restarts=n_restarts, maxiter=maxiter)
+            self.gp.update(new_pts_u, new_vals)
+            
+            # Get updated GP state to broadcast
+            gp_state = self.gp.state_dict()
         else:
             refit = False
             n_restarts = maxiter = None
+            gp_state = None
+        
+        # Broadcast updated GP state to all processes
+        gp_state = mpi.share(gp_state, root=0)
+        
+        # Workers reconstruct GP from updated state dict
+        if not self.is_main:
+            use_clf = 'clf_use_size' in gp_state
+            self.gp = load_gp_statedict(gp_state, use_clf)
         
         # Share refit decision and parameters to all processes
-        refit, n_restarts, maxiter, use_gp_pool = mpi.share((refit, n_restarts, maxiter, self.use_gp_pool))
+        refit, n_restarts, maxiter = mpi.share((refit, n_restarts, maxiter), root=0)
         
-        # ALL processes participate in gp_fit_parallel if refitting (synchronization point)
-        if refit and use_gp_pool:
-            mpi.gp_fit_parallel(self.gp, n_restarts=n_restarts, maxiters=maxiter, use_parallel=True)
+        # ALL processes participate in distributed fitting if refitting (synchronization point)
+        if refit:
+            self.distributed_gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
         
         # Only main process continues with result processing and tracking
         if not self.is_main:
@@ -614,25 +689,52 @@ class BOBE:
 
     def evaluate_likelihood(self, new_pts_u, step, verbose=True):
         """
-        Evaluate the likelihood for new points.
+        Evaluate the likelihood for new points using scatter/gather pattern.
+        
+        Parameters
+        ----------
+        new_pts_u : array-like
+            Points in unit cube space to evaluate, shape (n_points, ndim).
+        step : int
+            Current iteration number.
+        verbose : bool, optional
+            Whether to log detailed information.
+            
+        Returns
+        -------
+        new_vals : jax.numpy.ndarray
+            Evaluated likelihood values, shape (n_points, 1).
         """
-        # Workers participate in map_parallel but don't process results
+        # Main process prepares points for evaluation
         if self.is_main:
             new_pts_u = jnp.atleast_2d(new_pts_u)
             new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
             self.results_manager.start_timing('True Objective Evaluations')
+            # Convert to list for scatter
+            points_list = [new_pts[i] for i in range(len(new_pts))]
         else:
-            new_pts = None
+            points_list = None
+
+        # Scatter points across processes
+        local_points = mpi.scatter(points_list, root=0)
         
-        # ALL processes participate in map_parallel (synchronization point)
-        new_vals = mpi.map_parallel(self.loglikelihood, new_pts.tolist() if self.is_main else [])
-        
+        # Each process evaluates its assigned points
+        if local_points is not None and len(local_points) > 0:
+            local_points = np.atleast_2d(local_points)
+            local_vals = np.array([self.loglikelihood(pt) for pt in local_points]).reshape(-1, 1)
+        else:
+            local_vals = np.empty((0, 1))
+
+        # Gather results back to main process
+        gathered_vals = mpi.gather(local_vals, root=0)
+
         # Only main process continues with result processing
         if not self.is_main:
             return None
         
-        new_vals = np.array(new_vals)  # Convert list to numpy array
-        new_vals = jnp.reshape(new_vals, (len(new_pts), 1))
+        # Reconstruct full array from gathered results
+        new_vals = np.vstack([vals for vals in gathered_vals if len(vals) > 0])
+        new_vals = jnp.array(new_vals)
         self.results_manager.end_timing('True Objective Evaluations')
 
         best_new_idx = np.argmax(new_vals)
@@ -905,7 +1007,7 @@ class BOBE:
         if self.do_final_ns and not self.converged:
             
             self.results_manager.start_timing('GP Training')
-            mpi.gp_fit_parallel(self.gp, n_restarts=4, maxiters=500, use_parallel=self.use_gp_pool)
+            self.distributed_gp_fit(self.gp, n_restarts=4, maxiters=500)
             self.results_manager.end_timing('GP Training')
 
             log.info(" Final Nested Sampling")
@@ -1055,7 +1157,7 @@ class BOBE:
         if self.do_final_ns and not self.converged:
             
             self.results_manager.start_timing('GP Training')
-            self.gp.fit()
+            self.distributed_gp_fit(self.gp, n_restarts=4, maxiters=500)
             self.results_manager.end_timing('GP Training')
 
             log.info(" Final Nested Sampling")
@@ -1270,26 +1372,24 @@ class BOBE:
             "callable, string (Cobaya YAML path), dict (Cobaya info), or Likelihood instance"
         )
     
-    def _setup_worker(self, seed, use_gp_pool, optimizer, resume):
+    def _setup_worker(self, seed, optimizer, resume):
         """Setup minimal attributes for worker processes."""
         worker_seed = (seed + mpi.rank()) if seed is not None else None
         set_global_seed(worker_seed)
         self.np_rng = get_numpy_rng()
         
         # Minimal attributes for MPI participation
-        self.use_gp_pool = use_gp_pool
         self.optimizer = optimizer
         self.fresh_start = not resume
         self.gp = None
     
-    def _setup_main_process(self, seed, use_gp_pool, optimizer, save, save_dir, save_step,
+    def _setup_main_process(self, seed, optimizer, save, save_dir, save_step,
                            do_final_ns, logz_threshold, convergence_n_iters, ei_goal,
                            n_cobaya_init, n_sobol_init, min_evals, max_evals, max_gp_size,
                            fit_step, wipv_batch_size, ns_step, num_hmc_warmup, num_hmc_samples,
                            mc_points_size, mc_points_method, acq, use_clf, clf_type,
                            clf_nsigma_threshold, minus_inf, resume):
         """Setup full attributes for main process."""
-        self.use_gp_pool = use_gp_pool
         set_global_seed(seed)
         self.np_rng = get_numpy_rng()
         

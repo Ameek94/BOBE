@@ -1,7 +1,7 @@
 Quick Start Guide
 =================
 
-JaxBO estimates Bayesian evidence using Gaussian Process surrogates of expensive likelihoods.
+JaxBo estimates Bayesian evidence for expensive likelihood functions using Gaussian Process (GP) surrogates. The GP is trained using Bayesian optimisation with an acquisition function.
 
 Simple Example
 --------------
@@ -18,15 +18,16 @@ Here's a minimal example using a test function:
        x, y = X[0], X[1]
        return -0.5 * (x**2 + y**2)
    
-   # Run BOBE with simplified interface
+   # Initialize the BOBE sampler providing your likelihood function and parameter bounds in shape (2, ndim), number of initial Sobol points, evaluation budget and random seed.
    bobe = BOBE(
        loglikelihood=my_likelihood,
-       param_list=['x', 'y'],
        param_bounds=np.array([[-3, 3], [-3, 3]]).T,
        likelihood_name='test',
+       n_sobol_init=4,
        max_evals=100,
        seed=42,
    )
+   #
    results = bobe.run(['wipv'])
    
    # Get results
