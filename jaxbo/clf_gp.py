@@ -11,7 +11,7 @@ import numpyro.distributions as dist
 from numpyro.infer.initialization import init_to_value, init_to_sample
 from numpyro.util import enable_x64
 enable_x64()
-from .gp import GP, safe_noise_floor, get_hmc_settings
+from .gp import GP, safe_noise_floor
 from .clf import (
     CLASSIFIER_REGISTRY
 )

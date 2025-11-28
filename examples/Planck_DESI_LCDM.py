@@ -19,7 +19,7 @@ seed = int(sys.argv[3]) if len(sys.argv) > 3 else 42
 # ls_priors = str(sys.argv[4]) if len(sys.argv) > 4 else 'SAAS'
 
 # --- Imports ---
-from jaxbo.run import run_bobe
+from jaxbo import BOBE
 from jaxbo.utils.log import get_logger
 from jaxbo.utils.plot import plot_final_samples, BOBESummaryPlotter
 
@@ -38,15 +38,12 @@ def main():
 
     likelihood_name = f'Planck_DESIDR2_LCDM_{clf_type}_uniform_{seed}'
 
-    results = run_bobe(
-        likelihood=cobaya_input_file,
-        likelihood_kwargs={
-            'confidence_for_unbounded': 0.9999995,
-            'minus_inf': -1e5,
-            'noise_std': 0.0,
-            'name': likelihood_name,
-        },
-        # resume
+    # Pass Cobaya YAML file path directly to BOBE
+    bobe = BOBE(
+        loglikelihood=cobaya_input_file,  # BOBE handles CobayaLikelihood internally
+        likelihood_name=likelihood_name,
+        confidence_for_unbounded=0.9999995,
+        noise_std=0.0,
         resume=True,
         resume_file=f'./results/{likelihood_name}',
         save=True,
@@ -89,6 +86,8 @@ def main():
         logz_threshold=0.01,
         do_final_ns=True, 
     )
+    
+    results = bobe.run(['wipv'])
 
     end = time.time()
 

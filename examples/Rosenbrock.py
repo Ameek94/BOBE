@@ -1,7 +1,7 @@
 from jaxbo.bo import BOBE
 from jaxbo.utils.plot import plot_final_samples
 from jaxbo.likelihood import Likelihood, CobayaLikelihood
-from jaxbo.sampler import renormalise_log_weights
+from jaxbo.samplers import renormalise_log_weights
 from getdist import MCSamples
 from dynesty import DynamicNestedSampler
 import numpy as np

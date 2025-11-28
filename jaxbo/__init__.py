@@ -8,11 +8,28 @@ nested sampling/MCMC on the surrogate instead of the underlying expensive
 likelihood.
 
 Main Components:
-- BOBE: Main Bayesian Optimization class
+- BOBE: Main Bayesian Optimization class (accepts raw callable or Likelihood)
 - GP: Gaussian Process implementation
 - GPwithClassifier: GP with SVM/NN/Ellipsoid classifier for filtering
-- Likelihood classes: Likelihood, CobayaLikelihood
+- Likelihood classes: Likelihood, CobayaLikelihood (optional, wrapping handled automatically)
 - Acquisition functions: EI, LogEI, WIPV, WIPStd
+
+Quick Start:
+    >>> from jaxbo import BOBE
+    >>> import numpy as np
+    >>> 
+    >>> def my_loglike(x):
+    >>>     return -np.sum(x**2)
+    >>> 
+    >>> bobe = BOBE(
+    >>>     loglikelihood=my_loglike,
+    >>>     param_list=['x', 'y'],
+    >>>     param_bounds=np.array([[-5, 5], [-5, 5]]).T,
+    >>>     max_evals=100,
+    >>> )
+    >>> results = bobe.run(['wipv'])
+
+MPI parallelization and logging are handled transparently - no explicit setup needed.
 """
 
 __version__ = "0.1.0"
@@ -40,12 +57,10 @@ from .utils import (
     BOBEResults,
     BOBESummaryPlotter,
     get_logger,
+    setup_logging,
     scale_to_unit,
     scale_from_unit,
 )
-
-# High-level interface
-from .run import run_bobe
 
 # Build __all__ dynamically based on available optional dependencies
 __all__ = [
@@ -67,10 +82,9 @@ __all__ = [
     "BOBEResults",
     "BOBESummaryPlotter",
     "get_logger",
+    "setup_logging",
     "scale_to_unit",
     "scale_from_unit",
-    # High-level
-    "run_bobe",
 ]
 
 # Add optional dependencies to __all__ if available

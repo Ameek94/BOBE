@@ -3,18 +3,18 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
-from typing import Optional, Union, Tuple, Dict, Any
+from typing import Optional, Union, Tuple, Dict, Any, Callable
 # from .acquisition import WIPV, EI #, logEI
 from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import Likelihood, CobayaLikelihood
 from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
 from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng, get_new_jax_key
-from .sampler import nested_sampling_Dy, sample_GP_NUTS
-from .utils.log import get_logger
+from .samplers import nested_sampling_Dy, sample_GP_NUTS
+from .utils.log import get_logger, setup_logging
 from .utils.results import BOBEResults
 from .acquisition import *
-from .utils.pool import MPI_Pool
+from . import mpi
 
 log = get_logger("bo")
 log.info(f'JAX using {jax.device_count()} devices.')
@@ -46,6 +46,12 @@ class BOBE:
 
     def __init__(self,
                 loglikelihood=None,
+                 param_list=None,
+                 param_bounds=None,
+                 param_labels=None,
+                 likelihood_name=None,
+                 confidence_for_unbounded=0.9999995,
+                 noise_std=0.0,
                  gp_kwargs: Dict[str, Any] = {},
                  n_cobaya_init=4,
                  n_sobol_init=32,
@@ -54,7 +60,6 @@ class BOBE:
                  min_evals=200,
                  max_evals=1500,
                  max_gp_size=1200,
-                 pool: MPI_Pool = None,
                  use_gp_pool=True,
                  resume=False,
                  resume_file=None,
@@ -84,14 +89,37 @@ class BOBE:
                  minus_inf=-1e5,
                  do_final_ns=False,
                  seed: Optional[int] = None,
+                 verbosity: str = 'INFO',
                  ):
         """
         Initialize the BOBE (Bayesian Optimization for Bayesian Evidence) sampler.
 
         Parameters
         ----------
-        loglikelihood : Likelihood
-            Likelihood function instance. Must be an instance of Likelihood or its subclasses.
+        loglikelihood : callable, str, dict, or Likelihood
+            Log-likelihood specification. Can be:
+            - A callable function (requires param_list and param_bounds)
+            - A string path to Cobaya YAML file (automatically creates CobayaLikelihood)
+            - A dict with Cobaya info (automatically creates CobayaLikelihood)
+            - A Likelihood instance (param_list, param_bounds ignored)
+        param_list : list of str, optional
+            Names of parameters. Required if loglikelihood is a callable.
+            Ignored for Cobaya likelihoods (extracted from YAML/dict).
+        param_bounds : array-like, optional
+            Parameter bounds, shape (2, ndim). Required if loglikelihood is a callable.
+            Ignored for Cobaya likelihoods (extracted from priors).
+        param_labels : list of str, optional
+            LaTeX labels for parameters. If not provided, uses param_list.
+            Ignored for Cobaya likelihoods (extracted from YAML/dict).
+        likelihood_name : str, optional
+            Name for the likelihood (used in output files). If not provided, uses 'likelihood'
+            for callables or 'cobaya_model' for Cobaya likelihoods.
+        confidence_for_unbounded : float, optional
+            Confidence level for unbounded Cobaya priors. Default is 0.9999995.
+            Only used when loglikelihood is a Cobaya YAML file or dict.
+        noise_std : float, optional
+            Noise standard deviation for Cobaya likelihood. Default is 0.0.
+            Only used when loglikelihood is a Cobaya YAML file or dict.
         gp_kwargs : dict, optional
             Additional keyword arguments to pass to GP constructors. Default is {}.
         n_cobaya_init : int, optional
@@ -111,8 +139,6 @@ class BOBE:
             Maximum number of likelihood evaluations. Default is 1500.
         max_gp_size : int, optional
             Maximum number of points used to train the GP. Default is 1200.
-        pool : MPI_Pool, optional
-            MPI pool for parallel evaluation. Default is None.
         use_gp_pool : bool, optional
             Whether to use MPI pool for GP fitting. Default is True.
         resume : bool, optional
@@ -171,17 +197,84 @@ class BOBE:
             Whether to run final nested sampling at convergence. Default is False.
         seed : int, optional
             Random seed for reproducibility. Default is None.
+        verbosity : str, optional
+            Logging verbosity level: 'DEBUG', 'INFO', 'WARNING', 'ERROR'. Default is 'INFO'.
+            
+        Notes
+        -----
+        MPI parallelization is handled automatically and transparently. Users do not
+        need to manage MPI processes explicitly in their scripts. When running with
+        MPI (e.g., `mpirun -n 4 python script.py`), worker processes automatically
+        participate in parallel likelihood evaluations via the `mpi` module, while
+        only the main process (rank 0) runs the optimization loop and manages results.
         """
 
-        self.pool = pool
-        self.use_gp_pool = use_gp_pool
+        # Setup logging first (works for all processes)
+        setup_logging(verbosity=verbosity)
 
+        # Check if this is the main process
+        self.is_main = mpi.is_main_process()
+        
+        # Convert to Likelihood instance if needed
+        if not isinstance(loglikelihood, Likelihood):
+            # Check if it's a Cobaya YAML file or info dict
+            if isinstance(loglikelihood, (str, dict)):
+                # Cobaya likelihood: string path to YAML or info dict
+                try:
+                    from .likelihood import CobayaLikelihood
+                    loglikelihood = CobayaLikelihood(
+                        input_file_dict=loglikelihood,
+                        confidence_for_unbounded=confidence_for_unbounded,
+                        minus_inf=minus_inf,
+                        name=likelihood_name if likelihood_name is not None else 'cobaya_model',
+                    )
+                    # Add noise if specified
+                    if noise_std > 0:
+                        log.warning(f"Adding Gaussian noise with std={noise_std} to Cobaya likelihood")
+                except ImportError:
+                    raise ImportError(
+                        "Cobaya is required for YAML/dict likelihoods. "
+                        "Install with: pip install 'jaxbo[cobaya]'"
+                    )
+            elif callable(loglikelihood):
+                # Regular callable likelihood
+                if param_list is None or param_bounds is None:
+                    raise ValueError(
+                        "param_list and param_bounds are required when loglikelihood is a callable. "
+                        "For Cobaya likelihoods, pass the YAML file path or info dict directly."
+                    )
+                
+                # Create Likelihood instance from callable
+                loglikelihood = Likelihood(
+                    loglikelihood=loglikelihood,
+                    param_list=param_list,
+                    param_bounds=param_bounds,
+                    param_labels=param_labels if param_labels is not None else param_list,
+                    name=likelihood_name if likelihood_name is not None else 'likelihood',
+                    minus_inf=minus_inf,
+                )
+            else:
+                raise ValueError(
+                    "loglikelihood must be one of: "
+                    "callable, string (Cobaya YAML path), dict (Cobaya info), or Likelihood instance"
+                )
+        
+        # Workers only need minimal state - they participate via mpi.map_parallel
+        if not self.is_main:
+            # Store just enough info for workers to participate in parallel tasks
+            self.loglikelihood = loglikelihood
+            # Workers don't need any other initialization
+            # They will automatically participate in mpi.map_parallel calls
+            return
+        
+        # ============================================================================
+        # MAIN PROCESS INITIALIZATION ONLY
+        # ============================================================================
+        
+        self.use_gp_pool = use_gp_pool
 
         set_global_seed(seed)
         self.np_rng = get_numpy_rng()
-
-        if not isinstance(loglikelihood, Likelihood):
-            raise ValueError("loglikelihood must be an instance of Likelihood")
 
         self.loglikelihood = loglikelihood
         self.ndim = len(self.loglikelihood.param_list)
@@ -340,6 +433,17 @@ class BOBE:
         self.mc_points_method = mc_points_method
         self.zeta_ei = zeta_ei
 
+        # Adjust wipv_batch_size to be multiple of MPI processes for load balancing
+        if mpi.more_than_one_process():
+            n_processes = mpi.size()
+            original_batch = self.wipv_batch_size
+            if self.wipv_batch_size % n_processes != 0:
+                self.wipv_batch_size = (self.wipv_batch_size // n_processes) * n_processes
+                if self.wipv_batch_size < n_processes:
+                    self.wipv_batch_size = n_processes
+                log.info(f" Adjusted wipv_batch_size from {original_batch} to {self.wipv_batch_size} "
+                        f"(multiple of {n_processes} processes)")
+
         self.gp.save(filename=f"{self.save_path}_gp")
         log.info(f" Saving GP to file {self.save_path}_gp")
 
@@ -353,7 +457,7 @@ class BOBE:
         This method:
         1. Generates Sobol quasi-random points
         2. Generates Cobaya points (if applicable)
-        3. Evaluates all points using the pool
+        3. Evaluates all points using mpi.map_parallel
         4. Adds user-provided initial points (if given)
         5. Removes duplicates
         6. Returns points and values in both parameter and unit space
@@ -376,6 +480,9 @@ class BOBE:
         train_y : jax.numpy.ndarray
             Training values, shape (n_points, 1).
         """
+        if not self.is_main:
+            return None, None
+        
         self.results_manager.start_timing('True Objective Evaluations')
         
         # Generate Sobol points
@@ -386,7 +493,7 @@ class BOBE:
         
         # Evaluate Sobol points
         log.info(f"Evaluating {len(sobol_points)} Sobol initial points")
-        sobol_vals = self.pool.run_map_objective(self.loglikelihood, sobol_points)
+        sobol_vals = mpi.map_parallel(self.loglikelihood, sobol_points.tolist())
         sobol_vals = np.array(sobol_vals).reshape(len(sobol_points), 1)
         
         # Handle Cobaya points if applicable
@@ -483,6 +590,9 @@ class BOBE:
         gp_kwargs : dict
             Additional GP initialization kwargs.
         """
+        if not self.is_main:
+            return
+        
         # Update GP kwargs with training data
         gp_kwargs.update({
             'train_x': train_x, 
@@ -510,7 +620,7 @@ class BOBE:
         # Fit GP hyperparameters
         self.results_manager.start_timing('GP Training')
         log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
-        self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, use_pool=self.use_gp_pool, rng=self.np_rng)
+        mpi.gp_fit_parallel(self.gp, n_restarts=4, maxiters=500, use_parallel=self.use_gp_pool, rng=self.np_rng)
         log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
         self.results_manager.end_timing('GP Training')
     
@@ -518,6 +628,9 @@ class BOBE:
         """
         Update the GP with new points and values, and track hyperparameters.
         """
+        if not self.is_main:
+            return
+        
         self.results_manager.start_timing('GP Training')
         refit = (step % self.fit_step == 0)
         if self.gp.train_x.shape[0] < 200:
@@ -538,7 +651,7 @@ class BOBE:
             refit = (step % override_fit_step == 0)  
         self.gp.update(new_pts_u, new_vals, n_restarts=n_restarts, maxiter=maxiter) # add verbose
         if refit:
-            self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
+            mpi.gp_fit_parallel(self.gp, n_restarts=n_restarts, maxiters=maxiter, use_parallel=self.use_gp_pool)
         self.results_manager.end_timing('GP Training')
 
         # Extract GP hyperparameters for tracking
@@ -557,6 +670,9 @@ class BOBE:
         """
         Get the next batch of points using the acquisition function, and track acquisition values.
         """
+        if not self.is_main:
+            return None, None
+        
         self.results_manager.start_timing('Acquisition Optimization')
         new_pts_u, acq_vals = self.acquisition.get_next_batch(
             gp=self.gp,
@@ -579,11 +695,15 @@ class BOBE:
         """
         Evaluate the likelihood for new points.
         """
+        if not self.is_main:
+            return None
+        
         new_pts_u = jnp.atleast_2d(new_pts_u)
         new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
 
         self.results_manager.start_timing('True Objective Evaluations')
-        new_vals = self.pool.run_map_objective(self.loglikelihood, new_pts)
+        new_vals = mpi.map_parallel(self.loglikelihood, new_pts.tolist())
+        new_vals = np.array(new_vals)  # Convert list to numpy array
         new_vals = jnp.reshape(new_vals, (len(new_pts), 1))
         self.results_manager.end_timing('True Objective Evaluations')
 
@@ -611,6 +731,9 @@ class BOBE:
         Args:
             current_evals: Current number of objective evaluations.
         """
+        if not self.is_main:
+            return False
+        
         if current_evals >= self.max_evals:
             self.termination_reason = "Maximum evaluations reached"
             self.results_dict['termination_reason'] = self.termination_reason
@@ -623,6 +746,10 @@ class BOBE:
         return False
 
     def run(self, acqs: Union[str, Tuple[str]]):
+        # Workers don't run the optimization loop
+        if not self.is_main:
+            return None
+        
         acqs_funcs_available = list(_acq_funcs.keys())
 
         self.samples_dict = {}
@@ -630,7 +757,6 @@ class BOBE:
 
         if isinstance(acqs, str):
             acqs = (acqs,)
-
 
         self.current_iteration = self.start_iteration
 
@@ -662,6 +788,9 @@ class BOBE:
         """
         Run the optimization loop for EI/LogEI acquisition functions.
         """
+        if not self.is_main:
+            return
+        
         current_evals = self.gp.npoints
         log.info(f"Starting iteration {ii}")
         converged=False
@@ -722,6 +851,9 @@ class BOBE:
         Returns:
             bool: Whether convergence is achieved based on acquisition value.
         """
+        if not self.is_main:
+            return False
+        
         if self.acquisition.name.lower() == 'ei':
             acq_val = np.log(acq_val + 1e-100)  # Avoid log(0)
         
@@ -744,6 +876,9 @@ class BOBE:
         """
         Run the optimization loop for WIPStd acquisition function.
         """
+        if not self.is_main:
+            return
+        
         self.acquisition = WIPStd(optimizer=self.optimizer)  # Set acquisition function to WIPStd   
         current_evals = self.gp.npoints
         self.results_manager.start_timing('MCMC Sampling')
@@ -842,7 +977,7 @@ class BOBE:
         if self.do_final_ns and not self.converged:
             
             self.results_manager.start_timing('GP Training')
-            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500)
+            mpi.gp_fit_parallel(self.gp, n_restarts=4, maxiters=500, use_parallel=self.use_gp_pool)
             self.results_manager.end_timing('GP Training')
 
             log.info(" Final Nested Sampling")
@@ -888,6 +1023,9 @@ class BOBE:
         """
         Run the optimization loop for WIPV acquisition function.
         """
+        if not self.is_main:
+            return
+        
         self.acquisition = WIPV(optimizer=self.optimizer)  # Set acquisition function to WIPV
         current_evals = self.gp.npoints
         self.results_manager.start_timing('MCMC Sampling')
@@ -1044,6 +1182,9 @@ class BOBE:
         Returns:
             bool: Whether convergence is achieved based on logz only
         """
+        if not self.is_main:
+            return False
+        
         # Standard logz convergence check
         delta =  logz_dict['std']
         converged = delta < self.logz_threshold
@@ -1116,7 +1257,9 @@ class BOBE:
             return False
 
     def finalise_results(self):
-            # here finalize results
+        # here finalize results
+        if not self.is_main:
+            return
         
         # Prepare return dictionary
 

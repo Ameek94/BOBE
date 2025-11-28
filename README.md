@@ -19,31 +19,28 @@ JaxBO is a high-performance package for Bayesian model comparison using expensiv
 ## Quick Start
 
 ```python
-from jaxbo import BOBE, Likelihood
+import numpy as np
+from jaxbo import BOBE
 
 # Define your likelihood function
 def my_likelihood(params):
     # Your expensive computation here
-    return log_likelihood
-
-# Set up the likelihood with parameter bounds
-likelihood = Likelihood(
-    loglikelihood=my_likelihood,
-    bounds=[(0, 1), (-5, 5), (0, 10)],  # bounds for 3 parameters
-    param_names=['x', 'y', 'z']
-)
+    return -np.sum(params**2)  # Example: simple quadratic
 
 # Run Bayesian Optimization for Bayesian Evidence
 bobe = BOBE(
-    loglikelihood=likelihood,
+    loglikelihood=my_likelihood,
+    param_list=['x', 'y', 'z'],
+    param_bounds=np.array([[0, 1], [-5, 5], [0, 10]]).T,
     min_evals=100,
     max_evals=500,
-    save_dir='./results'
+    save_dir='./results',
 )
-results = bobe.run()
+results = bobe.run(['wipv'])
 
 # Access the evidence and posterior samples
-print(f"Log Evidence: {results.logZ}")
+print(f"Log Evidence: {results['logz']['mean']}")
+print(f"Samples shape: {results['samples']['x'].shape}")
 ```
 
 ## Installation
@@ -131,6 +128,25 @@ mpirun -n 4 python your_bo_script.py
 ```
 
 where `-n 4` specifies the number of MPI processes. In MPI mode, the code distributes the computation of the likelihood function at several candidate points across different MPI processes, significantly reducing wall-clock time for expensive likelihoods. It also distributes GP fitting by running multiple restarts across the different MPI processes.
+
+### Cosmology Example with Cobaya
+
+For cosmological likelihoods, simply pass the Cobaya YAML file path:
+
+```python
+from jaxbo import BOBE
+
+# Pass Cobaya YAML file directly - CobayaLikelihood created internally
+bobe = BOBE(
+    loglikelihood='path/to/cobaya_input.yaml',
+    likelihood_name='planck_lcdm',
+    confidence_for_unbounded=0.9999995,
+    min_evals=200,
+    max_evals=1000,
+    save_dir='./results'
+)
+results = bobe.run(['wipv'])
+```
 
 <!-- **Example with MPI:**
 

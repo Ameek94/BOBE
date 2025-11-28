@@ -10,7 +10,7 @@ import tensorflow_probability.substrates.jax as tfp
 from .optim import optimize_optax, optimize_optax_vmap, optimize_scipy
 from .utils.log import get_logger
 from .utils.seed import get_numpy_rng
-from .sampler import nested_sampling_Dy
+from .samplers import nested_sampling_Dy, sample_GP_NUTS
 from .gp import GP
 config.update("jax_enable_x64", True)
 log = get_logger("acq")
@@ -468,17 +468,17 @@ class WIPStd(AcquisitionFunction):
 def get_mc_samples(gp: GP,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",num_chains=4,np_rng=None,rng_key=None):
     if method=='NUTS':
         try:
-            mc_samples = gp.sample_GP_NUTS(warmup_steps=warmup_steps,
+            mc_samples = sample_GP_NUTS(gp=gp, warmup_steps=warmup_steps,
             num_samples=num_samples, thinning=thinning, num_chains=num_chains,np_rng=np_rng,rng_key=rng_key
             )
         except Exception as e:
             log.error(f"Error in sampling GP NUTS: {e}")
             mc_samples, logz, success = nested_sampling_Dy(gp=gp, ndim=gp.ndim, mode = 'acq', maxcall=int(2e6),
-                                            dynamic=False, dlogz=0.1,equal_weights=True,rng=np_rng
+                                            dynamic=False, dlogz=0.1,equal_weights=True
             )
     elif method=='NS':
         mc_samples, logz, success = nested_sampling_Dy(gp=gp, ndim=gp.ndim, mode = 'acq', maxcall=int(2e6),
-                                            dynamic=False, dlogz=0.1,equal_weights=True,rng=np_rng)
+                                            dynamic=False, dlogz=0.1,equal_weights=True)
     elif method=='uniform':
         mc_samples = {}
         points = qmc.Sobol(gp.ndim, scramble=True, rng=np_rng).random(num_samples)

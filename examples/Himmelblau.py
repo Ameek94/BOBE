@@ -1,7 +1,7 @@
 from jaxbo.utils.plot import plot_final_samples, BOBESummaryPlotter 
 from jaxbo.utils.log import get_logger
 from jaxbo.utils.core import renormalise_log_weights
-from jaxbo.run import run_bobe
+from jaxbo import BOBE
 import matplotlib.pyplot as plt
 import time
 import sys
@@ -33,19 +33,16 @@ def main():
     start = time.time()
     print("Starting BOBE run...")
 
-    # Run BOBE with the new interface
     # Prepare gp_kwargs for parameters intended for the GP constructor
     gp_kwargs = {'lengthscale_prior': 'SAAS'}
 
-    results = run_bobe(
-        likelihood=loglike,
-        likelihood_kwargs={
-            'param_list': param_list,
-            'param_bounds': param_bounds,
-            'param_labels': param_labels,
-            'name': likelihood_name,
-            'minus_inf': -1e5,
-        },
+    bobe = BOBE(
+        loglikelihood=loglike,
+        param_list=param_list,
+        param_bounds=param_bounds,
+        param_labels=param_labels,
+        likelihood_name=likelihood_name,
+        gp_kwargs=gp_kwargs,
         optimizer='scipy',
         verbosity='INFO',
         n_cobaya_init=4,
@@ -67,6 +64,8 @@ def main():
         seed=42,
         do_final_ns=True,
     )
+    
+    results = bobe.run(['wipv'])
 
     end = time.time()
 

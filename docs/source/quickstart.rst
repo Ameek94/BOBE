@@ -11,32 +11,50 @@ Here's a minimal example using a test function:
 .. code-block:: python
 
    import numpy as np
-   from jaxbo.run import run_bobe
+   from jaxbo import BOBE
    
    # Define a simple 2D likelihood
    def my_likelihood(X):
        x, y = X[0], X[1]
        return -0.5 * (x**2 + y**2)
    
-   # Run BOBE
-   results = run_bobe(
-       likelihood=my_likelihood,
-       likelihood_kwargs={
-           'param_list': ['x', 'y'],
-           'param_bounds': np.array([[-3, 3], [-3, 3]]).T,
-           'name': 'test',
-       },
+   # Run BOBE with simplified interface
+   bobe = BOBE(
+       loglikelihood=my_likelihood,
+       param_list=['x', 'y'],
+       param_bounds=np.array([[-3, 3], [-3, 3]]).T,
+       likelihood_name='test',
        max_evals=100,
        seed=42,
    )
+   results = bobe.run(['wipv'])
    
    # Get results
-   print(f"Log Evidence: {results['logz']['logz']:.2f}")
+   print(f"Log Evidence: {results['logz']['mean']:.2f}")
 
 For detailed examples, see:
 
 - :doc:`examples/banana` - 2D test function example
 - :doc:`examples/cosmology` - Cosmological likelihood with Cobaya
+
+Cosmology Example
+~~~~~~~~~~~~~~~~~
+
+For Cobaya cosmological likelihoods, simply pass the YAML file path:
+
+.. code-block:: python
+
+   from jaxbo import BOBE
+   
+   # Pass Cobaya YAML directly - CobayaLikelihood created internally
+   bobe = BOBE(
+       loglikelihood='planck_lcdm.yaml',
+       likelihood_name='planck_lcdm',
+       confidence_for_unbounded=0.9999995,
+       max_evals=1000,
+   )
+   results = bobe.run(['wipv'])
+   print(f"Log Evidence: {results['logz']['mean']:.2f}")
 
 **Expected Output:**
 

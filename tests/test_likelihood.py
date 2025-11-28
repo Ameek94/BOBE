@@ -11,10 +11,9 @@ Tests include:
 """
 
 import numpy as np
-import pytest
 import sys
 from jaxbo.likelihood import Likelihood
-from jaxbo.utils.pool import MPI_Pool
+from jaxbo import mpi
 
 
 def simple_loglike(x):
@@ -38,14 +37,11 @@ def test_likelihood_initialization():
     print("TEST: Likelihood Initialization")
     print("="*80)
     
-    pool = MPI_Pool()
-    
     likelihood = Likelihood(
         loglikelihood=simple_loglike,
         param_list=['x', 'y', 'z'],
         param_bounds=np.array([(0, 1), (-5, 5), (0, 10)]).T,
         param_labels=['X', 'Y', 'Z'],
-        pool=pool,
         name="test_likelihood"
     )
     
@@ -65,13 +61,10 @@ def test_likelihood_single_evaluation():
     print("TEST: Likelihood Single Point Evaluation")
     print("="*80)
     
-    pool = MPI_Pool()
-    
     likelihood = Likelihood(
         loglikelihood=simple_loglike,
         param_list=['x', 'y'],
-        param_bounds=[(0, 1), (0, 1)],
-        pool=pool
+        param_bounds=[(0, 1), (0, 1)]
     )
     
     x = np.array([0.5, 0.5])
@@ -88,18 +81,15 @@ def test_likelihood_single_evaluation():
 
 
 def test_likelihood_batch_evaluation():
-    """Test batch evaluation using pool.run_map_objective."""
+    """Test batch evaluation using mpi.map_parallel."""
     print("\n" + "="*80)
     print("TEST: Likelihood Batch Evaluation")
     print("="*80)
     
-    pool = MPI_Pool()
-    
     likelihood = Likelihood(
         loglikelihood=simple_loglike,
         param_list=['x', 'y'],
-        param_bounds=np.array([(0, 1), (0, 1)]).T,
-        pool=pool
+        param_bounds=np.array([(0, 1), (0, 1)]).T
     )
     
     X = np.array([
@@ -108,19 +98,21 @@ def test_likelihood_batch_evaluation():
         [1.0, 1.0]
     ])
     
-    # Use pool.run_map_objective for batch evaluation
-    results = pool.run_map_objective(likelihood, X)
-    results = np.array(results).reshape(-1, 1)
+    # Use mpi.map_parallel for batch evaluation
+    results = mpi.map_parallel(likelihood, X.tolist())
+    if mpi.is_main_process():
+        results = np.array(results).reshape(-1, 1)
+        results = np.array(results).reshape(-1, 1)
     
-    assert results.shape == (3, 1), f"Expected shape (3, 1), got {results.shape}"
-    assert all(np.isfinite(results)), "All results should be finite"
-    
-    # First point should be maximum
-    assert results[0, 0] > results[1, 0], "Center should have higher value than corners"
-    assert results[0, 0] > results[2, 0], "Center should have higher value than corners"
-    
-    print(f"✓ Batch evaluation successful")
-    print(f"  Results: {results.flatten()}")
+        assert results.shape == (3, 1), f"Expected shape (3, 1), got {results.shape}"
+        assert all(np.isfinite(results)), "All results should be finite"
+        
+        # First point should be maximum
+        assert results[0, 0] > results[1, 0], "Center should have higher value than corners"
+        assert results[0, 0] > results[2, 0], "Center should have higher value than corners"
+        
+        print(f"✓ Batch evaluation successful")
+        print(f"  Results: {results.flatten()}")
 
 
 def test_likelihood_initial_points():
@@ -129,16 +121,13 @@ def test_likelihood_initial_points():
     print("TEST: Likelihood Initial Points")
     print("="*80)
     
-    pool = MPI_Pool()
-    
     likelihood = Likelihood(
         loglikelihood=simple_loglike,
         param_list=['x', 'y', 'z'],
-        param_bounds=np.array([(0, 1), (0, 1), (0, 1)]).T,
-        pool=pool
+        param_bounds=np.array([(0, 1), (0, 1), (0, 1)]).T
     )
     
-    if pool.is_master:
+    if mpi.is_main_process():
         n_init = 16
         X_init = likelihood.generate_initial_points(n_sobol_init=n_init, rng=np.random.default_rng(42))
         
@@ -147,8 +136,8 @@ def test_likelihood_initial_points():
         # Check bounds
         assert np.all(X_init >= 0) and np.all(X_init <= 1), "Points should be within [0, 1]"
         
-        # Evaluate points using pool
-        y_init = pool.run_map_objective(likelihood, X_init)
+        # Evaluate points using mpi.map_parallel
+        y_init = mpi.map_parallel(likelihood, X_init.tolist())
         y_init = np.array(y_init).reshape(-1, 1)
         
         assert y_init.shape == (n_init, 1), f"Expected shape ({n_init}, 1), got {y_init.shape}"
@@ -167,13 +156,10 @@ def test_likelihood_nan_handling():
     print("TEST: Likelihood NaN Handling")
     print("="*80)
     
-    pool = MPI_Pool()
-    
     likelihood = Likelihood(
         loglikelihood=nan_loglike,
         param_list=['x'],
         param_bounds=np.array([(0, 1)]).T,
-        pool=pool,
         minus_inf=-1e5
     )
     
@@ -192,13 +178,10 @@ def test_likelihood_exception_handling():
     print("TEST: Likelihood Exception Handling")
     print("="*80)
     
-    pool = MPI_Pool()
-    
     likelihood = Likelihood(
         loglikelihood=exception_loglike,
         param_list=['x'],
         param_bounds=np.array([(0, 1)]).T,
-        pool=pool,
         minus_inf=-1e5
     )
     
@@ -217,13 +200,10 @@ def test_likelihood_bounds_validation():
     print("TEST: Likelihood Bounds Validation")
     print("="*80)
     
-    pool = MPI_Pool()
-    
     likelihood = Likelihood(
         loglikelihood=simple_loglike,
         param_list=['x', 'y'],
-        param_bounds=np.array([(-10, 10), (0, 100)]).T,
-        pool=pool
+        param_bounds=np.array([(-10, 10), (0, 100)]).T
     )
     
     # Test with points at boundaries
@@ -233,14 +213,15 @@ def test_likelihood_bounds_validation():
         [0, 50]
     ])
     
-    results = pool.run_map_objective(likelihood, X_boundary)
-    results = np.array(results).reshape(-1, 1)
+    results = mpi.map_parallel(likelihood, X_boundary.tolist())
+    if mpi.is_main_process():
+        results = np.array(results).reshape(-1, 1)
     
-    assert results.shape == (3, 1)
-    assert all(np.isfinite(results)), "Boundary evaluations should be finite"
-    
-    print(f"✓ Bounds validation successful")
-    print(f"  Boundary results: {results.flatten()}")
+        assert results.shape == (3, 1)
+        assert all(np.isfinite(results)), "Boundary evaluations should be finite"
+        
+        print(f"✓ Bounds validation successful")
+        print(f"  Boundary results: {results.flatten()}")
 
 
 def test_likelihood_dimension_mismatch():
@@ -249,13 +230,10 @@ def test_likelihood_dimension_mismatch():
     print("TEST: Likelihood Dimension Mismatch")
     print("="*80)
     
-    pool = MPI_Pool()
-    
     likelihood = Likelihood(
         loglikelihood=simple_loglike,
         param_list=['x', 'y', 'z'],
-        param_bounds=np.array([(0, 1), (0, 1), (0, 1)]).T,
-        pool=pool
+        param_bounds=np.array([(0, 1), (0, 1), (0, 1)]).T
     )
     
     # Try to evaluate with wrong dimension

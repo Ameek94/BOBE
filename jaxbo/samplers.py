@@ -49,37 +49,6 @@ def compute_integrals(logl=None, logvol=None, reweight=None,squared=False):
     saved_logz = np.logaddexp.accumulate(saved_logwt)
     return saved_logz
 
-# def renormalise_log_weights(log_weights):
-#     log_total = logsumexp(log_weights)
-#     normalized_weights = np.exp(log_weights - log_total)
-#     return normalized_weights
-
-# def resample_equal(samples, aux, weights=None, logwts=None, rng = None):
-#     rng = get_numpy_rng() if rng is None else rng
-#     # Resample samples to obtain equal weights. Taken from jaxns
-#     if logwts is not None:
-#         wts = renormalise_log_weights(logwts)
-#     else:
-#         wts = weights
-#     weights = wts / wts.sum()
-#     cumulative_sum = np.cumsum(weights)
-#     cumulative_sum /= cumulative_sum[-1]
-#     nsamples = len(weights)
-#     positions = (rng.random() + np.arange(nsamples)) / nsamples
-#     idx = np.zeros(nsamples, dtype=int)
-#     i, j = 0, 0
-#     while i < nsamples:
-#         if positions[i] < cumulative_sum[j]:
-#             idx[i] = j
-#             i += 1
-#         else:
-#             j += 1
-#     perm = rng.permutation(nsamples)
-#     resampled_samples = samples[idx][perm]
-#     resampled_aux = aux[idx][perm]
-#     return resampled_samples, resampled_aux
-
-
 def prior_transform(x):
     return x
         
@@ -221,7 +190,7 @@ def nested_sampling_Dy(gp: GP,
     samples_dict['best'] = best_pt
     weights = renormalise_log_weights(res['logwt'])
     if equal_weights: #for MC points
-        samples_x, logl = resample_equal(samples_x, logl, weights=weights,rng=rng)
+        samples_x, logl = resample_equal(samples_x, logl, weights=weights)
         weights = np.ones(samples_x.shape[0])  # Equal weights after resampling
     samples_dict['x'] = samples_x
     samples_dict['weights'] = weights    
@@ -336,7 +305,7 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         inits = jnp.array([gp.get_random_point(rng=np_rng)])
     else:
         inits = jnp.vstack([gp.get_random_point(rng=np_rng) for _ in range(num_chains-1)])
-        inits = jnp.vstack([inits, gp.train_x_clf[jnp.argmax(gp.train_y_clf)]])
+        inits = jnp.vstack([inits, gp.train_x[jnp.argmax(gp.train_y)]])  # Add best training point as one init
 
     
     log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")

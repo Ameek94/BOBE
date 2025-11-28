@@ -10,7 +10,7 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 from jaxbo.utils.log import get_logger
-from jaxbo.run import run_bobe
+from jaxbo import BOBE
 
 def main():
     # Set up the cosmological likelihood
@@ -21,14 +21,12 @@ def main():
     start = time.time()
     print("Starting BOBE run...")
 
-    results = run_bobe(
-        likelihood=cobaya_input_file,
-        likelihood_kwargs={
-            'confidence_for_unbounded': 0.9999995,
-            'minus_inf': -1e5,
-            'noise_std': 0.0,
-            'name': likelihood_name,
-        },
+    # Pass Cobaya YAML file path directly to BOBE
+    bobe = BOBE(
+        loglikelihood=cobaya_input_file,  # BOBE handles CobayaLikelihood internally
+        likelihood_name=likelihood_name,
+        confidence_for_unbounded=0.9999995,
+        noise_std=0.0,
         resume=False,
         resume_file=f'{likelihood_name}',
         save_dir='./results/',
@@ -55,6 +53,8 @@ def main():
         seed=10,
         do_final_ns=False,
     )
+    
+    results = bobe.run(['wipv'])
 
     end = time.time()
 

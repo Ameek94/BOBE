@@ -6,7 +6,7 @@ from scipy.stats import qmc
 
 from .utils.core import scale_to_unit, scale_from_unit
 from .utils.log import get_logger
-from .utils.pool import MPI_Pool
+from . import mpi
 
 log = get_logger("likelihood")
 
@@ -33,8 +33,6 @@ class Likelihood:
         Name for this likelihood. Default is "loglikelihood".
     minus_inf : float, optional
         Value to return for failed evaluations. Default is -1e5.
-    pool : MPI_Pool, optional
-        MPI pool for parallel evaluation. Default is None.
     """
 
     def __init__(self,
@@ -45,8 +43,7 @@ class Likelihood:
                  param_labels: Optional[List[str]] = None,
                  param_bounds: Optional[Union[List, np.ndarray]] = None,
                  name: Optional[str] = None,
-                 minus_inf: float = -1e5,
-                 pool: MPI_Pool = None):
+                 minus_inf: float = -1e10):
         
         if logl_args or logl_kwargs:
             self.logp = partial(loglikelihood, *(logl_args or ()), **(logl_kwargs or {}))
@@ -68,11 +65,10 @@ class Likelihood:
         self.name = name or "loglikelihood"
         self.minus_inf = minus_inf
         self.logprior_vol = np.log(np.prod(self.param_bounds[1] - self.param_bounds[0]))
-        self.pool = pool if pool is not None else MPI_Pool()
 
         log.info(f"Initialized {self.name} with {self.ndim} params")
 
-        if self.pool.is_master:
+        if mpi.is_main_process():
             log.info(f"Param list: {self.param_list}")
             log.info(f"Param lower bounds: {self.param_bounds[0]}")
             log.info(f"Param upper bounds: {self.param_bounds[1]}")
@@ -105,8 +101,9 @@ class Likelihood:
         """
         Evaluate the likelihood function at a single point.
         
-        This method is designed to be called by workers in MPI mode or
-        by pool.run_map_objective in serial mode, which handles iteration.
+        This method is designed to be called by mpi.map_parallel, which
+        handles distributing tasks across MPI processes in parallel mode
+        or iterating in serial mode.
         
         Parameters
         ----------
@@ -123,7 +120,7 @@ class Likelihood:
             if X.shape[0] != 1:
                 raise ValueError(
                     "__call__ expects a single point. "
-                    "Use pool.run_map_objective for batch evaluations."
+                    "Use mpi.map_parallel for batch evaluations."
                 )
             X = X.flatten()
         
@@ -166,8 +163,7 @@ class CobayaLikelihood(Likelihood):
                  input_file_dict: Union[str, Dict[str, Any]],
                  confidence_for_unbounded: float = 0.9999995,
                  minus_inf: float = -1e5,
-                 name: str = "cobaya_model",
-                 pool: MPI_Pool = None):
+                 name: str = "cobaya_model"):
         
         try:
             from cobaya.yaml import yaml_load
@@ -197,17 +193,16 @@ class CobayaLikelihood(Likelihood):
                          param_labels=param_labels,
                          param_bounds=param_bounds,
                          name=name,
-                         minus_inf=minus_inf,
-                         pool=pool)
+                         minus_inf=minus_inf)
 
         self.cobaya_model = cobaya_model
         log.info(f"Logprior volume = {self.logprior_vol:.4f}")
 
     def __call__(self, X) -> float:
         """Evaluate Cobaya likelihood with logprior volume correction."""
-        val = super().__call__(X)
+        val = super().__call__(X) 
         if val <= self.minus_inf:
-            return self.minus_inf
+            val = self.minus_inf
         return val + self.logprior_vol
 
     def _get_single_valid_point(self, rng: np.random.Generator) -> tuple:
@@ -223,7 +218,9 @@ class CobayaLikelihood(Likelihood):
         )
         
         lp = res["logpost"]
-        logpost = self.minus_inf if lp < self.minus_inf else lp + self.logprior_vol
+        if lp < self.minus_inf:
+            lp = self.minus_inf
+        logpost = lp + self.logprior_vol
         
         return (pt, logpost)
 
@@ -245,13 +242,17 @@ class CobayaLikelihood(Likelihood):
         """
         if n_points <= 0:
             return []
+        
+        if rng is None:
+            rng = np.random.default_rng()
             
-        if self.pool.is_mpi:
+        if mpi.more_than_one_process():
             log.info(f"Generating {n_points} Cobaya points in parallel...")
-            return self.pool.get_cobaya_initial_points(n_points=n_points)
+            # Create task list with RNG seeds for each task
+            tasks = [None] * n_points
+            results = mpi.map_parallel(lambda _: self._get_single_valid_point(rng=rng), tasks)
+            return results if mpi.is_main_process() else []
         else:
             log.info(f"Generating {n_points} Cobaya points in serial...")
-            if rng is None:
-                rng = np.random.default_rng()
             return [self._get_single_valid_point(rng=rng) for _ in range(n_points)]
 

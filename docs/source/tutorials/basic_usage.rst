@@ -43,8 +43,8 @@ First, let's import all the necessary libraries and set up the environment.
 .. code-block:: python
 
    # Core JaxBo imports
-   from jaxbo.run import run_bobe
-   from jaxbo.utils.summary_plots import plot_final_samples, BOBESummaryPlotter
+   from jaxbo import BOBE
+   from jaxbo.utils.plot import plot_final_samples, BOBESummaryPlotter
    import matplotlib.pyplot as plt
    import time
    import numpy as np
@@ -140,16 +140,12 @@ Now let's set up the BOBE configuration and run the optimization. We'll use a sm
    start_time = time.time()
 
    # Run BOBE optimization
-   results = run_bobe(
-       likelihood=loglike,
-       likelihood_kwargs={
-           'param_list': param_list,
-           'param_bounds': param_bounds,
-           'param_labels': param_labels,
-           'name': likelihood_name,
-           'minus_inf': -1e5,
-       },
-       # Logging
+   bobe = BOBE(
+       loglikelihood=loglike,
+       param_list=param_list,
+       param_bounds=param_bounds,
+       param_labels=param_labels,
+       likelihood_name=likelihood_name,
        verbosity='INFO',
        
        # Initialization
@@ -160,9 +156,6 @@ Now let's set up the BOBE configuration and run the optimization. We'll use a sm
        max_evals=250,        # Maximum function evaluations
        max_gp_size=250,      # Maximum GP training set size
        
-       # Acquisition strategy
-       n_log_ei_iters=10,    # Use LogEI for first 10 iterations, then switch to WIPV
-
        # GP and optimization settings
        fit_step=2,           # Refit GP every 2 iterations
        wipv_batch_size=2,    # Batch size for WIPV acquisition
@@ -175,10 +168,13 @@ Now let's set up the BOBE configuration and run the optimization. We'll use a sm
        
        # Convergence
        logz_threshold=0.001, # Evidence convergence threshold
+       minus_inf=-1e5,
        
        # Reproducibility
        seed=42,
    )
+   
+   results = bobe.run(['wipv'])
 
    end_time = time.time()
    total_time = end_time - start_time
