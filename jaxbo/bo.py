@@ -67,8 +67,8 @@ def load_gp_statedict(state_dict: Dict[str, Any], clf: bool) -> Union[GP, GPwith
 class BOBE:
 
     def __init__(self,
-                loglikelihood=None,
-                 param_list=None,
+                loglikelihood: Union[Callable, str, Dict[str, Any], Likelihood],
+                 param_list: List[str],
                  param_bounds=None,
                  param_labels=None,
                  likelihood_name=None,
@@ -172,7 +172,7 @@ class BOBE:
         participate in parallel likelihood evaluations and GP hyperparameter optimization
         via the `MPI_Pool` class, while only the main process (rank 0) runs the optimization
         loop and manages results. Worker processes enter a waiting loop after initialization
-        and process tasks dispatched by the master.
+        and process tasks dispatched by the main process.
         """
 
         # Update logging verbosity if different from default
@@ -1276,7 +1276,7 @@ class BOBE:
                 input_file_dict=loglikelihood,
                 confidence_for_unbounded=confidence_for_unbounded,
                 minus_inf=minus_inf,
-                name=likelihood_name if likelihood_name is not None else 'cobaya_model',
+                name=likelihood_name if likelihood_name is not None else 'CobayaLikelihood',
             )
         
         if callable(loglikelihood):

@@ -20,10 +20,6 @@ class Likelihood:
         Log-likelihood function that takes parameter array and returns float.
     param_list : list of str
         List of parameter names.
-    logl_args : tuple, optional
-        Additional positional arguments for the likelihood function. Default is None.
-    logl_kwargs : dict, optional
-        Additional keyword arguments for the likelihood function. Default is None.
     param_labels : list of str, optional
         LaTeX labels for parameters. Default is None.
     param_bounds : array-like, optional
@@ -36,25 +32,22 @@ class Likelihood:
 
     def __init__(self,
                  loglikelihood: Callable,
-                 param_list: List[str],
-                 logl_args: Optional[Tuple[Any, ...]] = None,
-                 logl_kwargs: Optional[dict] = None,
+                 param_list: Optional[List[str]],
                  param_labels: Optional[List[str]] = None,
                  param_bounds: Optional[Union[List, np.ndarray]] = None,
                  name: Optional[str] = None,
                  minus_inf: float = -1e10):
         
-        if logl_args or logl_kwargs:
-            self.logp = partial(loglikelihood, *(logl_args or ()), **(logl_kwargs or {}))
-        else:
-            self.logp = loglikelihood
+
+        self.logl = loglikelihood
 
         # check param list in correct format
         if not all(isinstance(p, str) for p in param_list):
             raise ValueError("All elements of param_list must be strings corresponding to parameter names.")
 
-        self.ndim = len(param_list)
-        self.param_list = param_list if param_list is not None else [f"x_{i+1}" for i in range(self.ndim)]
+
+        self.param_list = param_list
+        self.ndim = len(self.param_list)
         self.param_labels = param_labels if param_labels is not None else [f"x_{{{i+1}}}" for i in range(self.ndim)]
         if param_bounds is None:
             self.param_bounds = np.array(self.ndim * [[0, 1]]).T
@@ -74,6 +67,7 @@ class Likelihood:
         log.info(f"Param list: {self.param_list}")
         log.info(f"Param lower bounds: {self.param_bounds[0]}")
         log.info(f"Param upper bounds: {self.param_bounds[1]}")
+        log.info(f"Logprior volume = {self.logprior_vol:.4f}")
 
     def _safe_eval(self, x: np.ndarray) -> float:
         """
@@ -90,7 +84,7 @@ class Likelihood:
             Log-likelihood value, or minus_inf if evaluation fails.
         """
         try:
-            val = float(self.logp(x))
+            val = float(self.logl(x))
         except Exception:
             log.debug(f"Log-likelihood evaluation failed at point {x}", exc_info=True)
             return self.minus_inf
@@ -131,41 +125,28 @@ class Likelihood:
         
         return self._safe_eval(X)
 
-    def generate_initial_points(self, n_sobol_init=8, rng=None) -> np.ndarray:
-        """
-        Generate initial points using Sobol quasi-random sampling (without evaluation).
-        
-        Parameters
-        ----------
-        n_sobol_init : int, optional
-            Number of Sobol points to generate. Minimum is 2. Default is 8.
-        rng : np.random.Generator, optional
-            Random number generator. Default is None.
-            
-        Returns
-        -------
-        points : np.ndarray
-            Initial points in parameter space, shape (n_sobol_init, ndim).
-        """
-        if rng is None:
-            rng = np.random.default_rng()
-        
-        n_sobol_init = max(2, n_sobol_init)  # Ensure at least 2 points for Sobol
-
-        sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=rng).random(n_sobol_init)
-        sobol_points = scale_from_unit(sobol, self.param_bounds)
-        
-        return np.array(sobol_points)
-
 
 class CobayaLikelihood(Likelihood):
-    """Likelihood wrapper for Cobaya models."""
+    """Likelihood wrapper for Cobaya models.
+
+    Parameters
+    ----------
+    input_file_dict : str or dict
+        Cobaya input YAML file path or input dictionary.
+    confidence_for_unbounded : float, optional
+        Confidence level for unbounded priors. Default is 0.9999995.
+    minus_inf : float, optional
+        Value to return for failed/minus infinity evaluations. Default is -1e10.
+    name : str, optional
+        Name for this likelihood. Default is "CobayaLikelihood".
+    """
 
     def __init__(self,
                  input_file_dict: Union[str, Dict[str, Any]],
                  confidence_for_unbounded: float = 0.9999995,
-                 minus_inf: float = -1e5,
-                 name: str = "cobaya_model"):
+                 minus_inf: float = -1e10,
+                 name: str = "CobayaLikelihood"):
+        
         
         try:
             from cobaya.yaml import yaml_load
@@ -198,10 +179,10 @@ class CobayaLikelihood(Likelihood):
                          minus_inf=minus_inf)
 
         self.cobaya_model = cobaya_model
-        log.info(f"Logprior volume = {self.logprior_vol:.4f}")
+
 
     def __call__(self, X) -> float:
-        """Evaluate Cobaya likelihood with logprior volume correction."""
+        """Evaluate Cobaya likelihood with logprior volume correction. This is added to match Cobaya behaviour."""
         val = super().__call__(X) 
         if val <= self.minus_inf:
             val = self.minus_inf
@@ -213,7 +194,7 @@ class CobayaLikelihood(Likelihood):
         This is the task that will be executed in parallel by each worker.
         """
         pt, res = self.cobaya_model.get_valid_point(
-            max_tries=100, 
+            max_tries=1000, 
             ignore_fixed_ref=False,
             logposterior_as_dict=True, 
             random_state=rng

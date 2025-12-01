@@ -211,13 +211,11 @@
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.from_state_dict"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.from_state_dict()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.save"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.save()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.load"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.load()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.sample_GP_NUTS"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.sample_GP_NUTS()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.copy"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.copy()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.clf_data_size"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.clf_data_size</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.npoints"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.npoints</span></code></a></li>
 </ul>
 </li>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.clf_gp.load_clf_gp"><code class="docutils literal notranslate"><span class="pre">load_clf_gp()</span></code></a></li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.gp">gp</a><ul>
@@ -248,7 +246,6 @@
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.recompute_cholesky"><code class="docutils literal notranslate"><span class="pre">GP.recompute_cholesky()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.fantasy_var"><code class="docutils literal notranslate"><span class="pre">GP.fantasy_var()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.get_random_point"><code class="docutils literal notranslate"><span class="pre">GP.get_random_point()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.sample_GP_NUTS"><code class="docutils literal notranslate"><span class="pre">GP.sample_GP_NUTS()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.state_dict"><code class="docutils literal notranslate"><span class="pre">GP.state_dict()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.from_state_dict"><code class="docutils literal notranslate"><span class="pre">GP.from_state_dict()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.gp.GP.load"><code class="docutils literal notranslate"><span class="pre">GP.load()</span></code></a></li>
@@ -262,31 +259,21 @@
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.likelihood">likelihood</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.BaseLikelihood"><code class="docutils literal notranslate"><span class="pre">BaseLikelihood</span></code></a><ul>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.BaseLikelihood.__init__"><code class="docutils literal notranslate"><span class="pre">BaseLikelihood.__init__()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.BaseLikelihood.__call__"><code class="docutils literal notranslate"><span class="pre">BaseLikelihood.__call__()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.BaseLikelihood.get_initial_points"><code class="docutils literal notranslate"><span class="pre">BaseLikelihood.get_initial_points()</span></code></a></li>
-</ul>
-</li>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.ExternalLikelihood"><code class="docutils literal notranslate"><span class="pre">ExternalLikelihood</span></code></a><ul>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.ExternalLikelihood.__init__"><code class="docutils literal notranslate"><span class="pre">ExternalLikelihood.__init__()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.Likelihood"><code class="docutils literal notranslate"><span class="pre">Likelihood</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.Likelihood.__init__"><code class="docutils literal notranslate"><span class="pre">Likelihood.__init__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.Likelihood.__call__"><code class="docutils literal notranslate"><span class="pre">Likelihood.__call__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.Likelihood.generate_initial_points"><code class="docutils literal notranslate"><span class="pre">Likelihood.generate_initial_points()</span></code></a></li>
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.CobayaLikelihood"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood</span></code></a><ul>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.CobayaLikelihood.__init__"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood.__init__()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.CobayaLikelihood.get_initial_points"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood.get_initial_points()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.CobayaLikelihood.__call__"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood.__call__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.likelihood.CobayaLikelihood.generate_cobaya_points"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood.generate_cobaya_points()</span></code></a></li>
 </ul>
 </li>
 </ul>
 </li>
-<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.nested_sampler">nested_sampler</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.compute_integrals"><code class="docutils literal notranslate"><span class="pre">compute_integrals()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.renormalise_log_weights"><code class="docutils literal notranslate"><span class="pre">renormalise_log_weights()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.resample_equal"><code class="docutils literal notranslate"><span class="pre">resample_equal()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.prior_transform"><code class="docutils literal notranslate"><span class="pre">prior_transform()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.nested_sampler.nested_sampling_Dy"><code class="docutils literal notranslate"><span class="pre">nested_sampling_Dy()</span></code></a></li>
-</ul>
-</li>
+<li class="toctree-l2"><a class="reference internal" href="jaxbo.html#nested-sampler">nested_sampler</a></li>
 <li class="toctree-l2"><a class="reference internal" href="jaxbo.html#module-jaxbo.optim">optim</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.optim.optimize_optax"><code class="docutils literal notranslate"><span class="pre">optimize_optax()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.optim.optimize_optax_vmap"><code class="docutils literal notranslate"><span class="pre">optimize_optax_vmap()</span></code></a></li>
@@ -328,7 +315,6 @@
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GP.recompute_cholesky"><code class="docutils literal notranslate"><span class="pre">GP.recompute_cholesky()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GP.fantasy_var"><code class="docutils literal notranslate"><span class="pre">GP.fantasy_var()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GP.get_random_point"><code class="docutils literal notranslate"><span class="pre">GP.get_random_point()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GP.sample_GP_NUTS"><code class="docutils literal notranslate"><span class="pre">GP.sample_GP_NUTS()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GP.state_dict"><code class="docutils literal notranslate"><span class="pre">GP.state_dict()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GP.from_state_dict"><code class="docutils literal notranslate"><span class="pre">GP.from_state_dict()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GP.load"><code class="docutils literal notranslate"><span class="pre">GP.load()</span></code></a></li>
@@ -355,21 +341,16 @@
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GPwithClassifier.from_state_dict"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.from_state_dict()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GPwithClassifier.save"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.save()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GPwithClassifier.load"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.load()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GPwithClassifier.sample_GP_NUTS"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.sample_GP_NUTS()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GPwithClassifier.copy"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.copy()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GPwithClassifier.clf_data_size"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.clf_data_size</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.GPwithClassifier.npoints"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.npoints</span></code></a></li>
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.load_gp"><code class="docutils literal notranslate"><span class="pre">load_gp()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.BaseLikelihood"><code class="docutils literal notranslate"><span class="pre">BaseLikelihood</span></code></a><ul>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.BaseLikelihood.__init__"><code class="docutils literal notranslate"><span class="pre">BaseLikelihood.__init__()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.BaseLikelihood.__call__"><code class="docutils literal notranslate"><span class="pre">BaseLikelihood.__call__()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.BaseLikelihood.get_initial_points"><code class="docutils literal notranslate"><span class="pre">BaseLikelihood.get_initial_points()</span></code></a></li>
-</ul>
-</li>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.ExternalLikelihood"><code class="docutils literal notranslate"><span class="pre">ExternalLikelihood</span></code></a><ul>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.ExternalLikelihood.__init__"><code class="docutils literal notranslate"><span class="pre">ExternalLikelihood.__init__()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.Likelihood"><code class="docutils literal notranslate"><span class="pre">Likelihood</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.Likelihood.__init__"><code class="docutils literal notranslate"><span class="pre">Likelihood.__init__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.Likelihood.__call__"><code class="docutils literal notranslate"><span class="pre">Likelihood.__call__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.Likelihood.generate_initial_points"><code class="docutils literal notranslate"><span class="pre">Likelihood.generate_initial_points()</span></code></a></li>
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.EI"><code class="docutils literal notranslate"><span class="pre">EI</span></code></a><ul>
@@ -444,12 +425,13 @@
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.get_logger"><code class="docutils literal notranslate"><span class="pre">get_logger()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.setup_logging"><code class="docutils literal notranslate"><span class="pre">setup_logging()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.scale_to_unit"><code class="docutils literal notranslate"><span class="pre">scale_to_unit()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.scale_from_unit"><code class="docutils literal notranslate"><span class="pre">scale_from_unit()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.run_bobe"><code class="docutils literal notranslate"><span class="pre">run_bobe()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="jaxbo.html#jaxbo.CobayaLikelihood"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood</span></code></a><ul>
 <li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.CobayaLikelihood.__init__"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood.__init__()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.CobayaLikelihood.get_initial_points"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood.get_initial_points()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.CobayaLikelihood.__call__"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood.__call__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="jaxbo.html#jaxbo.CobayaLikelihood.generate_cobaya_points"><code class="docutils literal notranslate"><span class="pre">CobayaLikelihood.generate_cobaya_points()</span></code></a></li>
 </ul>
 </li>
 </ul>

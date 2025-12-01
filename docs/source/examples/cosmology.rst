@@ -131,7 +131,7 @@ Complete Python Code
    import time
    import matplotlib.pyplot as plt
    
-   from jaxbo.run import run_bobe
+   from jaxbo import BOBE
    from jaxbo.utils.log import get_logger
    from jaxbo.utils.plot import BOBESummaryPlotter
    from getdist import MCSamples, plots as gdplt
@@ -144,17 +144,12 @@ Complete Python Code
        print("Starting BOBE run with cosmological likelihood...")
        start = time.time()
        
-       results = run_bobe(
-           likelihood=cobaya_input_file,
-           likelihood_kwargs={
-               'confidence_for_unbounded': 0.9999995,
-               'minus_inf': -1e5,
-               'noise_std': 0.0,
-               'name': likelihood_name,
-           },
-           # Resume settings (optional)
-           resume=False,  # Set to True to resume from previous run
-           resume_file=f'./results/{likelihood_name}',
+       # Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
+       bobe = BOBE(
+           loglikelihood=cobaya_input_file,
+           likelihood_name=likelihood_name,
+           confidence_for_unbounded=0.9999995,
+           minus_inf=-1e5,
            
            # Output
            save=True,
@@ -171,15 +166,11 @@ Complete Python Code
            max_evals=2500,     # Maximum likelihood evaluations
            max_gp_size=1500,   # Maximum GP training set size
            
-           # Acquisition
-           acq=['wipv'],
-           convergence_n_iters=2,  # Require 2 consecutive convergence checks
-           
            # Step settings
            fit_step=5,             # Fit GP every 5 evaluations
            wipv_batch_size=5,      # Evaluate 5 points per acquisition
            ns_step=5,              # Run nested sampling every 5 iterations
-           optimizer='scipy',      # 'scipy' or 'optax' (requires [nn])
+           optimizer='scipy',      # 'scipy' or 'optax'
            
            # HMC/MC settings for acquisition
            num_hmc_warmup=512,
@@ -199,7 +190,15 @@ Complete Python Code
            clf_type='svm',              # 'svm' (always available) or 'nn' (requires [nn])
            clf_nsigma_threshold=20,     # Filter points below -20 sigma
            clf_update_step=1,           # Update classifier every iteration
+           
+           # Convergence
+           logz_threshold=0.01,
+           convergence_n_iters=2,  # Require 2 consecutive convergence checks
+           do_final_ns=True,
        )
+       
+       # Run optimization
+       results = bobe.run(acqs='wipv')
        
        end = time.time()
        
@@ -340,12 +339,14 @@ To resume an interrupted run:
 
 .. code-block:: python
 
-   results = run_bobe(
-       likelihood=cobaya_input_file,
+   bobe = BOBE(
+       loglikelihood=cobaya_input_file,
+       likelihood_name=likelihood_name,
        resume=True,
        resume_file='./results/Planck_DESI_LCDM',
        # ... other settings ...
    )
+   results = bobe.run(acqs='wipv')
 
 Troubleshooting
 ---------------
