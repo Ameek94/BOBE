@@ -189,24 +189,19 @@ class BOBE:
         )
         self.ndim = len(self.loglikelihood.param_list)
         
-        # ============================================================================
-        # WORKER PROCESS MINIMAL SETUP
-        # ============================================================================
         if not self.is_main:
             # Workers only need likelihood and seed - everything else is handled in worker_wait
             self.pool.worker_wait(likelihood=self.loglikelihood, seed=seed)
             return  # Workers never return from worker_wait until pool.close()
         
-        # ============================================================================
         # MAIN PROCESS FULL SETUP
-        # ============================================================================
         self._setup_main_process(
             seed, optimizer, save, save_dir, save_step,
             n_cobaya_init, n_sobol_init, acq, use_clf, clf_type,
             clf_nsigma_threshold, minus_inf, resume
         )
         
-        # Handle resume - main process only
+        # handle resume if needed
         if resume and resume_file is not None:
             self._handle_resume(resume_file, use_clf)
 
@@ -456,9 +451,6 @@ class BOBE:
         # Update GP with new data
         self.gp.update(new_pts_u, new_vals)
         
-        # Use pool for parallel GP fitting if refitting
-        if refit:
-            self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter, rng=self.np_rng, use_pool=True)
         # Use pool for parallel GP fitting if refitting
         if refit:
             self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter, rng=self.np_rng, use_pool=True)

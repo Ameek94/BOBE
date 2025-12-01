@@ -21,12 +21,3 @@ Interface for Cobaya cosmological parameter estimation.
    :undoc-members:
    :show-inheritance:
 
-Nested Sampling
----------------
-
-Nested sampling utilities for likelihood evaluation.
-
-.. automodule:: jaxbo.nested_sampler
-   :members:
-   :undoc-members:
-   :show-inheritance:

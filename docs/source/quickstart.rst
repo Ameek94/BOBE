@@ -88,6 +88,6 @@ Key parameters are split between initialization (``__init__``) and execution (``
 
 - ``acqs``: Acquisition function - 'wipv' (recommended), 'ei', or 'logei'
 - ``min_evals``, ``max_evals``: Budget for likelihood evaluations
-- ``mc_points_method``: 'NS' (nested sampling) or 'HMC' for GP posterior sampling
+- ``mc_points_method``: 'NUTS' (default), 'NS' (nested sampling), or 'uniform' for GP posterior sampling
 - ``fit_step``: How often to refit GP hyperparameters
 - ``logz_threshold``: Convergence threshold for log-evidence

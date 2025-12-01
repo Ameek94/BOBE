@@ -52,10 +52,10 @@ likelihood
    :show-inheritance:
    :undoc-members:
 
-nested\_sampler
+samplers
 ----------------------------
 
-.. automodule:: jaxbo.nested_sampler
+.. automodule:: jaxbo.samplers
    :members:
    :show-inheritance:
    :undoc-members:

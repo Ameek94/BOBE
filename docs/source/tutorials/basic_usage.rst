@@ -170,9 +170,9 @@ Now let's set up the BOBE configuration and run the optimization. We'll use a sm
        wipv_batch_size=2,    # Batch size for WIPV acquisition
        ns_step=5,            # Run nested sampling every 5 iterations
 
-       # MCMC settings for WIPV
-       num_hmc_warmup=256,   # HMC warmup steps
-       num_hmc_samples=1024, # HMC samples
+       # MCMC settings for WIPV (uses NUTS by default)
+       num_hmc_warmup=256,   # NUTS warmup steps
+       num_hmc_samples=1024, # NUTS samples
        mc_points_size=256,   # Size of MC sample for WIPV
        
        # Convergence
