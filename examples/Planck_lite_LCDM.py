@@ -30,7 +30,16 @@ def main():
         save=True,
         verbosity='INFO',
         n_cobaya_init=4, 
-        n_sobol_init=8, 
+        n_sobol_init=8,
+        gp_kwargs={'lengthscale_prior': ls_priors,}, 
+        use_clf=True,
+        clf_type='svm',
+        minus_inf=-1e5,
+        seed=10,
+    )
+    
+    results = bobe.run(
+        acqs='wipv',
         min_evals=25, 
         max_evals=250,
         max_gp_size=200,
@@ -40,16 +49,9 @@ def main():
         num_hmc_warmup=256,
         num_hmc_samples=2048, 
         mc_points_size=256,
-        gp_kwargs={'lengthscale_prior': ls_priors,}, 
-        use_clf=True,
-        clf_type='svm',
-        minus_inf=-1e5,
         logz_threshold=0.001,
-        seed=10,
         do_final_ns=False,
     )
-    
-    results = bobe.run(['wipv'])
 
     end = time.time()
 

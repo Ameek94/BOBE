@@ -30,36 +30,38 @@ def main():
     print("Starting BOBE run...")
 
     # Run BOBE with simplified interface
+    gp_kwargs = {'lengthscale_prior': 'DSLP'}
+    
     bobe = BOBE(
         loglikelihood=loglike,
         param_list=param_list,
         param_bounds=param_bounds,
         param_labels=param_labels,
         likelihood_name=likelihood_name,
+        gp_kwargs=gp_kwargs,
         verbosity='INFO',
         n_cobaya_init=4,
         n_sobol_init=8,
-        n_log_ei_iters=20,
+        use_clf=False,
+        minus_inf=-1e5,
+        seed=42,
+    )
+    
+    results = bobe.run(
+        acqs='wipv',
         min_evals=30,
-        max_eval_budget=200,
+        max_evals=200,
         max_gp_size=200,
         fit_step=2,
-        update_mc_step=1,
         ns_step=4,
         wipv_batch_size=2,
         num_hmc_warmup=512,
         num_hmc_samples=512,
         mc_points_size=128,
         mc_points_method='NS',
-        lengthscale_priors='DSLP',
-        use_clf=False,
-        minus_inf=-1e5,
         logz_threshold=0.001,
-        seed=42,
         do_final_ns=False,
     )
-    
-    results = bobe.run(['wipv'])
 
     end = time.time()
 

@@ -39,23 +39,48 @@ reference_samples = MCSamples(samples=samples, names=param_list, labels=param_la
                             ranges= dict(zip(param_list,param_bounds.T)))
 
 
-likelihood = Likelihood(loglikelihood=loglike,param_list=param_list,
-        param_bounds=param_bounds,param_labels=param_labels,
-        name='Rosenbrock',noise_std=0.0,minus_inf=-1e5)
+likelihood_name = 'Rosenbrock'
 start = time.time()
-sampler = BOBE(n_cobaya_init=4, n_sobol_init = 16, 
-        miniters=50, maxiters=200,max_gp_size=200,
-        loglikelihood=likelihood,mc_points_method='NS',
-        fit_step = 2, update_mc_step = 5, ns_step = 10,
-        num_hmc_warmup = 512,num_hmc_samples = 512, mc_points_size = 32,
-        logz_threshold=0.5,
-        lengthscale_priors='DSLP', use_clf=False,minus_inf=-1e10,)
 
-gp, ns_samples, logz_dict = sampler.run()
-end = time.time()
+gp_kwargs = {'lengthscale_prior': 'DSLP'}
+
+sampler = BOBE(
+        loglikelihood=loglike,
+        param_list=param_list,
+        param_bounds=param_bounds,
+        param_labels=param_labels,
+        likelihood_name=likelihood_name,
+        gp_kwargs=gp_kwargs,
+        noise_std=0.0,
+        minus_inf=-1e10,
+        n_cobaya_init=4,
+        n_sobol_init=16,
+        use_clf=False,
+        verbosity='INFO',
+)
+
+results = sampler.run(
+        acqs='wipv',
+        min_evals=50,
+        max_evals=200,
+        max_gp_size=200,
+        fit_step=2,
+        ns_step=10,
+        num_hmc_warmup=512,
+        num_hmc_samples=512,
+        mc_points_size=32,
+        mc_points_method='NS',
+        logz_threshold=0.5,
+)
 print(f"Total time taken = {end-start:.4f} seconds")
 print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
 
-plot_final_samples(gp, ns_samples,param_list=likelihood.param_list,param_bounds=likelihood.param_bounds,
-                   param_labels=likelihood.param_labels,output_file=likelihood.name,reference_samples=reference_samples,
-                   reference_file=None,scatter_points=True,reference_label='Dynesty')
+if results is not None:
+    gp = results['gp']
+    samples = results['samples']
+    logz_dict = results.get('logz', {})
+    likelihood = results['likelihood']
+
+    plot_final_samples(gp, samples, param_list=likelihood.param_list, param_bounds=likelihood.param_bounds,
+                       param_labels=likelihood.param_labels, output_file=likelihood_name, reference_samples=reference_samples,
+                       reference_file=None, scatter_points=True, reference_label='Dynesty')

@@ -36,7 +36,7 @@ def main():
     start = time.time()
     print("Starting BOBE run...")
 
-    # Create and run BOBE sampler (logging and likelihood wrapping handled internally)
+    # Create BOBE sampler (logging and likelihood wrapping handled internally)
     bobe = BOBE(
         loglikelihood=loglike,
         param_list=param_list,
@@ -46,29 +46,32 @@ def main():
         verbosity='INFO',
         n_cobaya_init=4,
         n_sobol_init=8,
+        optimizer='scipy',
+        use_clf=False,
+        minus_inf=-1e5,
+        seed=42,
+        save_dir='./results/',
+        save=True,
+    )
+    
+    # Run optimization with convergence and run settings
+    results = bobe.run(
+        acqs='wipv',
         min_evals=20,
         max_evals=100,
         max_gp_size=200,
+        logz_threshold=1e-3,
+        do_final_ns=True,
         fit_step=1,
         wipv_batch_size=2,
         ns_step=5,
-        optimizer='scipy',
-        mc_points_method='NUTS',
         num_hmc_warmup=256,
         num_hmc_samples=4000,
         mc_points_size=128,
         thinning=4,
         num_chains=4,
-        use_clf=False,
-        minus_inf=-1e5,
-        logz_threshold=1e-3,
-        seed=42,
-        save_dir='./results/',
-        save=True,
-        do_final_ns=True,
+        mc_points_method='NUTS',
     )
-    
-    results = bobe.run(['wipv'])
 
     end = time.time()
 

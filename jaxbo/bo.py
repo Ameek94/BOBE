@@ -14,7 +14,7 @@ from .samplers import nested_sampling_Dy, sample_GP_NUTS
 from .utils.log import get_logger, update_verbosity
 from .utils.results import BOBEResults
 from .acquisition import *
-from . import mpi
+from .utils.pool import MPI_Pool
 
 log = get_logger("bo")
 log.info(f'JAX using {jax.device_count()} devices.')
@@ -78,36 +78,19 @@ class BOBE:
                  n_sobol_init=32,
                  init_train_x=None,
                  init_train_y=None,
-                 min_evals=200,
-                 max_evals=1500,
-                 max_gp_size=1200,
                  resume=False,
                  resume_file=None,
                  save_dir='.',
                  save=True,
                  save_step=5,
                  optimizer='scipy',
-                 fit_step=10,
-                 wipv_batch_size=4,
-                 ns_step=10,
-                 num_hmc_warmup=512,
-                 num_hmc_samples=512,
-                 mc_points_size=64,
-                 thinning=4,
-                 num_chains=4,
-                 mc_points_method='NUTS',
                  acq = 'WIPV',
-                 zeta_ei = 0.01,
-                 ei_goal = 1e-10,
                  use_clf=True,
                  clf_type = "svm",
                  clf_nsigma_threshold=20,
                  clf_use_size = 10,
                  clf_update_step=1,
-                 logz_threshold=0.01,
-                 convergence_n_iters=1,
                  minus_inf=-1e10,
-                 do_final_ns=False,
                  seed: Optional[int] = None,
                  verbosity: str = 'INFO',
                  ):
@@ -137,9 +120,6 @@ class BOBE:
         confidence_for_unbounded : float, optional
             Confidence level for unbounded Cobaya priors. Default is 0.9999995.
             Only used when loglikelihood is a Cobaya YAML file or dict.
-        noise_std : float, optional
-            Noise standard deviation for Cobaya likelihood. Default is 0.0.
-            Only used when loglikelihood is a Cobaya YAML file or dict.
         gp_kwargs : dict, optional
             Additional keyword arguments to pass to GP constructors. Default is {}.
         n_cobaya_init : int, optional
@@ -153,12 +133,6 @@ class BOBE:
         init_train_y : array-like, optional
             User-provided initial training values (log-likelihood), shape (n_points, 1) or (n_points,).
             Must be provided if init_train_x is given. Default is None.
-        min_evals : int, optional
-            Minimum number of likelihood evaluations before checking convergence. Default is 200.
-        max_evals : int, optional
-            Maximum number of likelihood evaluations. Default is 1500.
-        max_gp_size : int, optional
-            Maximum number of points used to train the GP. Default is 1200.
         resume : bool, optional
             If True, resume from a previous run. Default is False.
         resume_file : str, optional
@@ -171,30 +145,8 @@ class BOBE:
             Save results every save_step iterations. Default is 5.
         optimizer : str, optional
             Optimizer for GP and acquisition function. Options: 'scipy', 'optax'. Default is 'scipy'.
-        fit_step : int, optional
-            Fit GP every fit_step iterations. Default is 10.
-        wipv_batch_size : int, optional
-            Batch size for WIPV acquisition. Default is 4.
-        ns_step : int, optional
-            Run nested sampling every ns_step iterations. Default is 10.
-        num_hmc_warmup : int, optional
-            Number of HMC warmup steps. Default is 512.
-        num_hmc_samples : int, optional
-            Number of HMC samples to draw. Default is 512.
-        mc_points_size : int, optional
-            Number of MC points for WIPV acquisition. Default is 64.
-        thinning : int, optional
-            Thinning factor for MC samples. Default is 4.
-        num_chains : int, optional
-            Number of parallel HMC chains. Default is 4.
-        mc_points_method : str, optional
-            Method for generating MC points: 'NUTS', 'NS', or 'uniform'. Default is 'NUTS'.
         acq : str, optional
             Acquisition function: 'WIPV', 'EI', 'LogEI', 'WIPStd'. Default is 'WIPV'.
-        zeta_ei : float, optional
-            Exploration parameter for EI acquisition. Default is 0.01.
-        ei_goal : float, optional
-            Goal value for EI acquisition. Default is 1e-10.
         use_clf : bool, optional
             Whether to use classifier for GP filtering. Default is True.
         clf_type : str, optional
@@ -205,14 +157,8 @@ class BOBE:
             Minimum dataset size before using classifier. Default is 10.
         clf_update_step : int, optional
             Update classifier every clf_update_step iterations. Default is 1.
-        logz_threshold : float, optional
-            Convergence threshold for log evidence change. Default is 0.01.
-        convergence_n_iters : int, optional
-            Number of successive iterations meeting threshold for convergence. Default is 1.
         minus_inf : float, optional
             Value representing negative infinity for failed evaluations. Default is -1e5.
-        do_final_ns : bool, optional
-            Whether to run final nested sampling at convergence. Default is False.
         seed : int, optional
             Random seed for reproducibility. Default is None.
         verbosity : str, optional
@@ -224,13 +170,17 @@ class BOBE:
         need to manage MPI processes explicitly in their scripts. When running with
         MPI (e.g., `mpirun -n 4 python script.py`), worker processes automatically
         participate in parallel likelihood evaluations and GP hyperparameter optimization
-        via the `mpi` module, while only the main process (rank 0) runs the optimization
-        loop and manages results.
+        via the `MPI_Pool` class, while only the main process (rank 0) runs the optimization
+        loop and manages results. Worker processes enter a waiting loop after initialization
+        and process tasks dispatched by the master.
         """
 
         # Update logging verbosity if different from default
         update_verbosity(verbosity=verbosity)
-        self.is_main = mpi.is_main_process()
+        
+        # Initialize MPI pool
+        self.pool = MPI_Pool()
+        self.is_main = self.pool.is_main_process
         
         # Convert to Likelihood instance and store for all processes
         self.loglikelihood = self._prepare_likelihood(
@@ -243,26 +193,24 @@ class BOBE:
         # WORKER PROCESS MINIMAL SETUP
         # ============================================================================
         if not self.is_main:
-            self._setup_worker(seed, optimizer, resume)
+            # Workers only need likelihood and seed - everything else is handled in worker_wait
+            self.pool.worker_wait(likelihood=self.loglikelihood, seed=seed)
+            return  # Workers never return from worker_wait until pool.close()
         
         # ============================================================================
         # MAIN PROCESS FULL SETUP
         # ============================================================================
-        else:
-            self._setup_main_process(
-                seed, optimizer, save, save_dir, save_step,
-                do_final_ns, logz_threshold, convergence_n_iters, ei_goal,
-                n_cobaya_init, n_sobol_init, min_evals, max_evals, max_gp_size,
-                fit_step, wipv_batch_size, ns_step, num_hmc_warmup, num_hmc_samples,
-                mc_points_size, mc_points_method, acq, use_clf, clf_type,
-                clf_nsigma_threshold, minus_inf, resume
-            )
+        self._setup_main_process(
+            seed, optimizer, save, save_dir, save_step,
+            n_cobaya_init, n_sobol_init, acq, use_clf, clf_type,
+            clf_nsigma_threshold, minus_inf, resume
+        )
         
-        # Handle resume - ALL processes participate
+        # Handle resume - main process only
         if resume and resume_file is not None:
             self._handle_resume(resume_file, use_clf)
 
-        # Fresh start path - generate and train initial GP
+        # Fresh start path - generate and train initial GP (main process only)
         if self.fresh_start:
             self._handle_fresh_start(
                 n_cobaya_init, n_sobol_init, init_train_x, init_train_y,
@@ -270,17 +218,8 @@ class BOBE:
                 clf_nsigma_threshold, minus_inf, optimizer, gp_kwargs
             )
         
-        # Workers have GP loaded (either from resume or fresh init)
-        # Workers now return, they've completed their initialization participation
-        if not self.is_main:
-            return
-        
         # Finalize main process initialization
-        self._finalize_main_initialization(
-            min_evals, max_evals, max_gp_size, fit_step, ns_step,
-            wipv_batch_size, num_hmc_warmup, num_hmc_samples, thinning,
-            num_chains, mc_points_size, minus_inf, mc_points_method, zeta_ei
-        )
+        self._finalize_main_initialization()
     
     def _get_initial_training_data(self, n_cobaya_init, n_sobol_init, init_train_x=None, init_train_y=None):
         """
@@ -373,7 +312,7 @@ class BOBE:
 
     def _generate_sobol_points(self, n_sobol_init: int):
         """
-        Generate Sobol initial points on main rank and evaluate them in parallel.
+        Generate Sobol initial points on main rank and evaluate them in parallel using pool.
         
         Parameters
         ----------
@@ -391,43 +330,23 @@ class BOBE:
         
         n_sobol = max(2, n_sobol_init)
         
-        # Main process generates Sobol points
+        # Main process generates Sobol points and distributes via pool
         if self.is_main:
             self.results_manager.start_timing('True Objective Evaluations')
             sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=self.np_rng).random(n_sobol)
             sobol_points = scale_from_unit(sobol, self.loglikelihood.param_bounds)
-            # Convert to list for scatter
-            points_list = [sobol_points[i] for i in range(len(sobol_points))]
             log.info(f"Evaluating {len(sobol_points)} Sobol initial points")
-        else:
-            points_list = None
-
-        # Scatter points across processes
-        local_points = mpi.scatter(points_list, root=0)
-        
-        # Each process evaluates its assigned points
-        if local_points is not None and len(local_points) > 0:
-            local_points = np.atleast_2d(local_points)
-            local_vals = np.array([self.loglikelihood(pt) for pt in local_points]).reshape(-1, 1)
-        else:
-            local_points = np.empty((0, self.ndim))
-            local_vals = np.empty((0, 1))
-
-        # Gather results back to main process
-        gathered_points = mpi.gather(local_points, root=0)
-        gathered_vals = mpi.gather(local_vals, root=0)
-
-        if self.is_main:
-            # Reconstruct full arrays from gathered results
-            all_points = np.vstack([pts for pts in gathered_points if len(pts) > 0])
-            all_vals = np.vstack([vals for vals in gathered_vals if len(vals) > 0])
-            return all_points, all_vals
+            
+            # Use pool to evaluate points in parallel
+            all_vals = self.pool.run_map_objective(self.loglikelihood, sobol_points)
+            all_vals = np.atleast_2d(all_vals).reshape(-1, 1)
+            return sobol_points, all_vals
         else:
             return np.empty((0, self.ndim)), np.empty((0, 1))
 
     def _generate_cobaya_points(self, n_cobaya_init: int):
         """
-        Generate Cobaya initial points in parallel across ranks.
+        Generate Cobaya initial points in parallel using pool.
         
         Parameters
         ----------
@@ -444,30 +363,15 @@ class BOBE:
         if n_cobaya_init <= 0:
             raise ValueError("n_cobaya_init must be greater than zero to generate Cobaya points.")
 
-        # Distribute requests across processes
+        # Use pool to generate Cobaya points in parallel
         if self.is_main:
-            inits_per_process = np.array_split(np.arange(n_cobaya_init), mpi.get_mpi_size())
-        else:
-            inits_per_process = None
-
-        local_inits = mpi.scatter(inits_per_process, root=0)
-
-        # Each process generates its assigned points
-        local_points = []
-        local_vals = [] 
-        for _ in range(len(local_inits)):
-            pt, lp = self.loglikelihood._get_single_valid_point(rng=self.np_rng)
-            local_points.append(pt)
-            local_vals.append(lp)
-
-        # Gather all results
-        gathered_points = mpi.gather(local_points, root=0)
-        gathered_vals = mpi.gather(local_vals, root=0)
-
-        if self.is_main:
-            # Reconstruct full arrays from gathered results
-            all_points = np.vstack([pts for pts in gathered_points if len(pts) > 0])
-            all_vals = np.vstack([vals for vals in gathered_vals if len(vals) > 0])
+            results_tuples = self.pool.get_cobaya_initial_points(
+                self.loglikelihood, n_cobaya_init, rng=self.np_rng
+            )
+            
+            # Extract points and values from tuples
+            all_points = np.array([pt for pt, _ in results_tuples])
+            all_vals = np.array([[lp] for _, lp in results_tuples])
             return all_points, all_vals
         else:
             return np.empty((0, self.ndim)), np.empty((0, 1))
@@ -478,175 +382,86 @@ class BOBE:
         """
         Initialize and train the GP or GPwithClassifier.
         
-        Main process creates GP, workers receive state_dict and reconstruct.
+        Main process creates GP, workers will receive it via pool during fitting.
         """
-        # Main process creates and trains GP
-        if self.is_main:
-            # Update GP kwargs with training data
-            gp_kwargs.update({
-                'train_x': train_x, 
-                'train_y': train_y, 
-                'param_names': self.loglikelihood.param_list, 
-                'optimizer': optimizer
-            })
-            
-            # Create GP or GPwithClassifier
-            if use_clf:
-                clf_threshold = max(75, get_threshold_for_nsigma(clf_nsigma_threshold, self.ndim))
-                gp_kwargs.update({
-                    'clf_type': clf_type,
-                    'clf_use_size': clf_use_size,
-                    'clf_update_step': clf_update_step,
-                    'probability_threshold': 0.5,
-                    'minus_inf': minus_inf,
-                    'clf_threshold': clf_threshold,
-                    'gp_threshold': 2 * clf_threshold
-                })
-                self.gp = GPwithClassifier(**gp_kwargs)
-            else:
-                self.gp = GP(**gp_kwargs)
-            
-            self.results_manager.start_timing('GP Training')
-            log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
-            
-            # Get GP state dict to broadcast
-            gp_state = self.gp.state_dict()
-        else:
-            gp_state = None
-        
-        # Broadcast GP state to all processes
-        gp_state = mpi.share(gp_state, root=0)
-        
-        # Workers reconstruct GP from state dict
+        # Only main process creates and trains GP
         if not self.is_main:
-            if 'clf_use_size' in gp_state:
-                self.gp = GPwithClassifier.from_state_dict(gp_state)
-            else:
-                self.gp = GP.from_state_dict(gp_state)
+            return
         
-        # ALL processes participate in distributed GP fitting
-        self.distributed_gp_fit(self.gp, n_restarts=4, maxiters=500)
+        # Update GP kwargs with training data
+        gp_kwargs.update({
+            'train_x': train_x, 
+            'train_y': train_y, 
+            'param_names': self.loglikelihood.param_list, 
+            'optimizer': optimizer
+        })
         
-        if self.is_main:
-            log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
-            self.results_manager.end_timing('GP Training')
+        # Create GP or GPwithClassifier
+        if use_clf:
+            clf_threshold = max(75, get_threshold_for_nsigma(clf_nsigma_threshold, self.ndim))
+            gp_kwargs.update({
+                'clf_type': clf_type,
+                'clf_use_size': clf_use_size,
+                'clf_update_step': clf_update_step,
+                'probability_threshold': 0.5,
+                'minus_inf': minus_inf,
+                'clf_threshold': clf_threshold,
+                'gp_threshold': 2 * clf_threshold
+            })
+            self.gp = GPwithClassifier(**gp_kwargs)
+        else:
+            self.gp = GP(**gp_kwargs)
+        
+        self.results_manager.start_timing('GP Training')
+        log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
+        
+        # Use pool to fit GP in parallel
+        self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
+        
+        log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
+        self.results_manager.end_timing('GP Training')
     
-    def distributed_gp_fit(self, gp, n_restarts: int = 4, maxiters: int = 500):
-        """
-        Distribute GP fitting across MPI processes.
-        
-        Parameters
-        ----------
-        gp : GP or GPwithClassifier
-            Gaussian Process model to fit.
-        n_restarts : int, optional
-            Number of random restarts for optimization. Default is 4.
-        maxiters : int, optional
-            Maximum iterations for each optimization. Default is 500.
-            
-        Returns
-        -------
-        dict or None
-            Best fit result for main process, None for workers.
-        """
-        # Generate starting points
-        init_params = jnp.log(gp.get_hyperparams())
-        n_params = init_params.shape[0]
-        
-        if mpi.is_main_process():
-            if n_restarts > 1:
-                x0_random = self.np_rng.uniform(
-                    gp.hyperparam_bounds[0], 
-                    gp.hyperparam_bounds[1], 
-                    size=(n_restarts - 1, n_params)
-                )
-                x0 = np.vstack([np.array(init_params), x0_random])
-            else:
-                x0 = np.atleast_2d(np.array(init_params))
-            x0_list = [x0[i] for i in range(len(x0))]
-        else:
-            x0_list = None
-
-        # Distribute work and fit
-        local_x0 = mpi.scatter(x0_list, root=0)
-        local_result = {'mll': -np.inf, 'params': None}
-        
-        if local_x0 is not None and len(local_x0) > 0:
-            result = gp.fit(x0=np.array(local_x0), maxiter=maxiters)
-            local_result = result if result else local_result
-
-        # Gather and select best result
-        all_results = mpi.gather(local_result, root=0)
-        
-        if mpi.is_main_process():
-            valid_results = [r for r in all_results if r.get('mll', -np.inf) > -np.inf]
-            best_result = max(valid_results, key=lambda r: r.get('mll', -np.inf)) if valid_results else {'params': None}
-            best_params = best_result.get('params')
-        else:
-            best_params = None
-            best_result = None
-
-        # Share and update
-        best_params = mpi.share(best_params, root=0)
-        if best_params is not None:
-            gp.update_hyperparams(best_params)
-
-        return best_result if mpi.is_main_process() else None
     
     def update_gp(self, new_pts_u, new_vals, step = 0, verbose=True):
         """
         Update the GP with new points and values, and track hyperparameters.
         
-        Main process updates GP with new data, broadcasts state to workers,
-        then all processes participate in parallel fitting if needed.
+        Uses pool for parallel GP fitting when refitting is needed.
         """
-        # Main process updates GP and determines refit parameters
-        if self.is_main:
-            self.results_manager.start_timing('GP Training')
-            refit = (step % self.fit_step == 0)
-            if self.gp.train_x.shape[0] < 200:
-                # Override refit for small training sets to do more frequent fitting
-                override_fit_step = min(2, self.fit_step)
-                refit = (step % override_fit_step == 0)
-                maxiter = 1000
-                n_restarts = 8
-            elif 200 < self.gp.train_x.shape[0] < 800:
-                # for moderate size training sets
-                n_restarts = 4
-                maxiter = 500
-            else:
-                # for large training sets we don't need to do too many restarts or frequent fitting
-                n_restarts = 4
-                maxiter = 200
-                override_fit_step = max(10, self.fit_step)
-                refit = (step % override_fit_step == 0)
-            self.gp.update(new_pts_u, new_vals)
-            
-            # Get updated GP state to broadcast
-            gp_state = self.gp.state_dict()
-        else:
-            refit = False
-            n_restarts = maxiter = None
-            gp_state = None
-        
-        # Broadcast updated GP state to all processes
-        gp_state = mpi.share(gp_state, root=0)
-        
-        # Workers reconstruct GP from updated state dict
-        if not self.is_main:
-            use_clf = 'clf_use_size' in gp_state
-            self.gp = load_gp_statedict(gp_state, use_clf)
-        
-        # Share refit decision and parameters to all processes
-        refit, n_restarts, maxiter = mpi.share((refit, n_restarts, maxiter), root=0)
-        
-        # ALL processes participate in distributed fitting if refitting (synchronization point)
-        if refit:
-            self.distributed_gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter)
-        
-        # Only main process continues with result processing and tracking
+        # Only main process updates GP
         if not self.is_main:
             return
+        
+        self.results_manager.start_timing('GP Training')
+        
+        # Determine refit parameters based on training set size
+        refit = (step % self.fit_step == 0)
+        if self.gp.train_x.shape[0] < 200:
+            # Override refit for small training sets to do more frequent fitting
+            override_fit_step = min(2, self.fit_step)
+            refit = (step % override_fit_step == 0)
+            maxiter = 1000
+            n_restarts = 8
+        elif 200 < self.gp.train_x.shape[0] < 800:
+            # for moderate size training sets
+            n_restarts = 4
+            maxiter = 500
+        else:
+            # for large training sets we don't need to do too many restarts or frequent fitting
+            n_restarts = 4
+            maxiter = 200
+            override_fit_step = max(10, self.fit_step)
+            refit = (step % override_fit_step == 0)
+        
+        # Update GP with new data
+        self.gp.update(new_pts_u, new_vals)
+        
+        # Use pool for parallel GP fitting if refitting
+        if refit:
+            self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter, rng=self.np_rng, use_pool=True)
+        # Use pool for parallel GP fitting if refitting
+        if refit:
+            self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter, rng=self.np_rng, use_pool=True)
         
         self.results_manager.end_timing('GP Training')
 
@@ -660,7 +475,7 @@ class BOBE:
             self.gp.train_classifier()
             self.results_manager.end_timing('Classifier Training')
 
-        
+                
 
     def get_next_batch(self, acq_kwargs, n_batch, n_restarts, maxiter, early_stop_patience, step, verbose=True):
         """
@@ -689,7 +504,7 @@ class BOBE:
 
     def evaluate_likelihood(self, new_pts_u, step, verbose=True):
         """
-        Evaluate the likelihood for new points using scatter/gather pattern.
+        Evaluate the likelihood for new points using pool.
         
         Parameters
         ----------
@@ -705,36 +520,19 @@ class BOBE:
         new_vals : jax.numpy.ndarray
             Evaluated likelihood values, shape (n_points, 1).
         """
-        # Main process prepares points for evaluation
-        if self.is_main:
-            new_pts_u = jnp.atleast_2d(new_pts_u)
-            new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
-            self.results_manager.start_timing('True Objective Evaluations')
-            # Convert to list for scatter
-            points_list = [new_pts[i] for i in range(len(new_pts))]
-        else:
-            points_list = None
-
-        # Scatter points across processes
-        local_points = mpi.scatter(points_list, root=0)
-        
-        # Each process evaluates its assigned points
-        if local_points is not None and len(local_points) > 0:
-            local_points = np.atleast_2d(local_points)
-            local_vals = np.array([self.loglikelihood(pt) for pt in local_points]).reshape(-1, 1)
-        else:
-            local_vals = np.empty((0, 1))
-
-        # Gather results back to main process
-        gathered_vals = mpi.gather(local_vals, root=0)
-
-        # Only main process continues with result processing
+        # Only main process evaluates
         if not self.is_main:
             return None
         
-        # Reconstruct full array from gathered results
-        new_vals = np.vstack([vals for vals in gathered_vals if len(vals) > 0])
-        new_vals = jnp.array(new_vals)
+        new_pts_u = jnp.atleast_2d(new_pts_u)
+        new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
+        
+        self.results_manager.start_timing('True Objective Evaluations')
+        
+        # Use pool to evaluate points in parallel
+        new_vals = self.pool.run_map_objective(self.loglikelihood, new_pts)
+        new_vals = jnp.atleast_2d(new_vals).reshape(-1, 1)
+        
         self.results_manager.end_timing('True Objective Evaluations')
 
         best_new_idx = np.argmax(new_vals)
@@ -775,10 +573,134 @@ class BOBE:
         
         return False
 
-    def run(self, acqs: Union[str, Tuple[str]]):
+    def run(self, acqs: Union[str, Tuple[str]],
+            min_evals: int = 200,
+            max_evals: int = 1500,
+            max_gp_size: int = 1200,
+            logz_threshold: float = 0.01,
+            convergence_n_iters: int = 1,
+            ei_goal: float = 1e-10,
+            do_final_ns: bool = False,
+            fit_step: int = 10,
+            wipv_batch_size: int = 4,
+            ns_step: int = 10,
+            num_hmc_warmup: int = 512,
+            num_hmc_samples: int = 512,
+            mc_points_size: int = 64,
+            thinning: int = 4,
+            num_chains: int = 4,
+            mc_points_method: str = 'NUTS',
+            zeta_ei: float = 0.01):
+        """
+        Run the Bayesian Optimization loop.
+        
+        Parameters
+        ----------
+        acqs : str or tuple of str
+            Acquisition function(s) to use: 'WIPV', 'EI', 'LogEI', 'WIPStd'.
+        min_evals : int, optional
+            Minimum number of likelihood evaluations before checking convergence. Default is 200.
+        max_evals : int, optional
+            Maximum number of likelihood evaluations. Default is 1500.
+        max_gp_size : int, optional
+            Maximum number of points used to train the GP. Default is 1200.
+        logz_threshold : float, optional
+            Convergence threshold for log evidence change (WIPV/WIPStd). Default is 0.01.
+        convergence_n_iters : int, optional
+            Number of successive iterations meeting threshold for convergence. Default is 1.
+        ei_goal : float, optional
+            Goal value for EI/LogEI acquisition convergence. Default is 1e-10.
+        do_final_ns : bool, optional
+            Whether to run final nested sampling at convergence (WIPV/WIPStd). Default is False.
+        fit_step : int, optional
+            Fit GP every fit_step iterations. Default is 10.
+        wipv_batch_size : int, optional
+            Batch size for WIPV/WIPStd acquisition. Default is 4.
+        ns_step : int, optional
+            Run nested sampling every ns_step iterations. Default is 10.
+        num_hmc_warmup : int, optional
+            Number of HMC warmup steps. Default is 512.
+        num_hmc_samples : int, optional
+            Number of HMC samples to draw. Default is 512.
+        mc_points_size : int, optional
+            Number of MC points for WIPV acquisition. Default is 64.
+        thinning : int, optional
+            Thinning factor for MC samples. Default is 4.
+        num_chains : int, optional
+            Number of parallel HMC chains. Default is 4.
+        mc_points_method : str, optional
+            Method for generating MC points: 'NUTS', 'NS', or 'uniform'. Default is 'NUTS'.
+        zeta_ei : float, optional
+            Exploration parameter for EI acquisition. Default is 0.01.
+            
+        Returns
+        -------
+        dict
+            Results dictionary containing samples, GP, likelihood, and convergence information.
+        """
         # Workers don't run the optimization loop
         if not self.is_main:
             return None
+        
+        # Store convergence parameters
+        self.min_evals = min_evals
+        self.max_evals = max_evals
+        self.max_gp_size = max_gp_size
+        self.logz_threshold = logz_threshold
+        self.convergence_n_iters = convergence_n_iters
+        self.ei_goal_log = np.log(ei_goal)
+        self.do_final_ns = do_final_ns
+        
+        # Store run settings
+        self.fit_step = fit_step
+        self.ns_step = ns_step
+        self.wipv_batch_size = wipv_batch_size
+        self.num_hmc_warmup = num_hmc_warmup
+        self.num_hmc_samples = num_hmc_samples
+        self.mc_points_size = mc_points_size
+        self.hmc_thinning = thinning
+        self.hmc_num_chains = num_chains
+        self.mc_points_method = mc_points_method
+        self.zeta_ei = zeta_ei
+        
+        # Adjust wipv_batch_size for MPI load balancing
+        if self.pool.is_mpi:
+            n_processes = self.pool.size
+            original_batch = self.wipv_batch_size
+            if self.wipv_batch_size % n_processes != 0:
+                self.wipv_batch_size = (self.wipv_batch_size // n_processes) * n_processes
+                if self.wipv_batch_size < n_processes:
+                    self.wipv_batch_size = n_processes
+                log.info(f" Adjusted wipv_batch_size from {original_batch} to {self.wipv_batch_size} "
+                        f"(multiple of {n_processes} processes)")
+        
+        # Initialize convergence state
+        self.converged = False
+        self.prev_converged = False
+        self.convergence_counter = 0
+        self.min_delta_seen = np.inf
+        self.termination_reason = "Max evaluation budget reached"
+        
+        # Update results manager settings with all run parameters
+        self.results_manager.settings.update({
+            'min_evals': min_evals,
+            'max_evals': max_evals,
+            'max_gp_size': max_gp_size,
+            'logz_threshold': logz_threshold,
+            'convergence_n_iters': convergence_n_iters,
+            'ei_goal': ei_goal,
+            'do_final_ns': do_final_ns,
+            'fit_step': fit_step,
+            'wipv_batch_size': wipv_batch_size,
+            'ns_step': ns_step,
+            'num_hmc_warmup': num_hmc_warmup,
+            'num_hmc_samples': num_hmc_samples,
+            'mc_points_size': mc_points_size,
+            'thinning': thinning,
+            'num_chains': num_chains,
+            'mc_points_method': mc_points_method,
+            'zeta_ei': zeta_ei
+        })
         
         acqs_funcs_available = list(_acq_funcs.keys())
 
@@ -809,12 +731,13 @@ class BOBE:
         log.info(f" Final GP training set size: {self.gp.train_x.shape[0]}, max size: {self.max_gp_size}")
 
         self.finalise_results()
+        
+        # Close the pool and signal workers to exit
+        self.pool.close()
 
         return self.results_dict
 
-
-
-    def run_EI(self, ii = 0):
+    def run_EI(self, ii = 0, ):
         """
         Run the optimization loop for EI/LogEI acquisition functions.
         """
@@ -1007,7 +930,7 @@ class BOBE:
         if self.do_final_ns and not self.converged:
             
             self.results_manager.start_timing('GP Training')
-            self.distributed_gp_fit(self.gp, n_restarts=4, maxiters=500)
+            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
             self.results_manager.end_timing('GP Training')
 
             log.info(" Final Nested Sampling")
@@ -1157,7 +1080,7 @@ class BOBE:
         if self.do_final_ns and not self.converged:
             
             self.results_manager.start_timing('GP Training')
-            self.distributed_gp_fit(self.gp, n_restarts=4, maxiters=500)
+            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
             self.results_manager.end_timing('GP Training')
 
             log.info(" Final Nested Sampling")
@@ -1372,22 +1295,9 @@ class BOBE:
             "callable, string (Cobaya YAML path), dict (Cobaya info), or Likelihood instance"
         )
     
-    def _setup_worker(self, seed, optimizer, resume):
-        """Setup minimal attributes for worker processes."""
-        worker_seed = (seed + mpi.rank()) if seed is not None else None
-        set_global_seed(worker_seed)
-        self.np_rng = get_numpy_rng()
-        
-        # Minimal attributes for MPI participation
-        self.optimizer = optimizer
-        self.fresh_start = not resume
-        self.gp = None
     
     def _setup_main_process(self, seed, optimizer, save, save_dir, save_step,
-                           do_final_ns, logz_threshold, convergence_n_iters, ei_goal,
-                           n_cobaya_init, n_sobol_init, min_evals, max_evals, max_gp_size,
-                           fit_step, wipv_batch_size, ns_step, num_hmc_warmup, num_hmc_samples,
-                           mc_points_size, mc_points_method, acq, use_clf, clf_type,
+                           n_cobaya_init, n_sobol_init, acq, use_clf, clf_type,
                            clf_nsigma_threshold, minus_inf, resume):
         """Setup full attributes for main process."""
         set_global_seed(seed)
@@ -1402,23 +1312,13 @@ class BOBE:
             os.makedirs(self.save_dir, exist_ok=True)
         self.save_path = os.path.join(self.save_dir, self.output_file)
         
-        # Convergence and optimization settings
-        self.do_final_ns = do_final_ns
-        self.logz_threshold = logz_threshold
-        self.convergence_n_iters = convergence_n_iters
-        self.converged = False
-        self.prev_converged = False
-        self.convergence_counter = 0
-        self.min_delta_seen = np.inf
-        self.termination_reason = "Max evaluation budget reached"
-        self.ei_goal_log = np.log(ei_goal)
-        
         # Validate optimizer
         if optimizer.lower() not in ['optax', 'scipy']:
             raise ValueError("optimizer must be either 'optax' or 'scipy'")
         self.optimizer = optimizer
+        self.minus_inf = minus_inf
         
-        # Initialize results manager
+        # Initialize results manager (settings will be updated when run() is called)
         self.results_manager = BOBEResults(
             output_file=self.output_file,
             save_dir=self.save_dir,
@@ -1428,24 +1328,11 @@ class BOBE:
             settings={
                 'n_cobaya_init': n_cobaya_init,
                 'n_sobol_init': n_sobol_init,
-                'min_evals': min_evals,
-                'max_evals': max_evals,
-                'max_gp_size': max_gp_size,
-                'fit_step': fit_step,
-                'wipv_batch_size': wipv_batch_size,
-                'ns_step': ns_step,
-                'num_hmc_warmup': num_hmc_warmup,
-                'num_hmc_samples': num_hmc_samples,
-                'mc_points_size': mc_points_size,
-                'mc_points_method': mc_points_method,
                 'acq': acq,
                 'use_clf': use_clf,
                 'clf_type': clf_type,
                 'clf_nsigma_threshold': clf_nsigma_threshold,
-                'logz_threshold': logz_threshold,
-                'convergence_n_iters': convergence_n_iters,
                 'minus_inf': minus_inf,
-                'do_final_ns': do_final_ns,
                 'seed': seed
             },
             likelihood_name=self.loglikelihood.name,
@@ -1455,72 +1342,53 @@ class BOBE:
         self.fresh_start = not resume
     
     def _handle_resume(self, resume_file, use_clf):
-        """Handle resume from existing run."""
-        if self.is_main:
-            try:
-                log.info(f" Attempting to resume from file {resume_file}")
-                gp_file = resume_file + '_gp'
-                self.gp = load_gp_file(gp_file, use_clf)
+        """Handle resume from existing run (main process only)."""
+        try:
+            log.info(f" Attempting to resume from file {resume_file}")
+            gp_file = resume_file + '_gp'
+            self.gp = load_gp_file(gp_file, use_clf)
+            
+            # Test GP functionality
+            _ = self.gp.predict_mean_single(self.gp.train_x[0])
+            log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
+            
+            # Restore iteration and best point info
+            if self.results_manager.is_resuming():
+                self.start_iteration = self.results_manager.get_last_iteration()
+                log.info(f"Resuming from iteration {self.start_iteration}")
+                log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
                 
-                # Test GP functionality
-                _ = self.gp.predict_mean_single(self.gp.train_x[0])
-                log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
-                
-                # Restore iteration and best point info
-                if self.results_manager.is_resuming():
-                    self.start_iteration = self.results_manager.get_last_iteration()
-                    log.info(f"Resuming from iteration {self.start_iteration}")
-                    log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
-                    
-                    if self.results_manager.best_loglike_values:
-                        self.best_f = max(self.results_manager.best_loglike_values)
-                        best_idx = self.results_manager.best_loglike_values.index(self.best_f)
-                        self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_idx]
-                        log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
-                    else:
-                        self.start_iteration = 0
-                        self.best_pt_iteration = 0
-                    
-                    if self.results_manager.converged:
-                        self.prev_converged = True
-                        self.convergence_counter = 1
-                        log.info(" Previous run had converged.")
+                if self.results_manager.best_loglike_values:
+                    self.best_f = max(self.results_manager.best_loglike_values)
+                    best_idx = self.results_manager.best_loglike_values.index(self.best_f)
+                    self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_idx]
+                    log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
                 else:
                     self.start_iteration = 0
                     self.best_pt_iteration = 0
-                    log.info("Starting fresh optimization")
                 
-                gp_state = self.gp.state_dict()
-                resume_success = True
-                
-            except Exception as e:
-                log.error(f" Failed to load GP from file {gp_file}: {e}")
-                log.info(" Starting a fresh run instead.")
-                self.fresh_start = True
-                gp_state = None
-                resume_success = False
-        else:
-            gp_state = None
-            resume_success = None
-        
-        # Broadcast resume success and GP state to all processes
-        resume_success = mpi.share(resume_success, root=0)
-        
-        if resume_success:
-            gp_state = mpi.share(gp_state, root=0)
-            if not self.is_main:
-                self.gp = load_gp_statedict(gp_state, use_clf)
+                if self.results_manager.converged:
+                    self.prev_converged = True
+                    self.convergence_counter = 1
+                    log.info(" Previous run had converged.")
+            else:
+                self.start_iteration = 0
+                self.best_pt_iteration = 0
+                log.info("Starting fresh optimization")
+            
             self.fresh_start = False
-        else:
+            
+        except Exception as e:
+            log.error(f" Failed to load GP from file {gp_file}: {e}")
+            log.info(" Starting a fresh run instead.")
             self.fresh_start = True
     
     def _handle_fresh_start(self, n_cobaya_init, n_sobol_init, init_train_x, init_train_y,
                            use_clf, clf_type, clf_use_size, clf_update_step,
                            clf_nsigma_threshold, minus_inf, optimizer, gp_kwargs):
-        """Handle fresh start initialization."""
-        if self.is_main:
-            self.start_iteration = 0
-            self.best_pt_iteration = 0
+        """Handle fresh start initialization (main process only)."""
+        self.start_iteration = 0
+        self.best_pt_iteration = 0
         
         # Generate and evaluate initial training points
         train_x, train_y = self._get_initial_training_data(
@@ -1544,9 +1412,7 @@ class BOBE:
             gp_kwargs=gp_kwargs
         )
     
-    def _finalize_main_initialization(self, min_evals, max_evals, max_gp_size, fit_step, ns_step,
-                                     wipv_batch_size, num_hmc_warmup, num_hmc_samples, thinning,
-                                     num_chains, mc_points_size, minus_inf, mc_points_method, zeta_ei):
+    def _finalize_main_initialization(self):
         """Finalize main process initialization."""
         # Extract best point from GP
         if self.gp.train_y.size > 0:
@@ -1566,33 +1432,6 @@ class BOBE:
         if self.best_pt is not None:
             self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
             log.info(f" Initial best point {self.best} with value = {self.best_f:.6f}")
-        
-        # Store optimization settings
-        self.min_evals = min_evals
-        self.max_evals = max_evals
-        self.max_gp_size = max_gp_size
-        self.fit_step = fit_step
-        self.ns_step = ns_step
-        self.wipv_batch_size = wipv_batch_size
-        self.num_hmc_warmup = num_hmc_warmup
-        self.num_hmc_samples = num_hmc_samples
-        self.hmc_thinning = thinning
-        self.hmc_num_chains = num_chains
-        self.mc_points_size = mc_points_size
-        self.minus_inf = minus_inf
-        self.mc_points_method = mc_points_method
-        self.zeta_ei = zeta_ei
-        
-        # Adjust wipv_batch_size for MPI load balancing
-        if mpi.more_than_one_process():
-            n_processes = mpi.size()
-            original_batch = self.wipv_batch_size
-            if self.wipv_batch_size % n_processes != 0:
-                self.wipv_batch_size = (self.wipv_batch_size // n_processes) * n_processes
-                if self.wipv_batch_size < n_processes:
-                    self.wipv_batch_size = n_processes
-                log.info(f" Adjusted wipv_batch_size from {original_batch} to {self.wipv_batch_size} "
-                        f"(multiple of {n_processes} processes)")
         
         # Save initial GP
         self.gp.save(filename=f"{self.save_path}_gp")

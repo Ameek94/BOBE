@@ -6,7 +6,6 @@ from scipy.stats import qmc
 
 from .utils.core import scale_to_unit, scale_from_unit
 from .utils.log import get_logger
-from . import mpi
 
 log = get_logger("likelihood")
 
@@ -61,17 +60,20 @@ class Likelihood:
             self.param_bounds = np.array(self.ndim * [[0, 1]]).T
             log.warning("No param_bounds provided. Assuming unit cube [0,1] for all parameters.")
         else:
-            self.param_bounds = np.array(param_bounds)
+            # validate param_bounds shape
+            param_bounds = np.array(param_bounds)
+            if param_bounds.shape != (2, self.ndim):
+                raise ValueError(f"param_bounds must have shape (2, {self.ndim}), but got {param_bounds.shape}.")
+            self.param_bounds = param_bounds
+        
         self.name = name or "loglikelihood"
         self.minus_inf = minus_inf
         self.logprior_vol = np.log(np.prod(self.param_bounds[1] - self.param_bounds[0]))
 
         log.info(f"Initialized {self.name} with {self.ndim} params")
-
-        if mpi.is_main_process():
-            log.info(f"Param list: {self.param_list}")
-            log.info(f"Param lower bounds: {self.param_bounds[0]}")
-            log.info(f"Param upper bounds: {self.param_bounds[1]}")
+        log.info(f"Param list: {self.param_list}")
+        log.info(f"Param lower bounds: {self.param_bounds[0]}")
+        log.info(f"Param upper bounds: {self.param_bounds[1]}")
 
     def _safe_eval(self, x: np.ndarray) -> float:
         """
@@ -101,7 +103,7 @@ class Likelihood:
         """
         Evaluate the likelihood function at a single point.
         
-        This method is designed to be called by mpi.map_parallel, which
+        This method is designed to be called by pool.run_map_objective, which
         handles distributing tasks across MPI processes in parallel mode
         or iterating in serial mode.
         
@@ -120,7 +122,7 @@ class Likelihood:
             if X.shape[0] != 1:
                 raise ValueError(
                     "__call__ expects a single point. "
-                    "Use mpi.map_parallel for batch evaluations."
+                    "Use pool.run_map_objective for batch evaluations."
                 )
             X = X.flatten()
         
@@ -223,36 +225,3 @@ class CobayaLikelihood(Likelihood):
         logpost = lp + self.logprior_vol
         
         return (pt, logpost)
-
-    def generate_cobaya_points(self, n_points, rng=None) -> List[Tuple]:
-        """
-        Generate points from Cobaya reference prior.
-        
-        Parameters
-        ----------
-        n_points : int
-            Number of points to generate.
-        rng : np.random.Generator, optional
-            Random number generator.
-            
-        Returns
-        -------
-        results : List[Tuple]
-            List of (point, logpost) tuples.
-        """
-        if n_points <= 0:
-            return []
-        
-        if rng is None:
-            rng = np.random.default_rng()
-            
-        if mpi.more_than_one_process():
-            log.info(f"Generating {n_points} Cobaya points in parallel...")
-            # Create task list with RNG seeds for each task
-            tasks = [None] * n_points
-            results = mpi.map_parallel(lambda _: self._get_single_valid_point(rng=rng), tasks)
-            return results if mpi.is_main_process() else []
-        else:
-            log.info(f"Generating {n_points} Cobaya points in serial...")
-            return [self._get_single_valid_point(rng=rng) for _ in range(n_points)]
-

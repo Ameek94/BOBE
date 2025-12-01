@@ -29,16 +29,20 @@ def my_likelihood(params):
     # Your expensive computation here
     return -np.sum(params**2)  # Example: simple quadratic
 
-# Run Bayesian Optimization for Bayesian Evidence
+# Initialize BOBE with setup parameters
 bobe = BOBE(
     loglikelihood=my_likelihood,
     param_list=['x', 'y', 'z'],
     param_bounds=np.array([[0, 1], [-5, 5], [0, 10]]).T,
-    min_evals=100,
-    max_evals=500,
     save_dir='./results',
 )
-results = bobe.run(['wipv'])
+
+# Run optimization with convergence and run settings
+results = bobe.run(
+    acqs='wipv',
+    min_evals=100,
+    max_evals=500,
+)
 
 # Access the evidence and posterior samples
 print(f"Log Evidence: {results['logz']['mean']}")
@@ -138,16 +142,20 @@ For cosmological likelihoods, simply pass the Cobaya YAML file path:
 ```python
 from jaxbo import BOBE
 
-# Pass Cobaya YAML file directly - CobayaLikelihood created internally
+# Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
 bobe = BOBE(
     loglikelihood='path/to/cobaya_input.yaml',
     likelihood_name='planck_lcdm',
     confidence_for_unbounded=0.9999995,
-    min_evals=200,
-    max_evals=1000,
     save_dir='./results'
 )
-results = bobe.run(['wipv'])
+
+# Run with optimization settings
+results = bobe.run(
+    acqs='wipv',
+    min_evals=200,
+    max_evals=1000,
+)
 ```
 
 <!-- **Example with MPI:**

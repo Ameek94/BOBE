@@ -47,9 +47,19 @@ def main():
         verbosity='INFO',
         n_cobaya_init=4,
         n_sobol_init=16,
+        use_clf=False,
+        minus_inf=-1e5,
+        seed=42,
+    )
+    
+    # Run optimization with convergence and run settings
+    results = bobe.run(
+        acqs='wipv',
         min_evals=25,
         max_evals=250,
         max_gp_size=250,
+        logz_threshold=0.001,
+        do_final_ns=True,
         fit_step=4,
         wipv_batch_size=2,
         ns_step=4,
@@ -57,15 +67,7 @@ def main():
         num_hmc_samples=2048,
         mc_points_size=256,
         num_chains=4,
-        gp_kwargs=gp_kwargs,
-        use_clf=False,
-        minus_inf=-1e5,
-        logz_threshold=0.001,
-        seed=42,
-        do_final_ns=True,
     )
-    
-    results = bobe.run(['wipv'])
 
     end = time.time()
 

@@ -49,42 +49,31 @@ def main():
         verbosity='INFO',
         n_cobaya_init=32,
         n_sobol_init=64,
+        optimizer='optax',
+        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None,
+                   'lengthscale_bounds': [1e-2,5.]},
+        use_clf=True,
+        clf_type=clf_type,
+        minus_inf=-1e5,
+    )
+    
+    results = bobe.run(
+        acqs='wipv',
         min_evals=800,
         max_evals=2500,
         max_gp_size=1500,
-        acq=['wipv'],
         convergence_n_iters=2,
-
-        # Step settings
         fit_step=5,
         wipv_batch_size=5,
         ns_step=5,
-        optimizer='optax',
-        
-        # Acquisition function settings
         zeta_ei=0.1,
-        
-        # HMC/MC settings
         num_hmc_warmup=512,
         num_hmc_samples=12000,
         mc_points_size=512,
         num_chains=num_devices,
-        
-        # GP settings
-        gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None,
-                   'lengthscale_bounds': [1e-2,5.]},
-        
-        # Classifier settings
-        use_clf=True,
-        clf_type=clf_type,
-        
-        # Convergence and other settings
-        minus_inf=-1e5,
         logz_threshold=0.01,
-        do_final_ns=True, 
+        do_final_ns=True,
     )
-    
-    results = bobe.run(['wipv'])
 
     end = time.time()
         clf_type=clf_type,

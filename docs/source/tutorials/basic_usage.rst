@@ -139,7 +139,7 @@ Now let's set up the BOBE configuration and run the optimization. We'll use a sm
 
    start_time = time.time()
 
-   # Run BOBE optimization
+   # Initialize BOBE with setup parameters
    bobe = BOBE(
        loglikelihood=loglike,
        param_list=param_list,
@@ -150,6 +150,15 @@ Now let's set up the BOBE configuration and run the optimization. We'll use a sm
        
        # Initialization
        n_sobol_init=4,       # Initial Sobol sequence points
+       minus_inf=-1e5,
+       
+       # Reproducibility
+       seed=42,
+   )
+   
+   # Run optimization with convergence and run settings
+   results = bobe.run(
+       acqs='wipv',
        
        # Budget control
        min_evals=20,         # Minimum evaluations before starting to check convergence
@@ -168,13 +177,7 @@ Now let's set up the BOBE configuration and run the optimization. We'll use a sm
        
        # Convergence
        logz_threshold=0.001, # Evidence convergence threshold
-       minus_inf=-1e5,
-       
-       # Reproducibility
-       seed=42,
    )
-   
-   results = bobe.run(['wipv'])
 
    end_time = time.time()
    total_time = end_time - start_time

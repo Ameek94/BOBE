@@ -18,17 +18,20 @@ Here's a minimal example using a test function:
        x, y = X[0], X[1]
        return -0.5 * (x**2 + y**2)
    
-   # Initialize the BOBE sampler providing your likelihood function and parameter bounds in shape (2, ndim), number of initial Sobol points, evaluation budget and random seed.
+   # Initialize BOBE with setup parameters
    bobe = BOBE(
        loglikelihood=my_likelihood,
        param_bounds=np.array([[-3, 3], [-3, 3]]).T,
        likelihood_name='test',
        n_sobol_init=4,
-       max_evals=100,
        seed=42,
    )
-   #
-   results = bobe.run(['wipv'])
+   
+   # Run optimization with convergence and run settings
+   results = bobe.run(
+       acqs='wipv',
+       max_evals=100,
+   )
    
    # Get results
    print(f"Log Evidence: {results['logz']['mean']:.2f}")
@@ -47,14 +50,18 @@ For Cobaya cosmological likelihoods, simply pass the YAML file path:
 
    from jaxbo import BOBE
    
-   # Pass Cobaya YAML directly - CobayaLikelihood created internally
+   # Initialize BOBE with Cobaya YAML - CobayaLikelihood created internally
    bobe = BOBE(
        loglikelihood='planck_lcdm.yaml',
        likelihood_name='planck_lcdm',
        confidence_for_unbounded=0.9999995,
+   )
+   
+   # Run with optimization settings
+   results = bobe.run(
+       acqs='wipv',
        max_evals=1000,
    )
-   results = bobe.run(['wipv'])
    print(f"Log Evidence: {results['logz']['mean']:.2f}")
 
 **Expected Output:**
@@ -66,10 +73,21 @@ to handle non-trivial likelihood surfaces.
 Understanding the Parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Key parameters to tune:
+Key parameters are split between initialization (``__init__``) and execution (``run()``):
 
+**Initialization parameters** (passed to ``BOBE()``):
+
+- ``loglikelihood``: Your likelihood function or Cobaya YAML file path
+- ``param_bounds``: Parameter bounds as array of shape (2, ndim)
 - ``n_sobol_init``: Number of initial space-filling points (more for higher dimensions)
-- ``min_evals``, ``max_evals``: Budget for likelihood evaluations
-- ``mc_points_method``: 'NUTS' for good exploration, 'uniform' for simpler problems
+- ``n_cobaya_init``: Number of initial points from Cobaya reference distribution
 - ``use_clf``: Enable classifier for high-dimensional or expensive likelihoods
-- ``acq``: Acquisition function - 'wipv' (recommended), 'ei', or 'logei'
+- ``gp_kwargs``: GP configuration (kernel, priors, bounds)
+
+**Execution parameters** (passed to ``run()``):
+
+- ``acqs``: Acquisition function - 'wipv' (recommended), 'ei', or 'logei'
+- ``min_evals``, ``max_evals``: Budget for likelihood evaluations
+- ``mc_points_method``: 'NS' (nested sampling) or 'HMC' for GP posterior sampling
+- ``fit_step``: How often to refit GP hyperparameters
+- ``logz_threshold``: Convergence threshold for log-evidence
