@@ -842,12 +842,6 @@ class BOBESummaryPlotter:
             f"Likelihood: {self.results.likelihood_name}"
         ]
         
-        # # Sample statistics
-        # if self.results.final_samples is not None:
-        #     n_samples = len(self.results.final_samples)
-        #     n_eff = int(np.sum(self.results.final_weights)**2 / np.sum(self.results.final_weights**2)) if len(self.results.final_weights) > 0 else n_samples
-        #     stats_lines.extend([f"Final samples: {n_samples}", f"Effective samples: {n_eff}"])
-
         # GP size (number of training points)
         gp_size = self.results.gp_info.get("gp_training_set_size", "N/A")
         stats_lines.append(f"GP size: {gp_size}")
@@ -886,13 +880,7 @@ class BOBESummaryPlotter:
         if total_runtime > 0:
             runtime_str = f"{total_runtime/3600:.2f} hours" if total_runtime > 3600 else f"{total_runtime:.1f} seconds"
             stats_lines.append(f"Runtime: {runtime_str}")
-            
-            # # If this was a resumed run, show additional info
-            # if timing_summary.get('previous_runtime', 0) > 0:
-            #     prev_runtime = timing_summary['previous_runtime']
-            #     current_runtime = timing_summary['current_session_runtime']
-            #     stats_lines.append(f"  (Previous: {prev_runtime:.1f}s, Current: {current_runtime:.1f}s)")
-        
+                    
         stats_lines.extend([
             f"Converged: {'Yes' if self.results.converged else 'No'}",
             f"Termination: {self.results.termination_reason}"

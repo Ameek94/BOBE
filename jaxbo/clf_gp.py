@@ -122,7 +122,7 @@ class GPwithClassifier(GP):
              if train_clf_on_init:
                  self.train_classifier()
         else:
-             log.info(f"Not enough data ({self.clf_data_size}) to use classifier (need {self.clf_use_size} points), or classifier type not set.")
+             log.debug(f"Not enough data ({self.clf_data_size}) to use classifier (need {self.clf_use_size} points), or classifier type not set.")
 
     def train_classifier(self):
         """Public method to train/retrain the classifier."""
@@ -151,7 +151,7 @@ class GPwithClassifier(GP):
         # Add method to handle if only class is present
         if np.all(labels == labels[0]):
             # If all labels are the same, we make sure not to use the classifier
-            log.info("All labels are identical. Not using classifier for the moment")
+            log.debug("All labels are identical. Not using classifier for the moment")
             self.use_clf = False
             return 
 
@@ -167,8 +167,8 @@ class GPwithClassifier(GP):
             init_params=self.clf_params, **kwargs
         )
 
-        log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
-        log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
+        log.debug(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
+        log.debug(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
 
     def predict_mean_single(self,x):
         gp_mean = super().predict_mean_single(x)
@@ -224,7 +224,7 @@ class GPwithClassifier(GP):
         new_vals_to_add = []
         for i in range(new_x.shape[0]):
             if jnp.any(jnp.all(jnp.isclose(self.train_x_clf, new_x[i], atol=1e-6,rtol=1e-4), axis=1)):
-                log.info(f"Point {new_x[i]} already exists in the training set, not updating")
+                log.debug(f"Point {new_x[i]} already exists in the training set, not updating")
             else:
                 new_pts_to_add.append(new_x[i])
                 new_vals_to_add.append(new_y[i])
@@ -243,7 +243,7 @@ class GPwithClassifier(GP):
             self.train_y = (self.train_y - self.y_mean) / self.y_std
             self.recompute_cholesky()
 
-            log.info(f"Classifier data size: {self.train_y_clf.shape[0]},  GP data size: {self.train_y.shape[0]}")
+            log.debug(f"Classifier data size: {self.train_y_clf.shape[0]},  GP data size: {self.train_y.shape[0]}")
 
     def kernel(self,x1,x2,lengthscales,kernel_variance,noise,include_noise=True):
         """

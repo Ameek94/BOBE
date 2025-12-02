@@ -742,17 +742,19 @@ class BOBEResults:
             }
         
         # Overall statistics
+        logz = self.final_logz_dict.get('mean', np.nan)
+        logz_lower = self.final_logz_dict.get('lower', np.nan)
+        logz_upper = self.final_logz_dict.get('upper', np.nan)
+        logz_delta = (logz_upper - logz_lower)/2
         stats = {
             "evidence": {
-                "logz": float(self.final_logz_dict.get('mean', np.nan)),
-                "logz_err": float(self.final_logz_dict.get('std', self.final_logz_dict.get('upper', 0) - self.final_logz_dict.get('lower', 0))),
-                "logz_lower": float(self.final_logz_dict.get('lower', np.nan)),
-                "logz_upper": float(self.final_logz_dict.get('upper', np.nan)),
+                "logz": float(logz),
+                "logz_err": float(logz_delta),
+                "logz_lower": float(logz_lower),
+                "logz_upper": float(logz_upper),
                 "dlogz_sampler": float(self.final_logz_dict.get('dlogz_sampler', np.nan))
             },
             "diagnostics": {
-                "n_samples": int(len(self.final_samples)),
-                "n_effective": int(np.sum(self.final_weights)**2 / np.sum(self.final_weights**2)) if len(self.final_weights) > 0 else 0,
                 "runtime_hours": float((self.end_time - self.start_time) / 3600) if self.end_time else 0,
                 "converged": bool(self.converged),
                 "termination_reason": str(self.termination_reason)

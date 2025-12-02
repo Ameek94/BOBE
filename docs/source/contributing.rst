@@ -19,7 +19,7 @@ Development Setup
 
 .. code-block:: bash
 
-   conda create -n jaxbo-dev python=3.10
+   conda create -n jaxbo-dev python=3.12
    conda activate jaxbo-dev
    
    # Install in development mode

@@ -111,7 +111,7 @@ def optimize_optax(
     optimizer_name = optimizer_options.pop("name", "adam")
     optimizer = _get_optimizer(optimizer_name, lr, optimizer_options)
 
-    log.info(f"Starting optax optimization with {optimizer_name}, restarts: {n_restarts}, maxiter: {maxiter}")
+    log.debug(f"Starting optax optimization with {optimizer_name}, restarts: {n_restarts}, maxiter: {maxiter}")
 
     @jax.jit
     def step(params, opt_state):
@@ -205,7 +205,7 @@ def optimize_optax_vmap(
     optimizer_name = optimizer_options.pop("name", "adam")
     optimizer = _get_optimizer(optimizer_name, lr, optimizer_options)
 
-    log.info(f"Starting vectorized optax optimization with {optimizer_name}, restarts: {n_restarts}, maxiter: {maxiter}")
+    log.debug(f"Starting vectorized optax optimization with {optimizer_name}, restarts: {n_restarts}, maxiter: {maxiter}")
 
     def step(params, opt_state):
         val, grad = jax.value_and_grad(scaled_func)(params)
@@ -293,8 +293,7 @@ def optimize_scipy(
 
     method = optimizer_options.pop("method", "L-BFGS-B")
 
-    log.info(f"Starting scipy optimization with method: {method}, restarts: {n_restarts}, maxiter: {maxiter}")
-
+    log.debug(f"Starting scipy optimization with method: {method}, restarts: {n_restarts}, maxiter: {maxiter}")
 
     bounds_arr = _setup_bounds(bounds, num_params)
     log.debug(f"Function bounds: {bounds_arr}")

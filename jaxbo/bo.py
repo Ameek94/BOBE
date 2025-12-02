@@ -75,7 +75,7 @@ class BOBE:
                  confidence_for_unbounded=0.9999995,
                  gp_kwargs: Dict[str, Any] = {},
                  n_cobaya_init=4,
-                 n_sobol_init=32,
+                 n_sobol_init=16,
                  init_train_x=None,
                  init_train_y=None,
                  resume=False,
@@ -158,7 +158,7 @@ class BOBE:
         clf_update_step : int, optional
             Update classifier every clf_update_step iterations. Default is 1.
         minus_inf : float, optional
-            Value representing negative infinity for failed evaluations. Default is -1e5.
+            Value representing negative infinity for failed evaluations. Default is -1e10.
         seed : int, optional
             Random seed for reproducibility. Default is None.
         verbosity : str, optional
@@ -181,6 +181,7 @@ class BOBE:
         # Initialize MPI pool
         self.pool = MPI_Pool()
         self.is_main = self.pool.is_main_process
+        self.is_mpi = self.pool.is_mpi
         
         # Convert to Likelihood instance and store for all processes
         self.loglikelihood = self._prepare_likelihood(
@@ -660,6 +661,7 @@ class BOBE:
             return None, None
         
         self.results_manager.start_timing('Acquisition Optimization')
+        log.info(f"Optimizing acquisition function '{self.acquisition.name}' to get next {n_batch} points")
         new_pts_u, acq_vals = self.acquisition.get_next_batch(
             gp=self.gp,
             n_batch=n_batch,
@@ -719,11 +721,12 @@ class BOBE:
             self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt.flatten())}
             self.best_pt_iteration = step
 
+        log.info(f"Evaluated objective at {len(new_pts)} new points")
         for k, new_pt in enumerate(new_pts):
             new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pt.flatten())}
-            log.info(f" New point {new_pt_vals}, {k+1}/{len(new_pts)}")
+            log.debug(f" New point {new_pt_vals}, {k+1}/{len(new_pts)}")
             predicted_val = self.gp.predict_mean_single(new_pts_u[k])
-            log.info(f" Objective function value = {new_vals[k].item():.4f}, GP predicted value = {predicted_val.item():.4f}")
+            log.debug(f" Objective function value = {new_vals[k].item():.4f}, GP predicted value = {predicted_val.item():.4f}")
 
         return new_vals
 
@@ -791,12 +794,16 @@ class BOBE:
             gp_info=gp_info
         )
 
-        self.results_dict['gp'] = self.gp
-        self.results_dict['likelihood'] = self.loglikelihood
-        self.results_dict['samples'] = self.samples_dict
-
-        # Add results manager info
-        self.results_dict['results_manager'] = self.results_manager
+        # Create final results dictionary with only the specified keys
+        self.results_dict = {
+            'gp': self.gp,
+            'likelihood': self.loglikelihood,
+            'results': self.results_manager,
+            'best_val': self.best_f,
+            'best_pt': self.best_pt,
+            'logz': logz_dict,
+            'termination_reason': self.termination_reason
+        }
 
     def check_convergence_ei(self, step, acq_val):
         """
@@ -829,7 +836,7 @@ class BOBE:
             self.convergence_counter = 0  # Reset counter if not converged
             return False
 
-    def check_convergence_WIPV(self, step, logz_dict, equal_samples, equal_logl, verbose=True):
+    def check_convergence_logz(self, step, logz_dict, equal_samples, equal_logl, verbose=True):
         """
         Check if the nested sampling has converged and compute KL divergence metrics.
         
@@ -846,7 +853,7 @@ class BOBE:
             return False
         
         # Standard logz convergence check
-        delta =  logz_dict['std']
+        delta = (logz_dict['upper'] - logz_dict['lower'])/2 #logz_dict['std']
         converged = delta < self.logz_threshold
         
         # Compute KL divergences if we have nested sampling samples
@@ -882,11 +889,10 @@ class BOBE:
             threshold=self.logz_threshold
         )
         
-
         log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
         
         # Check if this is the smallest delta seen so far and save checkpoint, also ensure delta is reasonably good
-        if (delta < self.min_delta_seen) and (delta < 0.5):
+        if (delta < self.min_delta_seen) and (delta < 1.0):
             self.min_delta_seen = delta
 
             # Create checkpoint filename with suffix
@@ -920,7 +926,7 @@ class BOBE:
     # MAIN RUN METHODS
     # ============================================================================
 
-    def run(self, acqs: Union[str, Tuple[str]],
+    def run(self, acq: Union[str, Tuple[str]] = 'wipstd',
             min_evals: int = 200,
             max_evals: int = 1500,
             max_gp_size: int = 1200,
@@ -943,7 +949,7 @@ class BOBE:
         
         Parameters
         ----------
-        acqs : str or tuple of str
+        acq : str or tuple of str
             Acquisition function(s) to use: 'WIPV', 'EI', 'LogEI', 'WIPStd'.
         min_evals : int, optional
             Minimum number of likelihood evaluations before checking convergence. Default is 200.
@@ -983,7 +989,7 @@ class BOBE:
         Returns
         -------
         dict
-            Results dictionary containing samples, GP, likelihood, and convergence information.
+            Results dictionary containing samples, GP, likelihood, and convergence information. Keys include:
         """
         # Workers don't run the optimization loop
         if not self.is_main:
@@ -1011,7 +1017,7 @@ class BOBE:
         self.zeta_ei = zeta_ei
         
         # Adjust wipv_batch_size for MPI load balancing
-        if self.pool.is_mpi:
+        if self.is_mpi:
             n_processes = self.pool.size
             original_batch = self.wipv_batch_size
             if self.wipv_batch_size % n_processes != 0:
@@ -1054,8 +1060,8 @@ class BOBE:
         self.samples_dict = {}
         self.results_dict = {}
 
-        if isinstance(acqs, str):
-            acqs = (acqs,)
+        if isinstance(acq, str):
+            acqs = [acq]
 
         self.current_iteration = self.start_iteration
 
@@ -1100,7 +1106,6 @@ class BOBE:
             verbose = True
 
             if verbose:
-                log.debug("\n")
                 log.info(f" Iteration {ii} of {self.acquisition.name}, objective evals {current_evals}/{self.max_evals}")
 
             acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten()) if self.gp.train_y.size > 0 else 0.}
@@ -1133,8 +1138,6 @@ class BOBE:
             max_evals_or_gpsize_reached = self.check_max_evals_and_gpsize(current_evals)
             if max_evals_or_gpsize_reached:
                 break
-
-
 
         # End EI
         self.current_iteration = ii
@@ -1178,7 +1181,7 @@ class BOBE:
             verbose = True
 
             if verbose:
-                log.info(f"\nIteration {ii} of {acq_name}, objective evals {current_evals}/{self.max_evals}, ns={ns_flag}")
+                log.info(f"Iteration {ii} of {acq_name}, objective evals {current_evals}/{self.max_evals}, ns={ns_flag}")
 
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
@@ -1212,7 +1215,7 @@ class BOBE:
                         'method': 'NS',
                         'best': ns_samples['best']
                     }
-                    self.converged = self.check_convergence_WIPV(ii, logz_dict, equal_samples, equal_logl)
+                    self.converged = self.check_convergence_logz(ii, logz_dict, equal_samples, equal_logl)
                     if self.converged:
                         self.termination_reason = "LogZ converged"
                         self.results_dict['logz'] = logz_dict
@@ -1267,7 +1270,7 @@ class BOBE:
             if ns_success:
                 equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
                 log.info(f"Using nested sampling results")
-                self.check_convergence_WIPV(ii+1, logz_dict, equal_samples, equal_logl)
+                self.check_convergence_logz(ii+1, logz_dict, equal_samples, equal_logl)
                 if self.converged:
                     self.termination_reason = "LogZ converged"
                     self.results_dict['logz'] = logz_dict
