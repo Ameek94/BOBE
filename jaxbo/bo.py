@@ -353,7 +353,21 @@ class BOBE:
                 if self.results_manager.converged:
                     self.prev_converged = True
                     self.convergence_counter = 1
-                    log.info(" Previous run had converged.")
+                    # Store last convergence info for threshold comparison
+                    if self.results_manager.convergence_history:
+                        last_conv = self.results_manager.convergence_history[-1]
+                        self.prev_convergence_delta = last_conv.delta
+                        self.prev_convergence_threshold = last_conv.threshold
+                        log.info(f" Previous run had converged with delta={self.prev_convergence_delta:.6f}, threshold={self.prev_convergence_threshold:.6f}")
+                    else:
+                        self.prev_convergence_delta = None
+                        self.prev_convergence_threshold = None
+                        log.info(" Previous run had converged.")
+                else:
+                    # Not converged in previous run
+                    self.prev_converged = False
+                    self.prev_convergence_delta = None
+                    self.prev_convergence_threshold = None
             else:
                 self.start_iteration = 0
                 self.best_pt_iteration = 0
@@ -372,6 +386,9 @@ class BOBE:
         """Handle fresh start initialization (main process only)."""
         self.start_iteration = 0
         self.best_pt_iteration = 0
+        self.prev_converged = False
+        self.prev_convergence_delta = None
+        self.prev_convergence_threshold = None
         
         # Generate and evaluate initial training points
         train_x, train_y = self._get_initial_training_data(
@@ -806,7 +823,7 @@ class BOBE:
         self.results_dict = {
             'gp': self.gp,
             'likelihood': self.loglikelihood,
-            'results': self.results_manager,
+            'results_manager': self.results_manager,
             'best_val': self.best_f,
             'best_pt': self.best_pt,
             'logz': logz_dict,
@@ -1012,6 +1029,45 @@ class BOBE:
         self.max_evals = max_evals
         self.max_gp_size = max_gp_size
         self.logz_threshold = logz_threshold
+        
+        # Initialize result containers
+        self.samples_dict = {}
+        self.results_dict = {}
+        
+        # Check if already converged with new threshold when resuming
+        if self.prev_converged and self.prev_convergence_delta is not None:
+            if self.prev_convergence_delta < logz_threshold:
+                log.info(f"Previous run already converged with delta={self.prev_convergence_delta:.6f} < new threshold={logz_threshold:.6f}")
+                log.info("Skipping BO loop and proceeding to finalization")
+                self.converged = True
+                self.termination_reason = "Already converged in previous run"
+                
+                # Restore samples and logz from previous run
+                if self.results_manager.convergence_history:
+                    last_conv = self.results_manager.convergence_history[-1]
+                    self.results_dict['logz'] = last_conv.logz_dict.copy()
+                
+                # Restore samples from results_manager if available
+                if self.results_manager.final_samples is not None and len(self.results_manager.final_samples) > 0:
+                    self.samples_dict = {
+                        'x': self.results_manager.final_samples,
+                        'weights': self.results_manager.final_weights,
+                        'logl': self.results_manager.final_loglikes
+                    }
+                    log.info(f"Restored {len(self.samples_dict['x'])} samples from previous run")
+                else:
+                    self.samples_dict = {}
+                    log.warning("No samples found in previous run")
+                
+                self.finalise_results()
+                self.pool.close()
+                return self.results_dict
+            else:
+                log.info(f"Previous run converged with delta={self.prev_convergence_delta:.6f} >= new threshold={logz_threshold:.6f}")
+                log.info("Continuing optimization to meet new convergence threshold")
+                self.converged = False
+                self.convergence_counter = 0
+        
         self.convergence_n_iters = convergence_n_iters
         self.ei_goal_log = np.log(ei_goal)
         self.do_final_ns = do_final_ns
@@ -1222,8 +1278,8 @@ class BOBE:
 
                 log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
 
-                if logz_dict['std'] < 0.5:
-                    self.ns_samples = ns_samples
+                # if logz_dict['std'] < 0.5: # only accept if uncertainty from method 2 is also reasonable
+                self.ns_samples = ns_samples
                 if ns_success:
                     equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
                     self.mc_samples = {

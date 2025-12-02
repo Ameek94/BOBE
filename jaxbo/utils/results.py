@@ -858,6 +858,10 @@ class BOBEResults:
             # Determine sampler method
             sampler_method = 'nested' if self.final_logz_dict else 'mcmc'
 
+        # Check if samples array is empty
+        if len(samples) == 0:
+            log.warning("Samples array is empty, cannot create MCSamples object")
+            return None
 
         # Parameter ranges for GetDist
         # param_bounds is shape (2, nparams)
