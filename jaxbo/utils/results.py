@@ -581,7 +581,7 @@ class BOBEResults:
             'samples': self.final_samples,
             'weights': self.final_weights,
             'logl': self.final_loglikes,
-            'logwt': np.log(self.final_weights) if len(self.final_weights) > 0 else np.array([]),
+            'logwt': np.log(self.final_weights+1e-300) if len(self.final_weights) > 0 else np.array([]),
             
             # === EVIDENCE INFORMATION ===
             'logz': self.final_logz_dict.get('mean', np.nan),

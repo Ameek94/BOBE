@@ -606,6 +606,7 @@ class BOBE:
         Update the GP with new points and values, and track hyperparameters.
         
         Uses pool for parallel GP fitting when refitting is needed.
+        Refits based on number of points added since last fit.
         """
         # Only main process updates GP
         if not self.is_main:
@@ -613,31 +614,38 @@ class BOBE:
         
         self.results_manager.start_timing('GP Training')
         
-        # Determine refit parameters based on training set size
-        refit = (step % self.fit_step == 0)
+        # Count how many points are being added
+        n_new_points = new_pts_u.shape[0]
+        self.n_points_since_last_fit += n_new_points
+        
+        # Determine refit parameters based on training set size and points added
         if self.gp.train_x.shape[0] < 200:
-            # Override refit for small training sets to do more frequent fitting
-            override_fit_step = min(2, self.fit_step)
-            refit = (step % override_fit_step == 0)
+            # For small training sets, refit more frequently
+            refit_threshold = min(2, self.fit_n_points)
             maxiter = 1000
             n_restarts = 8
-        elif 200 < self.gp.train_x.shape[0] < 800:
-            # for moderate size training sets
+        elif 200 < self.gp.train_x.shape[0] < 750:
+            # For moderate size training sets
+            refit_threshold = self.fit_n_points
             n_restarts = 4
             maxiter = 500
         else:
-            # for large training sets we don't need to do too many restarts or frequent fitting
+            # For large training sets, refit less frequently
+            refit_threshold = max(40, self.fit_n_points)
             n_restarts = 4
             maxiter = 200
-            override_fit_step = max(10, self.fit_step)
-            refit = (step % override_fit_step == 0)
+        
+        refit = (self.n_points_since_last_fit >= refit_threshold)
         
         # Update GP with new data
         self.gp.update(new_pts_u, new_vals)
         
         # Use pool for parallel GP fitting if refitting
         if refit:
+            log.info(f" Refitting GP hyperparameters with {self.gp.train_x.shape[0]} training points ")
             self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter, rng=self.np_rng, use_pool=True)
+            # Reset counter after successful refit
+            self.n_points_since_last_fit = 0
         
         self.results_manager.end_timing('GP Training')
 
@@ -802,7 +810,8 @@ class BOBE:
             'best_val': self.best_f,
             'best_pt': self.best_pt,
             'logz': logz_dict,
-            'termination_reason': self.termination_reason
+            'termination_reason': self.termination_reason,
+            'samples': samples_dict
         }
 
     def check_convergence_ei(self, step, acq_val):
@@ -836,7 +845,7 @@ class BOBE:
             self.convergence_counter = 0  # Reset counter if not converged
             return False
 
-    def check_convergence_logz(self, step, logz_dict, equal_samples, equal_logl, verbose=True):
+    def check_convergence_logz(self, step, logz_dict, equal_samples, equal_logl, verbose=True, delta_method='diff'):
         """
         Check if the nested sampling has converged and compute KL divergence metrics.
         
@@ -853,7 +862,10 @@ class BOBE:
             return False
         
         # Standard logz convergence check
-        delta = (logz_dict['upper'] - logz_dict['lower'])/2 #logz_dict['std']
+        if delta_method == 'diff':
+            delta = (logz_dict['upper'] - logz_dict['lower'])/2 
+        else:
+            delta = logz_dict['std']
         converged = delta < self.logz_threshold
         
         # Compute KL divergences if we have nested sampling samples
@@ -934,9 +946,9 @@ class BOBE:
             convergence_n_iters: int = 1,
             ei_goal: float = 1e-10,
             do_final_ns: bool = False,
-            fit_step: int = 10,
+            fit_n_points: int = 10,
             wipv_batch_size: int = 4,
-            ns_step: int = 10,
+            ns_n_points: int = 10,
             num_hmc_warmup: int = 512,
             num_hmc_samples: int = 512,
             mc_points_size: int = 64,
@@ -965,12 +977,12 @@ class BOBE:
             Goal value for EI/LogEI acquisition convergence. Default is 1e-10.
         do_final_ns : bool, optional
             Whether to run final nested sampling at convergence (WIPV/WIPStd). Default is False.
-        fit_step : int, optional
-            Fit GP every fit_step iterations. Default is 10.
+        fit_n_points : int, optional
+            Refit GP hyperparameters after adding this many new points to the GP. Default is 10.
         wipv_batch_size : int, optional
             Batch size for WIPV/WIPStd acquisition. Default is 4.
-        ns_step : int, optional
-            Run nested sampling every ns_step iterations. Default is 10.
+        ns_n_points : int, optional
+            Run nested sampling after adding this many new points to the GP (for WIPV/WIPStd). Default is 10.
         num_hmc_warmup : int, optional
             Number of HMC warmup steps. Default is 512.
         num_hmc_samples : int, optional
@@ -1005,9 +1017,13 @@ class BOBE:
         self.do_final_ns = do_final_ns
         
         # Store run settings
-        self.fit_step = fit_step
-        self.ns_step = ns_step
+        self.fit_n_points = fit_n_points
+        self.ns_n_points = ns_n_points
         self.wipv_batch_size = wipv_batch_size
+        
+        # Initialize point counters for triggering GP refit and NS
+        self.n_points_since_last_fit = 0
+        self.n_points_since_last_ns = 0
         self.num_hmc_warmup = num_hmc_warmup
         self.num_hmc_samples = num_hmc_samples
         self.mc_points_size = mc_points_size
@@ -1043,9 +1059,9 @@ class BOBE:
             'convergence_n_iters': convergence_n_iters,
             'ei_goal': ei_goal,
             'do_final_ns': do_final_ns,
-            'fit_step': fit_step,
+            'fit_n_points': fit_n_points,
             'wipv_batch_size': wipv_batch_size,
-            'ns_step': ns_step,
+            'ns_n_points': ns_n_points,
             'num_hmc_warmup': num_hmc_warmup,
             'num_hmc_samples': num_hmc_samples,
             'mc_points_size': mc_points_size,
@@ -1177,7 +1193,9 @@ class BOBE:
 
         while not self.converged:
             ii += 1
-            ns_flag = (ii % self.ns_step == 0) and current_evals >= self.min_evals
+            # Check if we should run nested sampling based on points added
+            self.n_points_since_last_ns += self.wipv_batch_size
+            ns_flag = (self.n_points_since_last_ns >= self.ns_n_points) and current_evals >= self.min_evals
             verbose = True
 
             if verbose:
@@ -1220,6 +1238,9 @@ class BOBE:
                         self.termination_reason = "LogZ converged"
                         self.results_dict['logz'] = logz_dict
                         self.results_dict['termination_reason'] = self.termination_reason
+                
+                # Reset counter after running NS
+                self.n_points_since_last_ns = 0
             else:
                 self.results_manager.start_timing('MCMC Sampling')
                 self.mc_samples = get_mc_samples(

@@ -159,8 +159,6 @@ def nested_sampling_Dy(gp: GP,
     res = sampler.results
     mean = res['logz'][-1]
     logz_err = res['logzerr'][-1]
-    logz_dict = {'mean': mean}
-    logz_dict['dlogz_sampler'] = logz_err
     samples_x = res['samples']
     logl = res['logl']
     success = ~np.all(logl == logl[0]) # in case of failure do not check convergence
@@ -181,24 +179,15 @@ def nested_sampling_Dy(gp: GP,
     log_var_logz = log_var_delta - 2*mean 
     log_var_logz = np.clip(log_var_logz, a_min=-100, a_max=100)  # Avoid numerical issues with very small or large variances
     var_logz = np.exp(log_var_logz)
-    logz_dict['upper'] = upper[-1]
-    logz_dict['lower'] = lower[-1]
-    logz_dict['var'] = var_logz
-    logz_dict['std'] = 2*np.sqrt(var_logz) # 2 sigma
-    samples_dict = {}
+    logz_dict = {'mean': mean, 'dlogz_sampler': logz_err, 'upper': upper[-1], 'lower': lower[-1], 'var': var_logz, 'std': 2*np.sqrt(var_logz)}
     best_pt = samples_x[np.argmax(logl)]
-    samples_dict['best'] = best_pt
     weights = renormalise_log_weights(res['logwt'])
     if equal_weights: #for MC points
         samples_x, logl = resample_equal(samples_x, logl, weights=weights)
         weights = np.ones(samples_x.shape[0])  # Equal weights after resampling
+    samples_dict = {'x': samples_x,'weights': weights,'logl': logl,'best': best_pt,'method': 'nested'}
     samples_dict['x'] = samples_x
     samples_dict['weights'] = weights    
-    samples_dict['logl'] = logl
-    samples_dict['logl_upper'] = logl_upper
-    samples_dict['logl_lower'] = logl_lower
-    samples_dict['logvol'] = logvol
-    samples_dict['method']= 'nested'
     return (samples_dict, logz_dict, success)
 
 def get_hmc_settings(ndim, warmup_steps=None, num_samples=None, thinning=None):
@@ -307,8 +296,7 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         inits = jnp.vstack([gp.get_random_point(rng=np_rng) for _ in range(num_chains-1)])
         inits = jnp.vstack([inits, gp.train_x[jnp.argmax(gp.train_y)]])  # Add best training point as one init
 
-    
-    log.info(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
+    log.debug(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
 
     if (num_devices >= num_chains) and num_chains > 1:
         # if devices present run with pmap
@@ -336,6 +324,6 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         'method': "MCMC"
     }
 
-    log.info(f"Max logl found = {np.max(logps):.4f}")
+    log.debug(f"Max logl found = {np.max(logps):.4f}")
 
     return samples_dict
