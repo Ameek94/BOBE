@@ -78,17 +78,20 @@ From Source (Recommended)
 
 .. code-block:: bash
 
-   # For neural network classifiers, by default svm is available through scikit-learn
-   pip install '.[nn]'
+   # For neural network classifiers
+   pip install -e '.[nn]'
    
-   # In case you want to use cosmological likelihoods through the Cobaya interface
-   pip install '.[cobaya]'
+   # For cosmological likelihoods through Cobaya
+   pip install -e '.[cobaya]'
    
    # For MPI support
-   pip install '.[mpi]'
+   pip install -e '.[mpi]'
    
-   # For everything
-   pip install '.[all]'
+   # For all optional dependencies
+   pip install -e '.[all]'
+
+.. note::
+   The ``-e`` flag installs in editable mode. For a regular install, use ``pip install '.[nn]'`` instead.
 
 For development installation (allows editing the source code):
 

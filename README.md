@@ -81,23 +81,23 @@ pip install -e .
 
 ### Optional Dependencies
 
-JaxBo has several optional dependencies for extended functionality. These can be installed separately or with JaxBo as follows:
+JaxBo has several optional dependencies for extended functionality. When installing from source, you can install them as follows:
 
-- **Neural Network Classifiers** (Flax + Optax): Install with `pip install 'jaxbo[nn]'`
+- **Neural Network Classifiers** (Flax + Optax): Install with `pip install -e '.[nn]'`
   - Enables MLPClassifier and EllipsoidClassifier for GP filtering
   - Required for using `clf_type='nn'` or `clf_type='ellipsoid'`
   
-- **Cobaya Likelihoods**: Install with `pip install 'jaxbo[cobaya]'`
+- **Cobaya Likelihoods**: Install with `pip install -e '.[cobaya]'`
   - Enables `CobayaLikelihood` class for cosmological likelihoods
   - Required for interfacing with Cobaya cosmological models
   
-- **MPI Parallelization**: Install with `pip install 'jaxbo[mpi]'`
+- **MPI Parallelization**: Install with `pip install -e '.[mpi]'`
   - Enables parallel likelihood evaluation across multiple processes
   - Recommended for expensive likelihoods (evaluation time > 1 second)
 
-- **All Optional Dependencies**: Install with `pip install 'jaxbo[all]'`
+- **All Optional Dependencies**: Install with `pip install -e '.[all]'`
 
-**Note:** By default, only SVM classifiers are available. The core BO functionality works with scipy optimization and does not require optax.
+**Note:** The `-e` flag installs in editable mode. For a regular install, use `pip install '.[extra]'` instead. By default, only SVM classifiers are available. The core BO functionality works with scipy optimization and does not require optax.
 
 ## Requirements
 

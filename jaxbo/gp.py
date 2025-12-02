@@ -1,16 +1,10 @@
 from math import sqrt,pi
-import time
 from typing import Any,List
 import jax.numpy as jnp
 import numpy as np
 import jax
 from jax.scipy.linalg import cho_solve, solve_triangular
-from .utils.core import scale_to_unit, scale_from_unit
 jax.config.update("jax_enable_x64", True)
-import numpyro
-from numpyro.infer import MCMC, NUTS
-from numpyro.util import enable_x64
-enable_x64()
 from functools import partial
 from .utils.log import get_logger
 log = get_logger("gp")

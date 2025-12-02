@@ -179,7 +179,7 @@ class AcquisitionFunction:
                          lengthscales=gp.lengthscales,
                          kernel_variance=gp.kernel_variance,)
                         
-            dummy_gp.update(x_next, dummy_gp.predict_mean_single(x_next), refit=False)
+            dummy_gp.update(x_next, dummy_gp.predict_mean_single(x_next))
             for i in range(1,n_batch):
                 x_next, acq_val_next = self.get_next_point(dummy_gp, acq_kwargs=acq_kwargs,
                                                         maxiter=maxiter,
@@ -191,7 +191,7 @@ class AcquisitionFunction:
                 acq_vals.append(acq_val_next)
 
                 mu = dummy_gp.predict_mean_single(x_next)
-                dummy_gp.update(x_next, mu, refit=False)
+                dummy_gp.update(x_next, mu)
 
         return np.array(x_batch), np.array(acq_vals)
 
@@ -330,7 +330,89 @@ class LogEI(EI):
         return jnp.reshape(-log_ei, ())  # optimizer minimizes this
 
 
-class WIPV(AcquisitionFunction):
+class WeightedIntegratedPosteriorBase(AcquisitionFunction):
+    """Base class for Weighted Integrated Posterior acquisition functions.
+    
+    This base class provides common functionality for acquisition functions that
+    integrate over MC samples from the GP posterior, such as WIPV and WIPStd.
+    
+    Parameters
+    ----------
+    optimizer : str, optional
+        Optimizer to use ('scipy' or 'optax'). Default is 'scipy'.
+    optimizer_options : dict, optional
+        Additional options for the optimizer. Default is {}.
+    """
+
+    def __init__(self, optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {}):
+        super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
+
+    def get_next_point(self, gp,
+                 acq_kwargs,
+                 maxiter: int = 100,
+                 n_restarts: int = 1,
+                 verbose: bool = True,
+                 early_stop_patience: int = 25,
+                 rng=None):
+        """
+        Optimize the acquisition function to obtain the next point.
+        
+        This method is shared between WIPV and WIPStd as they follow the same
+        optimization procedure but differ only in their objective function.
+        
+        Parameters
+        ----------
+        gp : GP
+            Gaussian process model.
+        acq_kwargs : dict
+            Additional arguments containing 'mc_samples' and optionally 'mc_points_size'.
+        maxiter : int, optional
+            Maximum optimization iterations. Default is 100.
+        n_restarts : int, optional
+            Number of optimization restarts. Default is 1.
+        verbose : bool, optional
+            Whether to print progress. Default is True.
+        early_stop_patience : int, optional
+            Early stopping patience. Default is 25.
+        rng : np.random.Generator, optional
+            Random number generator. Default is None.
+            
+        Returns
+        -------
+        tuple
+            (best_point, best_value) where best_point is shape (ndim,).
+        """
+        mc_samples = acq_kwargs.get('mc_samples')
+        mc_points_size = acq_kwargs.get('mc_points_size', 128)
+        mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
+        k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.kernel_variance, gp.noise, include_noise=False)
+
+        @jax.jit
+        def mapped_fn(x):
+            return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
+
+        acq_vals = lax.map(mapped_fn, mc_points)
+        acq_val_min = jnp.min(acq_vals)
+        log.info(f"{self.name} acquisition min value on MC points: {float(acq_val_min):.4e}")
+        best_x = mc_points[jnp.argmin(acq_vals)]
+        x0_acq = best_x
+
+        if gp.train_x.shape[0] > 500:
+            return x0_acq, float(acq_val_min)
+        else:
+            return self.acq_optimize(fun=self.fun,
+                                  fun_args=(gp,),
+                                  fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
+                                  num_params=gp.ndim,
+                                  x0=x0_acq,
+                                  bounds = [0,1],
+                                  optimizer_options=self.optimizer_options,
+                                  maxiter=maxiter,
+                                  n_restarts=n_restarts,
+                                  verbose=verbose)
+
+
+class WIPV(WeightedIntegratedPosteriorBase):
     """Weighted Integrated Posterior Variance acquisition function.
     
     WIPV focuses on reducing uncertainty in regions weighted by posterior probability.
@@ -353,53 +435,12 @@ class WIPV(AcquisitionFunction):
 
     name: str = "WIPV"
 
-    def __init__(self,
-                 optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {}):
-
-        super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
-
     def fun(self, x, gp,  mc_points=None, k_train_mc = None):
         var = gp.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc)
         return jnp.mean(var)
 
-    def get_next_point(self, gp,
-                 acq_kwargs,
-                 maxiter: int = 100,
-                 n_restarts: int = 1,
-                 verbose: bool = True,
-                 early_stop_patience: int = 25,
-                 rng=None):
-        
-        mc_samples = acq_kwargs.get('mc_samples')
-        mc_points_size = acq_kwargs.get('mc_points_size', 128)
-        mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
-        k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.kernel_variance, gp.noise, include_noise=False)
 
-        @jax.jit
-        def mapped_fn(x):
-            return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
-
-        acq_vals = lax.map(mapped_fn, mc_points)
-        acq_val_min = jnp.min(acq_vals)
-        log.info(f"WIPV acquisition min value on MC points: {float(acq_val_min):.4e}")
-        best_x = mc_points[jnp.argmin(acq_vals)]
-        x0_acq = best_x
-
-        if gp.train_x.shape[0] > 750:
-            return x0_acq, float(acq_val_min)
-        else:
-            return self.acq_optimize(fun=self.fun,
-                                  fun_args=(gp,),
-                                  fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
-                                  num_params=gp.ndim,
-                                  x0=x0_acq,
-                                  bounds = [0,1],
-                                  optimizer_options=self.optimizer_options,
-                                  maxiter=maxiter,
-                                  n_restarts=n_restarts,
-                                  verbose=verbose)
-
-class WIPStd(AcquisitionFunction):
+class WIPStd(WeightedIntegratedPosteriorBase):
     """Weighted Integrated Posterior Standard Deviation acquisition function.
     
     WIPStd is similar to WIPV but uses standard deviation instead of variance,
@@ -410,59 +451,18 @@ class WIPStd(AcquisitionFunction):
         WIPStd(x) = E_{x' ~ p(x' | D)}[Std[f(x) | D]]
     
     Parameters
-    ----------\n    optimizer : str, optional
+    ----------
+    optimizer : str, optional
         Optimizer to use ('scipy' or 'optax'). Default is 'scipy'.
     optimizer_options : dict, optional
         Additional options for the optimizer. Default is {}.
     """
 
-    name: str = "WIPV"
-
-    def __init__(self,
-                 optimizer: str = "scipy", optimizer_options: Optional[Dict[str, Any]] = {}):
-
-        super().__init__(optimizer=optimizer, optimizer_options=optimizer_options)
+    name: str = "WIPStd"
 
     def fun(self, x, gp,  mc_points=None, k_train_mc = None):
-        std = jnp.sqrt(gp.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc)) #change this for testing WIPstd
+        std = jnp.sqrt(gp.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc))
         return jnp.mean(std)
-
-
-    def get_next_point(self, gp,
-                 acq_kwargs,
-                 maxiter: int = 100,
-                 n_restarts: int = 1,
-                 verbose: bool = True,
-                 early_stop_patience: int = 25,
-                 rng=None):
-        
-        mc_samples = acq_kwargs.get('mc_samples')
-        mc_points_size = acq_kwargs.get('mc_points_size', 128)
-        mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
-        k_train_mc = gp.kernel(gp.train_x, mc_points, gp.lengthscales, gp.kernel_variance, gp.noise, include_noise=False)
-
-        @jax.jit
-        def mapped_fn(x):
-            return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
-        acq_vals = lax.map(mapped_fn, mc_points)
-        acq_val_min = jnp.min(acq_vals)
-        log.info(f"WIPStd acquisition min value on MC points: {float(acq_val_min):.4e}")
-        best_x = mc_points[jnp.argmin(acq_vals)]
-        x0_acq = best_x
-
-        if gp.train_x.shape[0] > 750:
-            return x0_acq, float(acq_val_min)
-        else:
-            return self.acq_optimize(fun=self.fun,
-                                  fun_args=(gp,),
-                                  fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
-                                  num_params=gp.ndim,
-                                  x0=x0_acq,
-                                  bounds = [0,1],
-                                  optimizer_options=self.optimizer_options,
-                                  maxiter=maxiter,
-                                  n_restarts=1,
-                                  verbose=verbose)
 
 
 def get_mc_samples(gp: GP,warmup_steps=512, num_samples=512, thinning=4,method="NUTS",num_chains=4,np_rng=None,rng_key=None):
@@ -474,11 +474,11 @@ def get_mc_samples(gp: GP,warmup_steps=512, num_samples=512, thinning=4,method="
         except Exception as e:
             log.error(f"Error in sampling GP NUTS: {e}")
             mc_samples, logz, success = nested_sampling_Dy(gp=gp, ndim=gp.ndim, mode = 'acq', maxcall=int(2e6),
-                                            dynamic=False, dlogz=0.1,equal_weights=True
+                                            dynamic=False, dlogz=0.02,equal_weights=True
             )
     elif method=='NS':
         mc_samples, logz, success = nested_sampling_Dy(gp=gp, ndim=gp.ndim, mode = 'acq', maxcall=int(2e6),
-                                            dynamic=False, dlogz=0.1,equal_weights=True)
+                                            dynamic=False, dlogz=0.02,equal_weights=True)
     elif method=='uniform':
         mc_samples = {}
         points = qmc.Sobol(gp.ndim, scramble=True, rng=np_rng).random(num_samples)

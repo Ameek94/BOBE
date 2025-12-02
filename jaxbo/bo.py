@@ -14,7 +14,7 @@ from .samplers import nested_sampling_Dy, sample_GP_NUTS
 from .utils.log import get_logger, update_verbosity
 from .utils.results import BOBEResults
 from .acquisition import *
-from .utils.pool import MPI_Pool
+from .pool import MPI_Pool
 
 log = get_logger("bo")
 log.info(f'JAX using {jax.device_count()} devices.')
@@ -68,7 +68,7 @@ class BOBE:
 
     def __init__(self,
                 loglikelihood: Union[Callable, str, Dict[str, Any], Likelihood],
-                 param_list: List[str],
+                 param_list: List[str] = None,
                  param_bounds=None,
                  param_labels=None,
                  likelihood_name=None,
@@ -214,8 +214,187 @@ class BOBE:
             )
         
         # Finalize main process initialization
-        self._finalize_main_initialization()
+
+        # Extract best point from GP
+        if self.gp.train_y.size > 0:
+            idx_best = jnp.argmax(self.gp.train_y)
+            self.best_pt = scale_from_unit(self.gp.train_x[idx_best], self.loglikelihood.param_bounds).flatten()
+            best_f_from_gp = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
+        else:
+            best_f_from_gp = -np.inf
+            self.best_pt = None
+        
+        # Use restored best_f if available and better
+        if not hasattr(self, 'best_f') or best_f_from_gp > getattr(self, 'best_f', -np.inf):
+            self.best_f = best_f_from_gp
+            if not hasattr(self, 'best_pt_iteration'):
+                self.best_pt_iteration = self.start_iteration
+        
+        if self.best_pt is not None:
+            self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
+            log.info(f" Initial best point {self.best} with value = {self.best_f:.6f}")
+        
+        # Save initial GP
+        self.gp.save(filename=f"{self.save_path}_gp")
+        log.info(f" Saving GP to file {self.save_path}_gp")
+        
+        # Initialize for KL divergence tracking
+        self.prev_samples = None
+
+    # ============================================================================
+    # INITIALIZATION HELPER METHODS
+    # ============================================================================
     
+    def _prepare_likelihood(self, loglikelihood, param_list, param_bounds, param_labels,
+                           likelihood_name, confidence_for_unbounded, minus_inf):
+        """Convert input to Likelihood instance if needed."""
+        if isinstance(loglikelihood, Likelihood):
+            return loglikelihood
+        
+        if isinstance(loglikelihood, (str, dict)):
+            # Cobaya YAML file or info dict
+            from .likelihood import CobayaLikelihood
+            return CobayaLikelihood(
+                input_file_dict=loglikelihood,
+                confidence_for_unbounded=confidence_for_unbounded,
+                minus_inf=minus_inf,
+                name=likelihood_name if likelihood_name is not None else 'CobayaLikelihood',
+            )
+        
+        if callable(loglikelihood):
+            # Create Likelihood instance from callable
+            return Likelihood(
+                loglikelihood=loglikelihood,
+                param_list=param_list,
+                param_bounds=param_bounds,
+                param_labels=param_labels,
+                name=likelihood_name,
+                minus_inf=minus_inf,
+            )
+        
+        raise ValueError(
+            "loglikelihood must be one of: "
+            "callable, string (Cobaya YAML path), dict (Cobaya info), or Likelihood instance"
+        )
+    
+    
+    def _setup_main_process(self, seed, optimizer, save, save_dir, save_step,
+                           n_cobaya_init, n_sobol_init, acq, use_clf, clf_type,
+                           clf_nsigma_threshold, minus_inf, resume):
+        """Setup full attributes for main process."""
+        set_global_seed(seed)
+        self.np_rng = get_numpy_rng()
+        
+        # File paths and saving
+        self.output_file = self.loglikelihood.name
+        self.save = save
+        self.save_step = save_step
+        self.save_dir = save_dir
+        if self.save:
+            os.makedirs(self.save_dir, exist_ok=True)
+        self.save_path = os.path.join(self.save_dir, self.output_file)
+        
+        # Validate optimizer
+        if optimizer.lower() not in ['optax', 'scipy']:
+            raise ValueError("optimizer must be either 'optax' or 'scipy'")
+        self.optimizer = optimizer
+        self.minus_inf = minus_inf
+        
+        # Initialize results manager (settings will be updated when run() is called)
+        self.results_manager = BOBEResults(
+            output_file=self.output_file,
+            save_dir=self.save_dir,
+            param_names=self.loglikelihood.param_list,
+            param_labels=self.loglikelihood.param_labels,
+            param_bounds=self.loglikelihood.param_bounds,
+            settings={
+                'n_cobaya_init': n_cobaya_init,
+                'n_sobol_init': n_sobol_init,
+                'acq': acq,
+                'use_clf': use_clf,
+                'clf_type': clf_type,
+                'clf_nsigma_threshold': clf_nsigma_threshold,
+                'minus_inf': minus_inf,
+                'seed': seed
+            },
+            likelihood_name=self.loglikelihood.name,
+            resume_from_existing=resume
+        )
+        
+        self.fresh_start = not resume
+    
+    def _handle_resume(self, resume_file, use_clf):
+        """Handle resume from existing run (main process only)."""
+        try:
+            log.info(f" Attempting to resume from file {resume_file}")
+            gp_file = resume_file + '_gp'
+            self.gp = load_gp_file(gp_file, use_clf)
+            
+            # Test GP functionality
+            _ = self.gp.predict_mean_single(self.gp.train_x[0])
+            log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
+            
+            # Restore iteration and best point info
+            if self.results_manager.is_resuming():
+                self.start_iteration = self.results_manager.get_last_iteration()
+                log.info(f"Resuming from iteration {self.start_iteration}")
+                log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
+                
+                if self.results_manager.best_loglike_values:
+                    self.best_f = max(self.results_manager.best_loglike_values)
+                    best_idx = self.results_manager.best_loglike_values.index(self.best_f)
+                    self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_idx]
+                    log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
+                else:
+                    self.start_iteration = 0
+                    self.best_pt_iteration = 0
+                
+                if self.results_manager.converged:
+                    self.prev_converged = True
+                    self.convergence_counter = 1
+                    log.info(" Previous run had converged.")
+            else:
+                self.start_iteration = 0
+                self.best_pt_iteration = 0
+                log.info("Starting fresh optimization")
+            
+            self.fresh_start = False
+            
+        except Exception as e:
+            log.error(f" Failed to load GP from file {gp_file}: {e}")
+            log.info(" Starting a fresh run instead.")
+            self.fresh_start = True
+    
+    def _handle_fresh_start(self, n_cobaya_init, n_sobol_init, init_train_x, init_train_y,
+                           use_clf, clf_type, clf_use_size, clf_update_step,
+                           clf_nsigma_threshold, minus_inf, optimizer, gp_kwargs):
+        """Handle fresh start initialization (main process only)."""
+        self.start_iteration = 0
+        self.best_pt_iteration = 0
+        
+        # Generate and evaluate initial training points
+        train_x, train_y = self._get_initial_training_data(
+            n_cobaya_init=n_cobaya_init,
+            n_sobol_init=n_sobol_init,
+            init_train_x=init_train_x,
+            init_train_y=init_train_y
+        )
+        
+        # Initialize and train GP
+        self._initialize_gp(
+            train_x=train_x,
+            train_y=train_y,
+            use_clf=use_clf,
+            clf_type=clf_type,
+            clf_use_size=clf_use_size,
+            clf_update_step=clf_update_step,
+            clf_nsigma_threshold=clf_nsigma_threshold,
+            minus_inf=minus_inf,
+            optimizer=optimizer,
+            gp_kwargs=gp_kwargs
+        )
+
+
     def _get_initial_training_data(self, n_cobaya_init, n_sobol_init, init_train_x=None, init_train_y=None):
         """
         Generate and evaluate initial training points for the GP.
@@ -416,7 +595,11 @@ class BOBE:
         log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
         self.results_manager.end_timing('GP Training')
     
-    
+
+    # ============================================================================
+    # RUN HELPER METHODS
+    # ============================================================================
+
     def update_gp(self, new_pts_u, new_vals, step = 0, verbose=True):
         """
         Update the GP with new points and values, and track hyperparameters.
@@ -564,6 +747,178 @@ class BOBE:
             return True
         
         return False
+    
+    def finalise_results(self):
+        # here finalize results
+        if not self.is_main:
+            return
+        
+        # Prepare return dictionary
+
+        # Extract GP and classifier information
+        gp_info = {
+            'gp_training_set_size': self.gp.train_x.shape[0],
+            'gp_final_best_loglike': float(self.best_f),  # Best value in true physical space
+        }
+        
+        # Add classifier info if using GPwithClassifier, this can be done at the start since there are no results here, only settings.
+        if isinstance(self.gp, GPwithClassifier):
+            gp_info.update({
+                'classifier_used': bool(self.gp.use_clf),
+                'classifier_type': str(self.gp.clf_type),
+                'classifier_training_set_size': int(self.gp.clf_data_size),
+                'classifier_use_threshold': int(self.gp.clf_use_size),
+                'classifier_probability_threshold': float(self.gp.probability_threshold)
+            })
+        else:
+            gp_info.update({
+                'classifier_used': False,
+                'classifier_type': None,
+                'classifier_training_set_size': 0
+            })
+
+        # Add evidence info if available
+        samples_dict = self.samples_dict or {}
+        log.debug(f"Samples dict keys: {samples_dict.keys()}")
+        logz_dict = self.results_dict.get('logz', {})
+
+        # Finalize results with comprehensive data
+        self.results_manager.finalize(
+            samples_dict=samples_dict,
+            logz_dict=logz_dict,
+            converged=self.converged,
+            termination_reason=self.termination_reason,
+            gp_info=gp_info
+        )
+
+        self.results_dict['gp'] = self.gp
+        self.results_dict['likelihood'] = self.loglikelihood
+        self.results_dict['samples'] = self.samples_dict
+
+        # Add results manager info
+        self.results_dict['results_manager'] = self.results_manager
+
+    def check_convergence_ei(self, step, acq_val):
+        """
+        Check convergence for EI/LogEI based on the acquisition function value.
+
+        Args:
+            step: Current iteration number.
+            acq_val: Current acquisition function value.
+
+        Returns:
+            bool: Whether convergence is achieved based on acquisition value.
+        """
+        if not self.is_main:
+            return False
+        
+        if self.acquisition.name.lower() == 'ei':
+            acq_val = np.log(acq_val + 1e-100)  # Avoid log(0)
+        
+        converged = acq_val < self.ei_goal_log
+
+        if converged:
+            self.convergence_counter += 1
+            if self.convergence_counter >= self.convergence_n_iters:
+                log.info(f"Convergence for {self.acquisition.name} achieved after {self.convergence_n_iters} successive iterations")
+                return True
+            else:
+                log.info(f"{self.acquisition.name} convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
+                return False
+        else:
+            self.convergence_counter = 0  # Reset counter if not converged
+            return False
+
+    def check_convergence_WIPV(self, step, logz_dict, equal_samples, equal_logl, verbose=True):
+        """
+        Check if the nested sampling has converged and compute KL divergence metrics.
+        
+        Args:
+            step: Current iteration number
+            logz_dict: Dictionary with logz bounds and mean
+            ns_samples: Nested sampling samples with x, weights, logl
+            threshold: LogZ convergence threshold
+            
+        Returns:
+            bool: Whether convergence is achieved based on logz only
+        """
+        if not self.is_main:
+            return False
+        
+        # Standard logz convergence check
+        delta =  logz_dict['std']
+        converged = delta < self.logz_threshold
+        
+        # Compute KL divergences if we have nested sampling samples
+        successive_kl = None
+        
+        equal_samples = scale_from_unit(equal_samples, self.loglikelihood.param_bounds)
+    
+
+        if self.prev_samples is not None:
+
+            prev_samples_x = self.prev_samples['x']
+            mu1 = np.mean(prev_samples_x, axis=0)
+            cov1 = np.cov(prev_samples_x, rowvar=False)
+            mu2 = np.mean(equal_samples, axis=0)
+            cov2 = np.cov(equal_samples, rowvar=False)
+            successive_kl = kl_divergence_gaussian(mu1, np.atleast_2d(cov1), mu2, np.atleast_2d(cov2))
+
+            log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
+            # Store KL divergences if computed
+            self.results_manager.update_kl_divergences(
+                iteration=step,
+                successive_kl=successive_kl
+            )
+
+        # Store current samples for next iteration
+        self.prev_samples = {'x': equal_samples, 'logl': equal_logl}
+
+        # Update results manager with convergence info and KL divergences
+        self.results_manager.update_convergence(
+            iteration=step,
+            logz_dict=logz_dict,
+            converged=converged,
+            threshold=self.logz_threshold
+        )
+        
+
+        log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
+        
+        # Check if this is the smallest delta seen so far and save checkpoint, also ensure delta is reasonably good
+        if (delta < self.min_delta_seen) and (delta < 0.5):
+            self.min_delta_seen = delta
+
+            # Create checkpoint filename with suffix
+            checkpoint_filename = f"{self.output_file}_checkpoint"
+
+            # Save intermediate results checkpoint
+            self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}")
+
+            # Save getdist chains
+            self.results_manager.save_chain_files(samples_dict=self.ns_samples, filename=f"{checkpoint_filename}")
+
+            if verbose:
+                log.info(f"New minimum delta achieved: {delta:.4f}")
+                log.info("Saving checkpoint results for new minimum delta")
+                log.info(f"Saved GP checkpoint to {checkpoint_filename}_gp.npz")
+                log.info(f"Saved intermediate results checkpoint to {checkpoint_filename}.json")
+
+        if converged:
+            self.convergence_counter += 1
+            if self.convergence_counter >= self.convergence_n_iters:
+                log.info(f"Convergence achieved after {self.convergence_n_iters} successive iterations")
+                return True
+            else:
+                log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
+                return False
+        else:
+            self.convergence_counter = 0  # Reset counter if not converged
+            return False
+        
+    # ============================================================================
+    # MAIN RUN METHODS
+    # ============================================================================
 
     def run(self, acqs: Union[str, Tuple[str]],
             min_evals: int = 200,
@@ -784,47 +1139,24 @@ class BOBE:
         # End EI
         self.current_iteration = ii
 
-
-    def check_convergence_ei(self, step, acq_val):
+    def run_weighted_integrated_posterior(self, acq_func_class, ii=0):
         """
-        Check convergence for EI/LogEI based on the acquisition function value.
-
-        Args:
-            step: Current iteration number.
-            acq_val: Current acquisition function value.
-
-        Returns:
-            bool: Whether convergence is achieved based on acquisition value.
-        """
-        if not self.is_main:
-            return False
+        Run the optimization loop for Weighted Integrated Posterior acquisition functions (WIPV or WIPStd).
         
-        if self.acquisition.name.lower() == 'ei':
-            acq_val = np.log(acq_val + 1e-100)  # Avoid log(0)
-        
-        converged = acq_val < self.ei_goal_log
-
-        if converged:
-            self.convergence_counter += 1
-            if self.convergence_counter >= self.convergence_n_iters:
-                log.info(f"Convergence for {self.acquisition.name} achieved after {self.convergence_n_iters} successive iterations")
-                return True
-            else:
-                log.info(f"{self.acquisition.name} convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
-                return False
-        else:
-            self.convergence_counter = 0  # Reset counter if not converged
-            return False
-
-
-    def run_WIPStd(self, ii = 0):
-        """
-        Run the optimization loop for WIPStd acquisition function.
+        Parameters
+        ----------
+        acq_func_class : class
+            The acquisition function class to use (WIPV or WIPStd).
+        ii : int, optional
+            Starting iteration number. Default is 0.
         """
         if not self.is_main:
             return
         
-        self.acquisition = WIPStd(optimizer=self.optimizer)  # Set acquisition function to WIPStd   
+        # Set acquisition function
+        self.acquisition = acq_func_class(optimizer=self.optimizer)
+        acq_name = self.acquisition.name
+        
         current_evals = self.gp.npoints
         self.results_manager.start_timing('MCMC Sampling')
         self.mc_samples = get_mc_samples(
@@ -846,162 +1178,13 @@ class BOBE:
             verbose = True
 
             if verbose:
-                log.debug("\n")
-                log.info(f" Iteration {ii} of WIPStd, objective evals {current_evals}/{self.max_evals}")
+                log.info(f"\nIteration {ii} of {acq_name}, objective evals {current_evals}/{self.max_evals}, ns={ns_flag}")
 
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
             new_pts_u = jnp.atleast_2d(new_pts_u)
             new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
             current_evals += self.wipv_batch_size
-
-
-            self.update_gp(new_pts_u, new_vals, step = ii)
-            self.results_manager.update_best_loglike(ii, self.best_f)
-
-            # Check convergence and update MCMC samples
-            if ns_flag:
-                log.info("Running Nested Sampling")
-                self.results_manager.start_timing('Nested Sampling')
-                ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
-                    gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01, equal_weights=False,
-                    rng=self.np_rng
-                )
-                self.results_manager.end_timing('Nested Sampling')
-                if ns_success:
-                    self.ns_samples = ns_samples
-                    log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
-                    equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
-                    self.mc_samples = {
-                        'x': equal_samples,
-                        'logl': equal_logl,
-                        'weights': np.ones(equal_samples.shape[0]),
-                        'method': 'NS',
-                        'best': self.ns_samples['best']
-                    }
-                    self.converged = self.check_convergence_WIPV(ii, logz_dict, equal_samples, equal_logl)
-                    if self.converged:
-                        self.termination_reason = "LogZ converged"
-                        self.results_dict['logz'] = logz_dict
-                        self.results_dict['termination_reason'] = self.termination_reason
-            else:
-                self.results_manager.start_timing('MCMC Sampling')
-                self.mc_samples = get_mc_samples(
-                        self.gp,
-                        warmup_steps=self.num_hmc_warmup,
-                        num_samples=self.num_hmc_samples,
-                        thinning=self.hmc_thinning,
-                        num_chains=self.hmc_num_chains,
-                        method=self.mc_points_method,
-                        np_rng=self.np_rng,
-                        rng_key=get_jax_key()
-                    )
-                self.results_manager.end_timing('MCMC Sampling')
-            
-            if verbose:
-                log.info(f" Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
-
-            # Update results manager with iteration info, also save results and gp if save_step
-            if ii % self.save_step == 0:
-                self.results_manager.save_intermediate(gp=self.gp)
-
-            if self.converged:
-                break
-            
-            jax.clear_caches()
-
-            max_evals_or_gpsize_reached = self.check_max_evals_and_gpsize(current_evals)
-            if max_evals_or_gpsize_reached:
-                break
-
-
-        # End of main BO loop for WIPV
-        self.current_iteration = ii
-
-        # Final nested sampling if not yet converged and do_final_ns is True
-        if self.do_final_ns and not self.converged:
-            
-            self.results_manager.start_timing('GP Training')
-            self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
-            self.results_manager.end_timing('GP Training')
-
-            log.info(" Final Nested Sampling")
-            self.results_manager.start_timing('Nested Sampling')
-            self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
-                gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01, rng=self.np_rng
-            )
-            self.results_manager.end_timing('Nested Sampling')
-            if ns_success:
-                log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
-                equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
-                log.info(f"Using nested sampling results")
-                self.check_convergence_WIPV(ii+1, logz_dict, equal_samples, equal_logl)
-                if self.converged:
-                    self.termination_reason = "LogZ converged"
-                    self.results_dict['logz'] = logz_dict
-                    self.results_dict['termination_reason'] = self.termination_reason
-
-        if (self.ns_samples is not None) and ns_success:
-            samples = self.ns_samples['x']
-            weights = self.ns_samples['weights']
-            loglikes = self.ns_samples['logl']
-        else:
-            log.info("No nested sampling results found or nested sampling unsuccessful, MC samples from HMC/MCMC will be used instead.")
-            self.results_manager.start_timing('MCMC Sampling')
-            mc_samples = get_mc_samples(
-                    self.gp, warmup_steps=512, num_samples=2000*self.ndim,
-                    thinning=4, method="NUTS")
-            self.results_manager.end_timing('MCMC Sampling')
-            samples = mc_samples['x']
-            weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
-            loglikes = mc_samples['logp']
-                
-        samples = scale_from_unit(samples, self.loglikelihood.param_bounds)
-
-        self.samples_dict = {
-            'x': samples,
-            'weights': weights,
-            'logl': loglikes
-        }
-
-    def run_WIPV(self, ii = 0):
-        """
-        Run the optimization loop for WIPV acquisition function.
-        """
-        if not self.is_main:
-            return
-        
-        self.acquisition = WIPV(optimizer=self.optimizer)  # Set acquisition function to WIPV
-        current_evals = self.gp.npoints
-        self.results_manager.start_timing('MCMC Sampling')
-        self.mc_samples = get_mc_samples(
-            self.gp,
-            warmup_steps=self.num_hmc_warmup,
-            num_samples=self.num_hmc_samples,
-            thinning=self.hmc_thinning,
-            num_chains=self.hmc_num_chains,
-            np_rng=self.np_rng,
-            rng_key=get_jax_key(),
-            method=self.mc_points_method,
-        )
-        self.results_manager.end_timing('MCMC Sampling')
-        self.ns_samples = None
-
-        while not self.converged:
-            ii += 1
-            refit = (ii % self.fit_step == 0)
-            ns_flag = (ii % self.ns_step == 0) and current_evals >= self.min_evals
-            verbose = True
-
-            if verbose:
-                log.info(f"\nIteration {ii} of WIPV, objective evals {current_evals}/{self.max_evals}, refit={refit}, ns={ns_flag}")
-
-            acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
-            new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
-            new_pts_u = jnp.atleast_2d(new_pts_u)
-            new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
-            current_evals += self.wipv_batch_size
-
 
             self.update_gp(new_pts_u, new_vals, step = ii)
             self.results_manager.update_best_loglike(ii, self.best_f)
@@ -1064,8 +1247,7 @@ class BOBE:
             if max_evals_or_gpsize_reached:
                 break
 
-
-        # End of main BO loop for WIPV
+        # End of main BO loop
         self.current_iteration = ii
 
         # Final nested sampling if not yet converged and do_final_ns is True
@@ -1114,320 +1296,10 @@ class BOBE:
             'logl': loglikes
         }
 
-    def check_convergence_WIPV(self, step, logz_dict, equal_samples, equal_logl, verbose=True):
-        """
-        Check if the nested sampling has converged and compute KL divergence metrics.
-        
-        Args:
-            step: Current iteration number
-            logz_dict: Dictionary with logz bounds and mean
-            ns_samples: Nested sampling samples with x, weights, logl
-            threshold: LogZ convergence threshold
-            
-        Returns:
-            bool: Whether convergence is achieved based on logz only
-        """
-        if not self.is_main:
-            return False
-        
-        # Standard logz convergence check
-        delta =  logz_dict['std']
-        converged = delta < self.logz_threshold
-        
-        # Compute KL divergences if we have nested sampling samples
-        successive_kl = None
-        
-        equal_samples = scale_from_unit(equal_samples, self.loglikelihood.param_bounds)
-    
+    def run_WIPStd(self, ii=0):
+        """Run optimization loop for WIPStd acquisition function."""
+        return self.run_weighted_integrated_posterior(WIPStd, ii)
 
-        if self.prev_samples is not None:
-
-            prev_samples_x = self.prev_samples['x']
-            mu1 = np.mean(prev_samples_x, axis=0)
-            cov1 = np.cov(prev_samples_x, rowvar=False)
-            mu2 = np.mean(equal_samples, axis=0)
-            cov2 = np.cov(equal_samples, rowvar=False)
-            successive_kl = kl_divergence_gaussian(mu1, np.atleast_2d(cov1), mu2, np.atleast_2d(cov2))
-
-            log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
-            # Store KL divergences if computed
-            self.results_manager.update_kl_divergences(
-                iteration=step,
-                successive_kl=successive_kl
-            )
-
-        # Store current samples for next iteration
-        self.prev_samples = {'x': equal_samples, 'logl': equal_logl}
-
-        # Update results manager with convergence info and KL divergences
-        self.results_manager.update_convergence(
-            iteration=step,
-            logz_dict=logz_dict,
-            converged=converged,
-            threshold=self.logz_threshold
-        )
-        
-
-        log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
-        
-        # Check if this is the smallest delta seen so far and save checkpoint, also ensure delta is reasonably good
-        if (delta < self.min_delta_seen) and (delta < 0.5):
-            self.min_delta_seen = delta
-
-            # Create checkpoint filename with suffix
-            checkpoint_filename = f"{self.output_file}_checkpoint"
-
-            # Save intermediate results checkpoint
-            self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}")
-
-            # Save getdist chains
-            self.results_manager.save_chain_files(samples_dict=self.ns_samples, filename=f"{checkpoint_filename}")
-
-            if verbose:
-                log.info(f"New minimum delta achieved: {delta:.4f}")
-                log.info("Saving checkpoint results for new minimum delta")
-                log.info(f"Saved GP checkpoint to {checkpoint_filename}_gp.npz")
-                log.info(f"Saved intermediate results checkpoint to {checkpoint_filename}.json")
-
-        if converged:
-            self.convergence_counter += 1
-            if self.convergence_counter >= self.convergence_n_iters:
-                log.info(f"Convergence achieved after {self.convergence_n_iters} successive iterations")
-                return True
-            else:
-                log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
-                return False
-        else:
-            self.convergence_counter = 0  # Reset counter if not converged
-            return False
-
-    def finalise_results(self):
-        # here finalize results
-        if not self.is_main:
-            return
-        
-        # Prepare return dictionary
-
-        # Extract GP and classifier information
-        gp_info = {
-            'gp_training_set_size': self.gp.train_x.shape[0],
-            'gp_final_best_loglike': float(self.best_f),  # Best value in true physical space
-        }
-        
-        # Add classifier info if using GPwithClassifier, this can be done at the start since there are no results here, only settings.
-        if isinstance(self.gp, GPwithClassifier):
-            gp_info.update({
-                'classifier_used': bool(self.gp.use_clf),
-                'classifier_type': str(self.gp.clf_type),
-                'classifier_training_set_size': int(self.gp.clf_data_size),
-                'classifier_use_threshold': int(self.gp.clf_use_size),
-                'classifier_probability_threshold': float(self.gp.probability_threshold)
-            })
-        else:
-            gp_info.update({
-                'classifier_used': False,
-                'classifier_type': None,
-                'classifier_training_set_size': 0
-            })
-
-        # Add evidence info if available
-        samples_dict = self.samples_dict or {}
-        log.debug(f"Samples dict keys: {samples_dict.keys()}")
-        logz_dict = self.results_dict.get('logz', {})
-
-        # Finalize results with comprehensive data
-        self.results_manager.finalize(
-            samples_dict=samples_dict,
-            logz_dict=logz_dict,
-            converged=self.converged,
-            termination_reason=self.termination_reason,
-            gp_info=gp_info
-        )
-
-        self.results_dict['gp'] = self.gp
-        self.results_dict['likelihood'] = self.loglikelihood
-        self.results_dict['samples'] = self.samples_dict
-
-        # Add results manager info
-        self.results_dict['results_manager'] = self.results_manager
-
-    # ============================================================================
-    # INITIALIZATION HELPER METHODS
-    # ============================================================================
-    
-    def _prepare_likelihood(self, loglikelihood, param_list, param_bounds, param_labels,
-                           likelihood_name, confidence_for_unbounded, minus_inf):
-        """Convert input to Likelihood instance if needed."""
-        if isinstance(loglikelihood, Likelihood):
-            return loglikelihood
-        
-        if isinstance(loglikelihood, (str, dict)):
-            # Cobaya YAML file or info dict
-            from .likelihood import CobayaLikelihood
-            return CobayaLikelihood(
-                input_file_dict=loglikelihood,
-                confidence_for_unbounded=confidence_for_unbounded,
-                minus_inf=minus_inf,
-                name=likelihood_name if likelihood_name is not None else 'CobayaLikelihood',
-            )
-        
-        if callable(loglikelihood):
-            # Create Likelihood instance from callable
-            return Likelihood(
-                loglikelihood=loglikelihood,
-                param_list=param_list,
-                param_bounds=param_bounds,
-                param_labels=param_labels,
-                name=likelihood_name,
-                minus_inf=minus_inf,
-            )
-        
-        raise ValueError(
-            "loglikelihood must be one of: "
-            "callable, string (Cobaya YAML path), dict (Cobaya info), or Likelihood instance"
-        )
-    
-    
-    def _setup_main_process(self, seed, optimizer, save, save_dir, save_step,
-                           n_cobaya_init, n_sobol_init, acq, use_clf, clf_type,
-                           clf_nsigma_threshold, minus_inf, resume):
-        """Setup full attributes for main process."""
-        set_global_seed(seed)
-        self.np_rng = get_numpy_rng()
-        
-        # File paths and saving
-        self.output_file = self.loglikelihood.name
-        self.save = save
-        self.save_step = save_step
-        self.save_dir = save_dir
-        if self.save:
-            os.makedirs(self.save_dir, exist_ok=True)
-        self.save_path = os.path.join(self.save_dir, self.output_file)
-        
-        # Validate optimizer
-        if optimizer.lower() not in ['optax', 'scipy']:
-            raise ValueError("optimizer must be either 'optax' or 'scipy'")
-        self.optimizer = optimizer
-        self.minus_inf = minus_inf
-        
-        # Initialize results manager (settings will be updated when run() is called)
-        self.results_manager = BOBEResults(
-            output_file=self.output_file,
-            save_dir=self.save_dir,
-            param_names=self.loglikelihood.param_list,
-            param_labels=self.loglikelihood.param_labels,
-            param_bounds=self.loglikelihood.param_bounds,
-            settings={
-                'n_cobaya_init': n_cobaya_init,
-                'n_sobol_init': n_sobol_init,
-                'acq': acq,
-                'use_clf': use_clf,
-                'clf_type': clf_type,
-                'clf_nsigma_threshold': clf_nsigma_threshold,
-                'minus_inf': minus_inf,
-                'seed': seed
-            },
-            likelihood_name=self.loglikelihood.name,
-            resume_from_existing=resume
-        )
-        
-        self.fresh_start = not resume
-    
-    def _handle_resume(self, resume_file, use_clf):
-        """Handle resume from existing run (main process only)."""
-        try:
-            log.info(f" Attempting to resume from file {resume_file}")
-            gp_file = resume_file + '_gp'
-            self.gp = load_gp_file(gp_file, use_clf)
-            
-            # Test GP functionality
-            _ = self.gp.predict_mean_single(self.gp.train_x[0])
-            log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
-            
-            # Restore iteration and best point info
-            if self.results_manager.is_resuming():
-                self.start_iteration = self.results_manager.get_last_iteration()
-                log.info(f"Resuming from iteration {self.start_iteration}")
-                log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
-                
-                if self.results_manager.best_loglike_values:
-                    self.best_f = max(self.results_manager.best_loglike_values)
-                    best_idx = self.results_manager.best_loglike_values.index(self.best_f)
-                    self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_idx]
-                    log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
-                else:
-                    self.start_iteration = 0
-                    self.best_pt_iteration = 0
-                
-                if self.results_manager.converged:
-                    self.prev_converged = True
-                    self.convergence_counter = 1
-                    log.info(" Previous run had converged.")
-            else:
-                self.start_iteration = 0
-                self.best_pt_iteration = 0
-                log.info("Starting fresh optimization")
-            
-            self.fresh_start = False
-            
-        except Exception as e:
-            log.error(f" Failed to load GP from file {gp_file}: {e}")
-            log.info(" Starting a fresh run instead.")
-            self.fresh_start = True
-    
-    def _handle_fresh_start(self, n_cobaya_init, n_sobol_init, init_train_x, init_train_y,
-                           use_clf, clf_type, clf_use_size, clf_update_step,
-                           clf_nsigma_threshold, minus_inf, optimizer, gp_kwargs):
-        """Handle fresh start initialization (main process only)."""
-        self.start_iteration = 0
-        self.best_pt_iteration = 0
-        
-        # Generate and evaluate initial training points
-        train_x, train_y = self._get_initial_training_data(
-            n_cobaya_init=n_cobaya_init,
-            n_sobol_init=n_sobol_init,
-            init_train_x=init_train_x,
-            init_train_y=init_train_y
-        )
-        
-        # Initialize and train GP
-        self._initialize_gp(
-            train_x=train_x,
-            train_y=train_y,
-            use_clf=use_clf,
-            clf_type=clf_type,
-            clf_use_size=clf_use_size,
-            clf_update_step=clf_update_step,
-            clf_nsigma_threshold=clf_nsigma_threshold,
-            minus_inf=minus_inf,
-            optimizer=optimizer,
-            gp_kwargs=gp_kwargs
-        )
-    
-    def _finalize_main_initialization(self):
-        """Finalize main process initialization."""
-        # Extract best point from GP
-        if self.gp.train_y.size > 0:
-            idx_best = jnp.argmax(self.gp.train_y)
-            self.best_pt = scale_from_unit(self.gp.train_x[idx_best], self.loglikelihood.param_bounds).flatten()
-            best_f_from_gp = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
-        else:
-            best_f_from_gp = -np.inf
-            self.best_pt = None
-        
-        # Use restored best_f if available and better
-        if not hasattr(self, 'best_f') or best_f_from_gp > getattr(self, 'best_f', -np.inf):
-            self.best_f = best_f_from_gp
-            if not hasattr(self, 'best_pt_iteration'):
-                self.best_pt_iteration = self.start_iteration
-        
-        if self.best_pt is not None:
-            self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
-            log.info(f" Initial best point {self.best} with value = {self.best_f:.6f}")
-        
-        # Save initial GP
-        self.gp.save(filename=f"{self.save_path}_gp")
-        log.info(f" Saving GP to file {self.save_path}_gp")
-        
-        # Initialize KL divergence tracking
-        self.prev_samples = None
+    def run_WIPV(self, ii=0):
+        """Run optimization loop for WIPV acquisition function."""
+        return self.run_weighted_integrated_posterior(WIPV, ii)

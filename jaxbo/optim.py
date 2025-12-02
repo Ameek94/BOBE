@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import minimize 
-from .utils.core import scale_to_unit, scale_from_unit, split_vmap 
+from .utils.core import scale_to_unit, scale_from_unit
 from .utils.log import get_logger
 
 try:

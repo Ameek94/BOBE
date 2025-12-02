@@ -1,7 +1,7 @@
 """
-JaxBO - Bayesian Optimization for Expensive Likelihoods using JAX
+JaxBo - Bayesian Optimization for Expensive Likelihoods using JAX
 
-JaxBO is a package for performing Bayesian model comparison for expensive 
+JaxBo is a package for performing Bayesian model comparison for expensive 
 likelihood functions, developed for applications to cosmology. It uses 
 Bayesian Optimization to train Gaussian process surrogates and runs 
 nested sampling/MCMC on the surrogate instead of the underlying expensive 

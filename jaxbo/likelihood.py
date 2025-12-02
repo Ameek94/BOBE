@@ -1,10 +1,6 @@
 # Class for implementing external loglikelihoods
 import numpy as np
 from typing import Any, Callable, List, Optional, Tuple, Union, Dict
-from functools import partial
-from scipy.stats import qmc
-
-from .utils.core import scale_to_unit, scale_from_unit
 from .utils.log import get_logger
 
 log = get_logger("likelihood")

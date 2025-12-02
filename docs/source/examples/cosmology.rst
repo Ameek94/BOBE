@@ -13,7 +13,9 @@ Prerequisites
    
    .. code-block:: bash
    
-      pip install 'jaxbo[cobaya]'
+      pip install -e '.[cobaya]'
+   
+   Run this from the JaxBo source directory.
 
 You'll also need the Planck and DESI data files. Follow the 
 `Cobaya installation guide <https://cobaya.readthedocs.io/>`_ for data setup.
@@ -275,8 +277,8 @@ For expensive cosmological likelihoods, use MPI parallelization:
 
 .. code-block:: bash
 
-   # Install MPI support
-   pip install 'jaxbo[mpi]'
+   # Install MPI support (from JaxBo source directory)
+   pip install -e '.[mpi]'
    
    # Run with 4 processes
    mpirun -n 4 python cosmology_example.py

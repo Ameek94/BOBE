@@ -216,8 +216,8 @@ def get_hmc_settings(ndim, warmup_steps=None, num_samples=None, thinning=None):
     thinning : int, optional
         Thinning factor. Defaults to 4.
     """
-    warmup_steps = warmup_steps if warmup_steps is not None else (256 if ndim <= 6 else 512)
-    num_samples = num_samples if num_samples is not None else (1024 if ndim <= 6 else  512 * ndim)
+    warmup_steps = warmup_steps if warmup_steps is not None else (256 if ndim <= 9 else 512)
+    num_samples = num_samples if num_samples is not None else (1024 if ndim <= 9 else  2048)
     thinning = thinning if thinning is not None else 4
     return warmup_steps, num_samples, thinning
 

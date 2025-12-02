@@ -3,14 +3,6 @@ import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-from jax.scipy.linalg import cho_solve, solve_triangular
-import copy
-import numpyro
-from numpyro.infer import MCMC, NUTS, SA, AIES
-import numpyro.distributions as dist
-from numpyro.infer.initialization import init_to_value, init_to_sample
-from numpyro.util import enable_x64
-enable_x64()
 from .gp import GP, safe_noise_floor
 from .clf import (
     CLASSIFIER_REGISTRY

@@ -84,5 +84,5 @@ all = [
     "cobaya>=3.0.0"
 ]
 
-[tool.setuptools.packages.find]
-exclude = ["examples", "tests", "docs"]
+[tool.setuptools]
+packages = ["jaxbo"]

@@ -31,33 +31,32 @@ def main():
     """
 
     # Set up the cosmological likelihood
-    cobaya_input_file = './cosmo_input/LCDM_Planck_DESIDr2.yaml'
+    cobaya_input_file = './../examples/cosmo_input/LCDM_Planck_DESI.yaml'
     
     start = time.time()
     print("Starting BOBE run with automatic timing measurement...")
 
-    likelihood_name = f'Planck_DESIDR2_LCDM_{clf_type}_uniform_{seed}'
+    likelihood_name = f'Planck_DESIDR2_LCDM_uniform_{seed}'
 
     # Pass Cobaya YAML file path directly to BOBE
     bobe = BOBE(
         loglikelihood=cobaya_input_file,  # BOBE handles CobayaLikelihood internally
         likelihood_name=likelihood_name,
         confidence_for_unbounded=0.9999995,
-        noise_std=0.0,
-        resume=True,
+        resume=False,
         resume_file=f'./results/{likelihood_name}',
         save=True,
         save_dir='./results/',
         seed=seed,
         verbosity='INFO',
-        n_cobaya_init=32,
-        n_sobol_init=64,
+        n_cobaya_init=8,
+        n_sobol_init=32,
         optimizer='scipy',
         gp_kwargs={'lengthscale_prior': None, 'kernel_variance_prior': None,
-                   'lengthscale_bounds': [1e-2,5.]},
+                   'lengthscale_bounds': [1e-2,4.]},
         use_clf=True,
         clf_type=clf_type,
-        minus_inf=-1e5,
+        minus_inf=-1e10,
     )
     
     results = bobe.run(
@@ -66,14 +65,15 @@ def main():
         max_evals=2500,
         max_gp_size=1500,
         convergence_n_iters=2,
-        fit_step=5,
-        wipv_batch_size=5,
-        ns_step=5,
+        fit_step=20,
+        wipv_batch_size=2,
+        ns_step=10,
         zeta_ei=0.1,
         num_hmc_warmup=512,
-        num_hmc_samples=12000,
+        num_hmc_samples=2048,
+        thinning=2,
         mc_points_size=512,
-        num_chains=num_devices,
+        num_chains=6,
         logz_threshold=0.01,
         do_final_ns=True,
     )
@@ -116,7 +116,7 @@ def main():
             plot_params=param_list_LCDM,
             output_dir='./results/',
             output_file=f'{likelihood.name}_cosmo',
-            reference_file='./cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
+            reference_file='../examples/cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
             scatter_points=False,
@@ -130,7 +130,7 @@ def main():
             param_labels=likelihood.param_labels,
             output_file=f'{likelihood.name}_full',
             output_dir='./results/',
-            reference_file='./cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
+            reference_file='../examples/cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
             reference_ignore_rows=0.3,
             reference_label='MCMC',
             scatter_points=False,
