@@ -38,26 +38,13 @@ cd BOBE
 python -m pip install .
 ```
 
-from the package directory. For an editable (dev) install do
+For an editable (dev) install do 
 
 ```bash
 python -m pip install -e .
 ```
 
-### Using Conda
-
-You can also set up an environment with the exact package versions BOBE was developed and tested with (or your own custom environment)
-
-```bash
-# Create environment from the minimal essential packages
-conda env create -f environment.yml
-
-# Activate the environment
-conda activate BOBE
-
-# Install BOBE
-pip install .
-```
+from the package directory. 
 
 ### Optional Dependencies
 
@@ -162,6 +149,24 @@ If you use BOBE in your research, please cite:
   url = {https://github.com/Ameek94/BOBE}
 }
 ```
+
+## Troubleshooting
+
+### Installation issues
+
+In case you run into installation issues related to incompatible versions of packages, you can also set up an environment with the exact package versions BOBE was developed and tested with
+
+```bash
+# Create environment from the minimal essential packages
+conda env create -f environment.yml
+
+# Activate the environment
+conda activate BOBE
+
+# Install BOBE
+pip install .
+```
+
 
 ## Support
 
