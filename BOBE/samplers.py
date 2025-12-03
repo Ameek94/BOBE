@@ -102,6 +102,8 @@ def nested_sampling_Dy(gp: GP,
         Whether the nested sampling run was successful
     """
 
+    log.info("Running Nested Sampling using Dynesty...")
+
     # Auto-detect cluster environment if print_progress not explicitly set
     if is_cluster_environment():
         print_progress = False
@@ -136,7 +138,7 @@ def nested_sampling_Dy(gp: GP,
             if np.all(live_logl == live_logl[0]):
                 log.debug(f" All logl values are the same on try {i+1}/{maxtries}. Retrying...")
             else:
-                log.info(f" Successful live points on try {i+1}/{maxtries}.")
+                log.debug(f" Successful live points on try {i+1}/{maxtries}.")
                 success = True
                 break
         live_points = x[live_indices]
@@ -162,9 +164,9 @@ def nested_sampling_Dy(gp: GP,
     samples_x = res['samples']
     logl = res['logl']
     success = ~np.all(logl == logl[0]) # in case of failure do not check convergence
-    log.info(f" Nested Sampling took {time.time() - start:.2f}s")
-    log.info(" Log Z evaluated using {} points".format(np.shape(logl))) 
-    log.info(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
+    log.debug(f" Nested Sampling took {time.time() - start:.2f}s")
+    log.debug(" Log Z evaluated using {} points".format(np.shape(logl))) 
+    log.debug(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
 
     var = jax.lax.map(gp.predict_var_single,samples_x,batch_size=100)
     std = np.sqrt(var)
@@ -301,7 +303,7 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
     # Adaptive method selection based on device/chain configuration
     if num_devices == 1:
         # Sequential method for single device
-        log.info("Using sequential method (single device)")
+        log.debug("Using sequential method (single device)")
         samples_x = []
         logps = []
         for i in range(num_chains):
@@ -322,7 +324,7 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         
     elif 1 < num_devices < num_chains:
         # Chunked method when devices < chains (but > 1 device)
-        log.info(f"Using chunked pmap method ({num_devices} devices < {num_chains} chains)")
+        log.debug(f"Using chunked pmap method ({num_devices} devices < {num_chains} chains)")
         
         # Process chains in chunks of device count using the existing run_single_chain
         pmapped_chunked = jax.pmap(run_single_chain, in_axes=(0, 0), out_axes=(0, 0))
