@@ -298,24 +298,52 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
 
     log.debug(f"Running MCMC with {num_chains} chains on {num_devices} devices.")
 
-    if (num_devices >= num_chains) and num_chains > 1:
-        # if devices present run with pmap
-        pmapped = jax.pmap(run_single_chain, in_axes=(0,0),out_axes=(0,0))
-        samples_x, logps = pmapped(rng_keys,inits)
-        # reshape to get proper shapes
-        samples_x = jnp.concatenate(samples_x, axis=0)
-        logps = jnp.reshape(logps, (samples_x.shape[0],))
-    else:
-        # if devices not available run sequentially
+    # Adaptive method selection based on device/chain configuration
+    if num_devices == 1:
+        # Sequential method for single device
+        log.info("Using sequential method (single device)")
         samples_x = []
         logps = []
         for i in range(num_chains):
             samples_x_i, logps_i = run_single_chain(rng_keys[i], inits[i])
             samples_x.append(samples_x_i)
             logps.append(logps_i)
-
         samples_x = jnp.concatenate(samples_x)
         logps = jnp.concatenate(logps)
+        
+    elif num_devices >= num_chains and num_chains > 1:
+        # Direct pmap method when devices >= chains
+        log.info("Using direct pmap method (devices >= chains)")
+        pmapped = jax.pmap(run_single_chain, in_axes=(0, 0), out_axes=(0, 0))
+        samples_x, logps = pmapped(rng_keys, inits)
+        samples_x = jnp.concatenate(samples_x, axis=0)
+        logps = jnp.concatenate(logps, axis=0)
+        logps = jnp.reshape(logps, (samples_x.shape[0],))
+        
+    elif 1 < num_devices < num_chains:
+        # Chunked method when devices < chains (but > 1 device)
+        log.info(f"Using chunked pmap method ({num_devices} devices < {num_chains} chains)")
+        
+        # Process chains in chunks of device count using the existing run_single_chain
+        pmapped_chunked = jax.pmap(run_single_chain, in_axes=(0, 0), out_axes=(0, 0))
+        
+        all_samples = []
+        all_logps = []
+        
+        for i in range(0, num_chains, num_devices):
+            end_idx = min(i + num_devices, num_chains)
+            chunk_keys = rng_keys[i:end_idx]
+            chunk_inits = inits[i:end_idx]
+            
+            # Run chunk (pmap handles variable chunk sizes automatically)
+            chunk_samples, chunk_logps = pmapped_chunked(chunk_keys, chunk_inits)
+            
+            all_samples.append(chunk_samples)
+            all_logps.append(chunk_logps)
+        
+        # Concatenate all chunks
+        samples_x = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_samples], axis=0)
+        logps = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_logps], axis=0)
 
     samples_dict = {
         'x': samples_x,

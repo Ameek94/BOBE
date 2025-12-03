@@ -77,12 +77,15 @@ def get_svm_predict_proba_fn(params):
     return jax.jit(partial(svm_predict_proba, support_vectors=support_vectors, 
                           dual_coef=dual_coef, intercept=intercept, gamma=gamma))
 
+
+# -----------------------------------------------------------------------------
+# Neural Network Classifier (currently in development)
+
 def train_nn_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     """Train neural network classifier and return parameters, metrics, and predict function."""
     if not FLAX_AVAILABLE or not OPTAX_AVAILABLE:
-        raise ImportError(
-            \"Flax and optax are required for NN classifier. \"
-            \"Install with: pip install 'BOBE[nn]'\"
+        raise ImportError("Flax and optax are required for NN classifier. "
+            "Install with: pip install 'BOBE[nn]'"
         )
     # Create model with settings
     label_size = X.shape[0]
