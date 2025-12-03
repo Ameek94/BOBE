@@ -20,7 +20,7 @@ def _get_optimizer(optimizer_name: str, learning_rate: float = 1e-3, optimizer_k
     if not OPTAX_AVAILABLE:
         raise ImportError(
             "optax is required for this optimizer. "
-            "Install it with: pip install 'jaxbo[nn]' or pip install optax"
+            "Install it with: pip install 'BOBE[nn]' or pip install optax"
         )
     optimizer_name = optimizer_name.lower()
     if 'learning_rate' not in optimizer_kwargs:
@@ -84,12 +84,12 @@ def optimize_optax(
     SEQUENTIAL OPTIMIZER: Minimize a function using JAX + optax,
     iterating through restarts with a Python for-loop.
     
-    Requires optax to be installed. Install with: pip install 'jaxbo[nn]' or pip install optax
+    Requires optax to be installed. Install with: pip install 'BOBE[nn]' or pip install optax
     """
     if not OPTAX_AVAILABLE:
         raise ImportError(
             "optax is required for optimize_optax. "
-            "Install it with: pip install 'jaxbo[nn]' or pip install optax"
+            "Install it with: pip install 'BOBE[nn]' or pip install optax"
         )
 
     if x0 is None:
@@ -179,12 +179,12 @@ def optimize_optax_vmap(
     VECTORIZED OPTIMIZER: Minimize a function using JAX + optax,
     vectorizing over restarts with jax.vmap for parallel execution. Only to be used with EI.
     
-    Requires optax to be installed. Install with: pip install 'jaxbo[nn]' or pip install optax
+    Requires optax to be installed. Install with: pip install 'BOBE[nn]' or pip install optax
     """
     if not OPTAX_AVAILABLE:
         raise ImportError(
             "optax is required for optimize_optax_vmap. "
-            "Install it with: pip install 'jaxbo[nn]' or pip install optax"
+            "Install it with: pip install 'BOBE[nn]' or pip install optax"
         )
 
     if x0 is None:

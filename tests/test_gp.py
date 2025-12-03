@@ -15,7 +15,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import sys
-from jaxbo.gp import GP
+from BOBE.gp import GP
 
 
 def generate_test_data(n_samples=50, d=2, seed=42):

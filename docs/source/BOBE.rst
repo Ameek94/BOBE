@@ -1,4 +1,4 @@
-jaxbo package
+BOBE package
 =============
 
 Submodules
@@ -7,7 +7,7 @@ Submodules
 acquisition
 ------------------------
 
-.. automodule:: jaxbo.acquisition
+.. automodule:: BOBE.acquisition
    :members:
    :show-inheritance:
    :undoc-members:
@@ -15,7 +15,7 @@ acquisition
 bo
 ---------------
 
-.. automodule:: jaxbo.bo
+.. automodule:: BOBE.bo
    :members:
    :show-inheritance:
    :undoc-members:
@@ -23,7 +23,7 @@ bo
 clf
 ----------------
 
-.. automodule:: jaxbo.clf
+.. automodule:: BOBE.clf
    :members:
    :show-inheritance:
    :undoc-members:
@@ -31,7 +31,7 @@ clf
 clf\_gp
 --------------------
 
-.. automodule:: jaxbo.clf_gp
+.. automodule:: BOBE.clf_gp
    :members:
    :show-inheritance:
    :undoc-members:
@@ -39,7 +39,7 @@ clf\_gp
 gp
 ---------------
 
-.. automodule:: jaxbo.gp
+.. automodule:: BOBE.gp
    :members:
    :show-inheritance:
    :undoc-members:
@@ -47,7 +47,7 @@ gp
 likelihood
 -----------------------
 
-.. automodule:: jaxbo.likelihood
+.. automodule:: BOBE.likelihood
    :members:
    :show-inheritance:
    :undoc-members:
@@ -55,7 +55,7 @@ likelihood
 samplers
 ----------------------------
 
-.. automodule:: jaxbo.samplers
+.. automodule:: BOBE.samplers
    :members:
    :show-inheritance:
    :undoc-members:
@@ -63,7 +63,7 @@ samplers
 optim
 ------------------
 
-.. automodule:: jaxbo.optim
+.. automodule:: BOBE.optim
    :members:
    :show-inheritance:
    :undoc-members:
@@ -71,7 +71,7 @@ optim
 run
 ----------------
 
-.. automodule:: jaxbo.run
+.. automodule:: BOBE.run
    :members:
    :show-inheritance:
    :undoc-members:
@@ -79,7 +79,7 @@ run
 Contents
 ---------------
 
-.. automodule:: jaxbo
+.. automodule:: BOBE
    :members:
    :show-inheritance:
    :undoc-members:

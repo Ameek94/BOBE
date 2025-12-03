@@ -1,7 +1,7 @@
-jaxbo
-=====
+BOBE
+====
 
 .. toctree::
    :maxdepth: 4
 
-   jaxbo
+   BOBE

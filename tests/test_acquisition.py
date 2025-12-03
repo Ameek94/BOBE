@@ -14,8 +14,8 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import sys
-from jaxbo.gp import GP
-from jaxbo.acquisition import EI, LogEI, WIPV
+from BOBE.gp import GP
+from BOBE.acquisition import EI, LogEI, WIPV
 
 
 def generate_test_gp(n_samples=30, d=2, seed=42):

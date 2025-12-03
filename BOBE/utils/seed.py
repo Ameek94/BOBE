@@ -1,5 +1,5 @@
 """
-Utility functions for managing global random seeds across the JaxBo package.
+Utility functions for managing global random seeds across the BOBE package.
 """
 
 import os

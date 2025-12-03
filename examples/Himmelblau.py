@@ -1,7 +1,7 @@
-from jaxbo.utils.plot import plot_final_samples, BOBESummaryPlotter 
-from jaxbo.utils.log import get_logger
-from jaxbo.utils.core import renormalise_log_weights
-from jaxbo import BOBE
+from BOBE.utils.plot import plot_final_samples, BOBESummaryPlotter 
+from BOBE.utils.log import get_logger
+from BOBE.utils.core import renormalise_log_weights
+from BOBE import BOBE
 import matplotlib.pyplot as plt
 import time
 import sys

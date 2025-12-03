@@ -4,7 +4,7 @@ Installation Guide
 Requirements
 ------------
 
-JaxBO requires Python 3.11 or 3.12 and has the following core dependencies:
+BOBE requires Python 3.11 or 3.12 and has the following core dependencies:
 
 Core Dependencies
 ~~~~~~~~~~~~~~~~~
@@ -65,8 +65,8 @@ From Source (Recommended)
 
 .. code-block:: bash
 
-   git clone https://github.com/Ameek94/JaxBo.git
-   cd JaxBo
+   git clone https://github.com/Ameek94/BOBE.git
+   cd BOBE
 
 2. Install the package:
 
@@ -103,7 +103,7 @@ Using Conda (Development)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you face installation issues related to incompatible versions of packages, you can set up 
-an environment with the exact package versions JaxBO was developed and tested with:
+an environment with the exact package versions BOBE was developed and tested with:
 
 .. code-block:: bash
 
@@ -111,9 +111,9 @@ an environment with the exact package versions JaxBO was developed and tested wi
    conda env create -f environment.yml
    
    # Activate the environment
-   conda activate jaxbo
+   conda activate BOBE
    
-   # Install JaxBO in development mode
+   # Install BOBE in development mode
    pip install -e .
 
 Virtual Environment Setup
@@ -126,8 +126,8 @@ Using conda
 
 .. code-block:: bash
 
-   conda create -n jaxbo python=3.12
-   conda activate jaxbo
+   conda create -n BOBE python=3.12
+   conda activate BOBE
    python -m pip install .
 
 Using venv
@@ -135,8 +135,8 @@ Using venv
 
 .. code-block:: bash
 
-   python -m venv jaxbo_env
-   source jaxbo_env/bin/activate  # On Windows: jaxbo_env\Scripts\activate
+   python -m venv BOBE_env
+   source BOBE_env/bin/activate  # On Windows: BOBE_env\Scripts\activate
    python -m pip install .
 
 GPU/TPU Support
@@ -173,8 +173,8 @@ To verify your installation, run:
 
 .. code-block:: python
 
-   import jaxbo
-   print(f"JaxBo version: {jaxbo.__version__}")
+   import BOBE
+   print(f"BOBE version: {BOBE.__version__}")
    
    # Check JAX backend
    import jax
@@ -219,5 +219,5 @@ Getting Help
 If you encounter installation issues:
 
 1. Check the `JAX installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_
-2. Review the `GitHub Issues <https://github.com/Ameek94/JaxBo/issues>`_
+2. Review the `GitHub Issues <https://github.com/Ameek94/BOBE/issues>`_
 3. Contact the developers (see main documentation page)

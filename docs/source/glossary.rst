@@ -13,7 +13,7 @@ Glossary
       A global optimization technique for expensive-to-evaluate functions. It uses a probabilistic model (typically a Gaussian Process) to make decisions about where to sample next.
 
    BOBE
-      Bayesian Optimization for Bayesian Evidence - the core algorithm implemented in JaxBo for efficiently estimating the Bayesian evidence of cosmological models.
+      Bayesian Optimization for Bayesian Evidence - the core algorithm implemented in BOBE for efficiently estimating the Bayesian evidence of cosmological models.
 
    Cobaya
       A framework for cosmological parameter estimation that handles theory codes, likelihoods, and sampling algorithms in a modular way.
@@ -31,7 +31,7 @@ Glossary
       A Python library for high-performance machine learning research that provides automatic differentiation and compilation to GPU/TPU.
 
    Log Evidence
-      The natural logarithm of the Bayesian evidence, often easier to work with numerically and the primary quantity estimated by JaxBo.
+      The natural logarithm of the Bayesian evidence, often easier to work with numerically and the primary quantity estimated by BOBE.
 
    Marginal Likelihood
       Another term for Bayesian evidence - the probability of the observed data given a model, marginalized over all possible parameter values.
@@ -52,7 +52,7 @@ Glossary
       A Gaussian Process variant that assumes the function varies primarily along axis-aligned subspaces, making it more efficient for high-dimensional problems.
 
    Surrogate Model
-      A computationally cheap approximation of an expensive function, used in optimization to guide the search. In JaxBo, Gaussian Processes serve as surrogate models.
+      A computationally cheap approximation of an expensive function, used in optimization to guide the search. In BOBE, Gaussian Processes serve as surrogate models.
 
    Weighted Integrated Posterior Variance (WIPV)
       An acquisition function that weights the integrated posterior variance by the posterior probability, particularly useful for evidence estimation.

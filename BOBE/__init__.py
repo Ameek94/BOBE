@@ -1,7 +1,7 @@
 """
-JaxBo - Bayesian Optimization for Expensive Likelihoods using JAX
+BOBE - Bayesian Optimization for Expensive Likelihoods using JAX
 
-JaxBo is a package for performing Bayesian model comparison for expensive 
+BOBE is a package for performing Bayesian model comparison for expensive 
 likelihood functions, developed for applications to cosmology. It uses 
 Bayesian Optimization to train Gaussian process surrogates and runs 
 nested sampling/MCMC on the surrogate instead of the underlying expensive 
@@ -15,7 +15,7 @@ Main Components:
 - Acquisition functions: EI, LogEI, WIPV, WIPStd
 
 Quick Start:
-    >>> from jaxbo import BOBE
+    >>> from BOBE import BOBE
     >>> import numpy as np
     >>> 
     >>> def my_loglike(x):

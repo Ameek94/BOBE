@@ -1,5 +1,5 @@
 """
-Results management system for JaxBo BOBE sampler.
+Results management system for BOBE sampler.
 
 This module provides comprehensive result storage and formatting similar to 
 typical nested samplers like Dynesty, PolyChord, MultiNest, etc.

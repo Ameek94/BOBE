@@ -12,8 +12,8 @@ Tests include:
 
 import numpy as np
 import sys
-from jaxbo.likelihood import Likelihood
-from jaxbo import mpi
+from BOBE.likelihood import Likelihood
+from BOBE import mpi
 
 
 def simple_loglike(x):

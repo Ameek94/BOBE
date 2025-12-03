@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - TBD
 
 ### Added
-- Initial release of JaxBO
+- Initial release of BOBE
 - Bayesian Optimization for Bayesian Evidence computation
 - Gaussian Process surrogates with RBF and Matérn kernels
 - DSLP and SAAS prior support for GP hyperparameters

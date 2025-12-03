@@ -1,7 +1,7 @@
-Contributing to JaxBo
-=====================
+Contributing to BOBE
+====================
 
-We welcome contributions to JaxBo! This guide explains how to set up a development environment and contribute to the project.
+We welcome contributions to BOBE! This guide explains how to set up a development environment and contribute to the project.
 
 Development Setup
 -----------------
@@ -11,16 +11,16 @@ Development Setup
 
 .. code-block:: bash
 
-   git clone https://github.com/YOUR_USERNAME/JaxBo.git
-   cd JaxBo
+   git clone https://github.com/YOUR_USERNAME/BOBE.git
+   cd BOBE
 
 2. Create Development Environment
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-   conda create -n jaxbo-dev python=3.12
-   conda activate jaxbo-dev
+   conda create -n BOBE-dev python=3.12
+   conda activate BOBE-dev
    
    # Install in development mode
    pip install -e ".[dev]"
@@ -46,9 +46,9 @@ Run all checks:
 
 .. code-block:: bash
 
-   black jaxbo/
-   isort jaxbo/
-   flake8 jaxbo/
+   black BOBE/
+   isort BOBE/
+   flake8 BOBE/
    mypy jaxbo/
 
 Testing

@@ -1,7 +1,7 @@
-JaxBo Basic Tutorial: Computing the Bayesian evidence for the Himmelblau Function
-====================================================================================
+BOBE Basic Tutorial: Computing the Bayesian evidence for the Himmelblau Function
+==================================================================================
 
-This tutorial demonstrates the basic usage of JaxBo through a classic optimization problem: the Himmelblau function. This example is based on the ``examples/Himmelblau.py`` file and shows how to set up and run a Bayesian optimization using the BOBE (Bayesian Optimization for Bayesian Evidence) framework.
+This tutorial demonstrates the basic usage of BOBE through a classic optimization problem: the Himmelblau function. This example is based on the ``examples/Himmelblau.py`` file and shows how to set up and run a Bayesian optimization using the BOBE (Bayesian Optimization for Bayesian Evidence) framework.
 
 Overview
 --------
@@ -29,7 +29,7 @@ The function has four global minima at approximately:
 
 By the end of this tutorial, you will understand:
 
-- How to define a likelihood function for JaxBo
+- How to define a likelihood function for BOBE
 - How to set up parameter bounds and transformations
 - How to configure and run the BOBE optimizer
 - How to analyze and visualize the results
@@ -42,9 +42,9 @@ First, let's import all the necessary libraries and set up the environment.
 
 .. code-block:: python
 
-   # Core JaxBo imports
-   from jaxbo import BOBE
-   from jaxbo.utils.plot import plot_final_samples, BOBESummaryPlotter
+   # Core BOBE imports
+   from BOBE import BOBE
+   from BOBE.utils.plot import plot_final_samples, BOBESummaryPlotter
    import matplotlib.pyplot as plt
    import time
    import numpy as np
@@ -389,7 +389,7 @@ BOBE provides comprehensive plotting utilities. Let's create a summary dashboard
 Summary
 -------
 
-This tutorial demonstrated the complete workflow for using JaxBo's BOBE framework:
+This tutorial demonstrated the complete workflow for using BOBE's BOBE framework:
 
 1. **Problem Setup**: Defined the Himmelblau function as a multi-modal test case
 2. **BOBE Configuration**: Set up the optimization with appropriate parameters

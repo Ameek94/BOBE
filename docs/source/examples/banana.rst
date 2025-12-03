@@ -3,7 +3,7 @@ Banana Function Example
 
 The Rosenbrock "banana" function is a classic test problem for optimization algorithms. 
 Its banana-shaped contours make it challenging for many methods, providing a good test 
-of JaxBO's ability to handle non-trivial likelihood surfaces.
+of BOBE's ability to handle non-trivial likelihood surfaces.
 
 Problem Description
 -------------------
@@ -29,9 +29,9 @@ Complete Example Code
 
    import numpy as np
    import matplotlib.pyplot as plt
-   from jaxbo.run import run_bobe
-   from jaxbo.utils.log import get_logger
-   from jaxbo.utils.plot import BOBESummaryPlotter
+   from BOBE.run import run_bobe
+   from BOBE.utils.log import get_logger
+   from BOBE.utils.plot import BOBESummaryPlotter
    from getdist import MCSamples
    
    def loglike_banana(X):
@@ -154,7 +154,7 @@ Key Takeaways
 
 1. **No Classifier Needed**: Simple 2D problems don't need a classifier
 2. **Fast Convergence**: The WIPV acquisition function efficiently explores the banana valley
-3. **Accurate Evidence**: JaxBO accurately estimates the evidence with ~100 evaluations
+3. **Accurate Evidence**: BOBE accurately estimates the evidence with ~100 evaluations
 
 Parameter Tuning Tips
 ---------------------

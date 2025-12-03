@@ -14,8 +14,8 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import sys
-from jaxbo import mpi
-from jaxbo.gp import GP
+from BOBE import mpi
+from BOBE.gp import GP
 
 
 def simple_objective(x):

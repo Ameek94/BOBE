@@ -1,8 +1,8 @@
-# JaxBO Copilot Instructions
+# BOBE Copilot Instructions
 
 ## Project Overview
 
-JaxBO is a Bayesian Optimization package for expensive likelihood functions, primarily targeting cosmology applications. It trains Gaussian Process (GP) surrogates for expensive likelihoods and runs nested sampling/MCMC on the surrogate instead of the true likelihood to compute Bayesian Evidence.
+BOBE is a Bayesian Optimization package for expensive likelihood functions, primarily targeting cosmology applications. It trains Gaussian Process (GP) surrogates for expensive likelihoods and runs nested sampling/MCMC on the surrogate instead of the true likelihood to compute Bayesian Evidence.
 
 **Core workflow**: Initialize points → Train GP surrogate → Acquire new points via acquisition functions → Update GP → Run nested sampling → Check convergence → Repeat
 
@@ -10,16 +10,16 @@ JaxBO is a Bayesian Optimization package for expensive likelihood functions, pri
 
 ### Main Components
 
-1. **BOBE (`jaxbo/bo.py`)**: Primary orchestrator class that manages the entire BO loop
-2. **GP Models (`jaxbo/gp.py`, `jaxbo/clf_gp.py`)**: 
+1. **BOBE (`BOBE/bo.py`)**: Primary orchestrator class that manages the entire BO loop
+2. **GP Models (`BOBE/gp.py`, `BOBE/clf_gp.py`)**: 
    - `GP`: Base Gaussian Process with JAX-based kernels (RBF, Matérn) and priors (DSLP, SAAS)
    - `GPwithClassifier`: Extended GP with SVM/NN/Ellipsoid classifier to filter low-likelihood regions
-3. **Likelihood Interfaces (`jaxbo/likelihood.py`)**:
+3. **Likelihood Interfaces (`BOBE/likelihood.py`)**:
    - `Likelihood`: Base class for any likelihood function
    - `CobayaLikelihood`: Interfaces with Cobaya for cosmological likelihoods (optional dependency)
-4. **Acquisition Functions (`jaxbo/acquisition.py`)**: EI, LogEI, WIPV (Weighted Integrated Posterior Variance), WIPStd
-5. **Nested Sampler (`jaxbo/nested_sampler.py`)**: Dynesty wrapper for evidence computation on GP surrogate
-6. **MPI Pool (`jaxbo/utils/pool.py`)**: Custom MPI parallelization for likelihood evaluations and GP fitting
+4. **Acquisition Functions (`BOBE/acquisition.py`)**: EI, LogEI, WIPV (Weighted Integrated Posterior Variance), WIPStd
+5. **Nested Sampler (`BOBE/nested_sampler.py`)**: Dynesty wrapper for evidence computation on GP surrogate
+6. **MPI Pool (`BOBE/utils/pool.py`)**: Custom MPI parallelization for likelihood evaluations and GP fitting
 
 ### Data Flow
 
@@ -49,7 +49,7 @@ enable_x64()
 ### Parameter Space Convention
 - **Internal**: All GP/acquisition operations work in unit cube [0,1]^D
 - **External**: User-facing parameters use physical bounds
-- Use `scale_to_unit()` and `scale_from_unit()` from `jaxbo/utils/core.py` for conversions
+- Use `scale_to_unit()` and `scale_from_unit()` from `BOBE/utils/core.py` for conversions
 - Training data stored in both spaces: `train_x` (unit), `train_x_clf` (unit for classifier GP)
 
 ### Classifier-GP Thresholds
@@ -66,7 +66,7 @@ Worker processes call `pool.worker_wait(likelihood, seed)` and loop indefinitely
 - Check `pool.is_master` before I/O operations; workers are silent
 
 ### Results Management
-`BOBEResults` class (`jaxbo/utils/results.py`) handles all saving:
+`BOBEResults` class (`BOBE/utils/results.py`) handles all saving:
 - Periodic saves every `save_step` iterations
 - GP state saved as pickle (`.gp` extension)
 - Samples saved as `.npz` (x, weights, logl, logp)
@@ -95,7 +95,7 @@ No formal test suite in `tests/` directory. `test_methods/` contains development
 Primary method (exact versions):
 ```bash
 conda env create -f environment.yml
-conda activate jaxbo
+conda activate BOBE
 pip install -e .
 ```
 
@@ -115,7 +115,7 @@ cd docs
 ## Key Implementation Details
 
 ### GP Hyperparameter Optimization
-Two optimizers available (`jaxbo/optim.py`):
+Two optimizers available (`BOBE/optim.py`):
 - `scipy`: L-BFGS-B (default, more robust)
 - `optax`: Adam/SGD with JAX autodiff (faster but requires tuning)
 
@@ -170,7 +170,7 @@ In `GPwithClassifier`, classifier trains when:
 
 ## Useful Utilities
 
-- `BOBESummaryPlotter` (`jaxbo/utils/plot.py`): Automated convergence plots
+- `BOBESummaryPlotter` (`BOBE/utils/plot.py`): Automated convergence plots
 - `plot_final_samples()`: Corner plots with GetDist integration
 - `get_logger()`: Consistent logging with rank-aware MPI output
 - `set_global_seed()`: Synchronize NumPy/JAX RNG across processes

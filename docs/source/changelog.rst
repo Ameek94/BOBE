@@ -1,7 +1,7 @@
 Changelog
 =========
 
-All notable changes to JaxBo will be documented in this file.
+All notable changes to BOBE will be documented in this file.
 
 The format is based on `Keep a Changelog <https://keepachangelog.com/en/1.0.0/>`_,
 and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0.html>`_.
@@ -21,7 +21,7 @@ Added
 
 Added
 ~~~~~
-- Initial release of JaxBo
+- Initial release of BOBE
 - Core BOBE (Bayesian Optimization for Bayesian Evidence) implementation
 - Deep Sigmoidal Location Process (DSLP) Gaussian Process
 - Sparse Axis-Aligned Subspace (SAAS) Gaussian Process

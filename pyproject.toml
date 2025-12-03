@@ -6,16 +6,16 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "jaxbo"
+name = "BOBE"
 version = "0.1.0"
 description = "A Bayesian Optimization package for cosmology using JAX"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
 authors = [
     {name = "Ameek Malhotra", email = "ameekmalhotra@gmail.com"},
     {name = "Nathan Cohen", email = "nathan.cohen@unsw.edu.au"},
-    {name = "Jan Hamman"},  
+    {name = "Jan Hamann", email = "jan.hamann@unsw.edu.au"},  
 ]
 dependencies = [
     "jax>=0.4.20,<=0.6.2",
@@ -40,15 +40,14 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
 ]
 
 [project.urls]
-Homepage = "https://github.com/Ameek94/JaxBo"
-Documentation = "https://jaxbo.readthedocs.io"
-Repository = "https://github.com/Ameek94/JaxBo"
-"Bug Tracker" = "https://github.com/Ameek94/JaxBo/issues"
+Homepage = "https://github.com/Ameek94/BOBE"
+Documentation = "https://BOBE.readthedocs.io"
+Repository = "https://github.com/Ameek94/BOBE"
+"Bug Tracker" = "https://github.com/Ameek94/BOBE/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -85,4 +84,4 @@ all = [
 ]
 
 [tool.setuptools]
-packages = ["jaxbo"]
+packages = ["BOBE"]

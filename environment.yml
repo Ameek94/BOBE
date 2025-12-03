@@ -1,4 +1,4 @@
-name: jaxbo
+name: BOBE
 channels:
   - conda-forge
   - defaults
@@ -29,7 +29,7 @@ dependencies:
     # TensorFlow ecosystem (required for tensorflow-probability)
     - tensorflow-probability==0.23.0
     
-    # Cosmology packages - essential for JaxBo (exact versions)
+    # Cosmology packages - essential for BOBE (exact versions)
     - cobaya==3.5.7
     - getdist==1.4.7
     - dynesty==2.1.4

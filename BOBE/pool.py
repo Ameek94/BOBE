@@ -2,11 +2,11 @@ import time
 import numpy as np
 import jax.numpy as jnp
 from typing import Callable, Dict, List, Any, Union, Optional, Tuple
-from jaxbo.utils.seed import set_global_seed, get_numpy_rng, get_new_jax_key
-from jaxbo.utils.log import get_logger
-from jaxbo.gp import GP
-from jaxbo.clf_gp import GPwithClassifier
-from jaxbo.likelihood import Likelihood, CobayaLikelihood
+from BOBE.utils.seed import set_global_seed, get_numpy_rng, get_new_jax_key
+from BOBE.utils.log import get_logger
+from BOBE.gp import GP
+from BOBE.clf_gp import GPwithClassifier
+from BOBE.likelihood import Likelihood, CobayaLikelihood
 log = get_logger('pool')
 
 try:

@@ -1,12 +1,12 @@
-# JaxBO
+# BOBE
 
 (Working on mpi atm so things might break for a while.)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Documentation Status](https://readthedocs.org/projects/jaxbo/badge/?version=latest)](https://jaxbo.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://readthedocs.org/projects/BOBE/badge/?version=latest)](https://BOBE.readthedocs.io/en/latest/?badge=latest)
 
-JaxBO is a high-performance package for Bayesian model comparison using expensive likelihood functions, developed for applications to cosmology. It computes the Bayesian Evidence using Bayesian Optimization by training a Gaussian process surrogate for the expensive likelihood function and runs nested sampling/MCMC on the surrogate instead of the underlying likelihood.
+BOBE is a high-performance package for Bayesian model comparison using expensive likelihood functions, developed for applications to cosmology. It computes the Bayesian Evidence using Bayesian Optimization by training a Gaussian process surrogate for the expensive likelihood function and runs nested sampling/MCMC on the surrogate instead of the underlying likelihood.
 
 ## Key Features
 
@@ -22,7 +22,7 @@ JaxBO is a high-performance package for Bayesian model comparison using expensiv
 
 ```python
 import numpy as np
-from jaxbo import BOBE
+from BOBE import BOBE
 
 # Define your likelihood function
 def my_likelihood(params):
@@ -54,7 +54,7 @@ print(f"Samples shape: {results['samples']['x'].shape}")
 ### From Source
 
 ```bash
-git clone https://github.com/Ameek94/JaxBo.git
+git clone https://github.com/Ameek94/BOBE.git
 python -m pip install .
 ```
 
@@ -66,22 +66,22 @@ python -m pip install -e .
 
 ### Using Conda (Recommended for Development)
 
-You can also set up an environment with the exact package versions JaxB was developed and tested with:
+You can also set up an environment with the exact package versions BOBE was developed and tested with:
 
 ```bash
 # Create environment from the minimal essential packages
 conda env create -f environment.yml
 
 # Activate the environment
-conda activate jaxbo
+conda activate BOBE
 
-# Install JaxBo in development mode
+# Install BOBE in development mode
 pip install -e .
 ```
 
 ### Optional Dependencies
 
-JaxBo has several optional dependencies for extended functionality. When installing from source, you can install them as follows:
+BOBE has several optional dependencies for extended functionality. When installing from source, you can install them as follows:
 
 - **Neural Network Classifiers** (Flax + Optax): Install with `pip install -e '.[nn]'`
   - Enables MLPClassifier and EllipsoidClassifier for GP filtering
@@ -119,7 +119,7 @@ See `pyproject.toml` for full dependencies.
 
 ### Basic Example
 
-Documentation is available at [https://jaxbo.readthedocs.io](https://jaxbo.readthedocs.io). The `examples/` folder also contains several examples on how to run the code with different likelihoods, including cosmological likelihoods interfaced through the Cobaya package or your own custom likelihoods.
+Documentation is available at [https://BOBE.readthedocs.io](https://BOBE.readthedocs.io). The `examples/` folder also contains several examples on how to run the code with different likelihoods, including cosmological likelihoods interfaced through the Cobaya package or your own custom likelihoods.
 
 ```bash
 python your_chosen_example.py
@@ -140,7 +140,7 @@ where `-n 4` specifies the number of MPI processes. In MPI mode, the code distri
 For cosmological likelihoods, simply pass the Cobaya YAML file path:
 
 ```python
-from jaxbo import BOBE
+from BOBE import BOBE
 
 # Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
 bobe = BOBE(
@@ -161,7 +161,7 @@ results = bobe.run(
 <!-- **Example with MPI:**
 
 ```python
-from jaxbo import run_bobe, CobayaLikelihood
+from BOBE import run_bobe, CobayaLikelihood
 
 # Use the high-level run_bobe function for automatic MPI handling
 results = run_bobe(
@@ -176,25 +176,25 @@ The `run_bobe` function automatically detects and uses MPI when available. -->
 
 ## Citation
 
-If you use JaxBO in your research, please cite:
+If you use BOBE in your research, please cite:
 
 ```bibtex
-@article{jaxbo2025,
+@article{BOBE2025,
   author = {Cohen, Nathan and Malhotra, Ameek and Hamann, Jan},
   title = {Bayesian Optimisation for Bayesian Evidence},
   year = {2025},
-  url = {https://github.com/Ameek94/JaxBo}
+  url = {https://github.com/Ameek94/BOBE}
 }
 ```
 
 ## Support
 
-- **Documentation**: [https://jaxbo.readthedocs.io](https://jaxbo.readthedocs.io)
-- **Issues**: [https://github.com/Ameek94/JaxBoissues](https://github.com/Ameek94/JaxBo/issues)
-- **Repository**: [https://github.com/Ameek94/JaxBo](https://github.com/Ameek94/JaxBo)
+- **Documentation**: [https://BOBE.readthedocs.io](https://BOBE.readthedocs.io)
+- **Issues**: [https://github.com/Ameek94/BOBE/issues](https://github.com/Ameek94/BOBE/issues)
+- **Repository**: [https://github.com/Ameek94/BOBE](https://github.com/Ameek94/BOBE)
 
 
 
 ## License
 
-JaxBO is released under the [MIT License](LICENSE).
+BOBE is released under the [MIT License](LICENSE).

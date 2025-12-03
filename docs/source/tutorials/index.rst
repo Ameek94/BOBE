@@ -1,7 +1,7 @@
 Tutorials
 =========
 
-Step-by-step tutorials to help you learn JaxBo.
+Step-by-step tutorials to help you learn BOBE.
 
 .. toctree::
    :maxdepth: 2

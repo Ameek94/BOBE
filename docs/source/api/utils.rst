@@ -6,7 +6,7 @@ Utility modules providing various helper functions and classes.
 Results Handling
 ----------------
 
-.. automodule:: jaxbo.utils.results
+.. automodule:: BOBE.utils.results
    :members:
    :undoc-members:
    :show-inheritance:
@@ -14,7 +14,7 @@ Results Handling
 Core Utilities
 --------------
 
-.. automodule:: jaxbo.utils.core
+.. automodule:: BOBE.utils.core
    :members:
    :undoc-members:
    :show-inheritance:
@@ -22,7 +22,7 @@ Core Utilities
 Seed Management
 ---------------
 
-.. automodule:: jaxbo.utils.seed
+.. automodule:: BOBE.utils.seed
    :members:
    :undoc-members:
    :show-inheritance:
@@ -30,7 +30,7 @@ Seed Management
 Logging Utilities
 -----------------
 
-.. automodule:: jaxbo.utils.log
+.. automodule:: BOBE.utils.log
    :members:
    :undoc-members:
    :show-inheritance:
@@ -38,7 +38,7 @@ Logging Utilities
 Plotting and Visualization
 ---------------------------
 
-.. automodule:: jaxbo.utils.plot
+.. automodule:: BOBE.utils.plot
    :members:
    :undoc-members:
    :show-inheritance:
@@ -46,7 +46,7 @@ Plotting and Visualization
 Timing Utilities
 ----------------
 
-.. automodule:: jaxbo.utils.timing
+.. automodule:: BOBE.utils.timing
    :members:
    :undoc-members:
    :show-inheritance:
@@ -54,7 +54,7 @@ Timing Utilities
 Parallel Computing
 ------------------
 
-.. automodule:: jaxbo.utils.pool
+.. automodule:: BOBE.utils.pool
    :members:
    :undoc-members:
    :show-inheritance:

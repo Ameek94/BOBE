@@ -1,5 +1,5 @@
 """
-Utilities package for JaxBo.
+Utilities package for BOBE.
 
 This package contains utility modules for results management, plotting, 
 logging, timing, and other helper functions.

@@ -7,8 +7,8 @@ to verify the basic functionality of the Bayesian Optimization loop.
 
 import numpy as np
 import sys
-from jaxbo.bo import BOBE
-from jaxbo.likelihood import Likelihood
+from BOBE.bo import BOBE
+from BOBE.likelihood import Likelihood
 
 
 def rosenbrock_loglike(x):

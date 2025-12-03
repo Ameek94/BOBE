@@ -1,5 +1,5 @@
 """
-Summary plotting module for JaxBo BOBE runtime visualization.
+Summary plotting module for BOBE runtime visualization.
 
 This module provides comprehensive plotting capabilities for analyzing BOBE runs,
 including evidence evolution, GP hyperparameters, timing information, and convergence diagnostics.

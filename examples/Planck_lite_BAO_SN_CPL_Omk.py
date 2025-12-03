@@ -5,12 +5,12 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
    num_devices
 )
 clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
-from jaxbo.utils.plot import plot_final_samples, BOBESummaryPlotter
+from BOBE.utils.plot import plot_final_samples, BOBESummaryPlotter
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
-from jaxbo.utils.log import get_logger
-from jaxbo import BOBE
+from BOBE.utils.log import get_logger
+from BOBE import BOBE
 
 def main():
     # Set up the cosmological likelihood

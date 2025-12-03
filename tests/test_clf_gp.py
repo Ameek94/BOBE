@@ -14,7 +14,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import sys
-from jaxbo.clf_gp import GPwithClassifier
+from BOBE.clf_gp import GPwithClassifier
 
 
 def generate_test_data_with_outliers(n_good=30, n_bad=20, d=2, seed=42):

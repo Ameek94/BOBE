@@ -1,7 +1,7 @@
-JaxBo Documentation
-===================
+BOBE Documentation
+==================
 
-**JaxBo** is a Bayesian Optimization package for efficiently estimating Bayesian evidence and parameter posteriors, 
+**BOBE** is a Bayesian Optimization package for efficiently estimating Bayesian evidence and parameter posteriors, 
 designed for expensive likelihoods such as those in cosmology. 
 
 Key Features

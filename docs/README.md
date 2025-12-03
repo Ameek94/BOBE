@@ -1,6 +1,6 @@
-# JaxBo Documentation
+# BOBE Documentation
 
-This directory contains the ReadTheDocs-style documentation for JaxBo.
+This directory contains the ReadTheDocs-style documentation for BOBE.
 
 ## Quick Start
 
@@ -61,7 +61,7 @@ Subsection
 .. code-block:: python
 
    # Code example
-   import jaxbo
+   import BOBE
    
 .. note::
    
@@ -81,7 +81,7 @@ Markdown is also supported via MyST parser:
 
 ```python
 # Code example
-import jaxbo
+import BOBE
 ```
 
 ```{note}

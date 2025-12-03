@@ -1,7 +1,7 @@
 Quick Start Guide
 =================
 
-JaxBo estimates Bayesian evidence for expensive likelihood functions using Gaussian Process (GP) surrogates. The GP is trained using Bayesian optimisation with an acquisition function.
+BOBE estimates Bayesian evidence for expensive likelihood functions using Gaussian Process (GP) surrogates. The GP is trained using Bayesian optimisation with an acquisition function.
 
 Simple Example
 --------------
@@ -11,7 +11,7 @@ Here's a minimal example using a test function:
 .. code-block:: python
 
    import numpy as np
-   from jaxbo import BOBE
+   from BOBE import BOBE
    
    # Define a simple 2D likelihood
    def my_likelihood(X):
@@ -48,7 +48,7 @@ For Cobaya cosmological likelihoods, simply pass the YAML file path:
 
 .. code-block:: python
 
-   from jaxbo import BOBE
+   from BOBE import BOBE
    
    # Initialize BOBE with Cobaya YAML - CobayaLikelihood created internally
    bobe = BOBE(
@@ -67,7 +67,7 @@ For Cobaya cosmological likelihoods, simply pass the YAML file path:
 **Expected Output:**
 
 The code will print progress information and converge to a log-evidence estimate. 
-The banana function has a complex posterior shape, demonstrating JaxBO's ability 
+The banana function has a complex posterior shape, demonstrating BOBE's ability 
 to handle non-trivial likelihood surfaces.
 
 Understanding the Parameters

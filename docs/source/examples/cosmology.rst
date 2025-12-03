@@ -1,7 +1,7 @@
 Cosmological Likelihood Example
 ================================
 
-This example demonstrates using JaxBO with realistic cosmological likelihoods 
+This example demonstrates using BOBE with realistic cosmological likelihoods 
 through the Cobaya framework. We'll estimate the Bayesian evidence for the 
 standard LCDM model using Planck and DESI data.
 
@@ -15,7 +15,7 @@ Prerequisites
    
       pip install -e '.[cobaya]'
    
-   Run this from the JaxBo source directory.
+   Run this from the BOBE source directory.
 
 You'll also need the Planck and DESI data files. Follow the 
 `Cobaya installation guide <https://cobaya.readthedocs.io/>`_ for data setup.
@@ -133,9 +133,9 @@ Complete Python Code
    import time
    import matplotlib.pyplot as plt
    
-   from jaxbo import BOBE
-   from jaxbo.utils.log import get_logger
-   from jaxbo.utils.plot import BOBESummaryPlotter
+   from BOBE import BOBE
+   from BOBE.utils.log import get_logger
+   from BOBE.utils.plot import BOBESummaryPlotter
    from getdist import MCSamples, plots as gdplt
    
    def main():
@@ -277,7 +277,7 @@ For expensive cosmological likelihoods, use MPI parallelization:
 
 .. code-block:: bash
 
-   # Install MPI support (from JaxBo source directory)
+   # Install MPI support (from BOBE source directory)
    pip install -e '.[mpi]'
    
    # Run with 4 processes

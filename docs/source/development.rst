@@ -1,12 +1,12 @@
 Development Guide
 =================
 
-This guide covers advanced development topics for JaxBo contributors.
+This guide covers advanced development topics for BOBE contributors.
 
 Architecture Overview
 ---------------------
 
-JaxBo is structured around several key components:
+BOBE is structured around several key components:
 
 Core Components
 ~~~~~~~~~~~~~~~
@@ -118,7 +118,7 @@ To support a new likelihood interface:
 JAX Integration
 ---------------
 
-JaxBo leverages JAX for performance. Key principles:
+BOBE leverages JAX for performance. Key principles:
 
 Pure Functions
 ~~~~~~~~~~~~~~
@@ -191,7 +191,7 @@ Computational Efficiency
 GPU/TPU Support
 ~~~~~~~~~~~~~~~
 
-JaxBo automatically uses available accelerators:
+BOBE automatically uses available accelerators:
 
 .. code-block:: python
 

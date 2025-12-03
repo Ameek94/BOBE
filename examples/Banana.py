@@ -2,13 +2,13 @@ import os
 os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
-from jaxbo.utils.plot import plot_final_samples, BOBESummaryPlotter
-from jaxbo.bo import BOBE
+from BOBE.utils.plot import plot_final_samples, BOBESummaryPlotter
+from BOBE.bo import BOBE
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
-from jaxbo.utils.log import get_logger
-from jaxbo.utils.core import renormalise_log_weights
+from BOBE.utils.log import get_logger
+from BOBE.utils.core import renormalise_log_weights
 from getdist import MCSamples
 import numpy as np
 from dynesty import DynamicNestedSampler
@@ -30,7 +30,6 @@ def main():
     param_list = ['x1', 'x2']
     param_labels = ['x_1', 'x_2']
     param_bounds = np.array([[-1, 1], [-1, 2]]).T
-    ls_priors = 'DSLP'
     likelihood_name = f'banana_slow_serial'
     
     start = time.time()

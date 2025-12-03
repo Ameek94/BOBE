@@ -21,9 +21,9 @@ seed = int(sys.argv[3]) if len(sys.argv) > 3 else 42
 # ls_priors = str(sys.argv[4]) if len(sys.argv) > 4 else 'SAAS'
 
 # --- Imports ---
-from jaxbo import BOBE
-from jaxbo.utils.log import get_logger
-from jaxbo.utils.plot import plot_final_samples, BOBESummaryPlotter
+from BOBE import BOBE
+from BOBE.utils.log import get_logger
+from BOBE.utils.plot import plot_final_samples, BOBESummaryPlotter
 
 def main():
 
