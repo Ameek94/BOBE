@@ -1,4 +1,4 @@
-Tutorials
+User guide
 =========
 
 Step-by-step tutorials to help you learn BOBE.
@@ -8,6 +8,8 @@ Step-by-step tutorials to help you learn BOBE.
 
    basic_usage
    gp
+   initialisation
    acquisition
    convergence
    advanced
+   faq
