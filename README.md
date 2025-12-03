@@ -34,6 +34,7 @@ See `pyproject.toml` and the [documentation](https://BOBE.readthedocs.io/en/) fo
 
 ```bash
 git clone https://github.com/Ameek94/BOBE.git
+cd BOBE
 python -m pip install .
 ```
 
