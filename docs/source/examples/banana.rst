@@ -28,107 +28,35 @@ Complete Example Code
 .. code-block:: python
 
    import numpy as np
-   import matplotlib.pyplot as plt
-   from BOBE.run import run_bobe
-   from BOBE.utils.log import get_logger
-   from BOBE.utils.plot import BOBESummaryPlotter
-   from getdist import MCSamples
+   from BOBE import BOBE
    
-   def loglike_banana(X):
+   def my_likelihood(X):
        """Rosenbrock banana function likelihood."""
        x, y = X[0], X[1]
        logpdf = -0.25 * (5 * (0.2 - x))**2 - (20 * (y/4 - x**4))**2
        return logpdf
    
-   def main():
-       # Problem setup
-       param_list = ['x1', 'x2']
-       param_labels = [r'x_1', r'x_2']
-       param_bounds = np.array([[-1, 1], [-1, 2]]).T
-       
-       print("Starting BOBE run...")
-       
-       results = run_bobe(
-           likelihood=loglike_banana,
-           likelihood_kwargs={
-               'param_list': param_list,
-               'param_bounds': param_bounds,
-               'param_labels': param_labels,
-               'name': 'banana_test',
-               'minus_inf': -1e5,
-           },
-           verbosity='INFO',
-           use_gp_pool=True,
-           n_sobol_init=8,
-           min_evals=20,
-           max_evals=100,
-           max_gp_size=200,
-           fit_step=1,
-           wipv_batch_size=2,
-           ns_step=5,
-           optimizer='scipy',
-           mc_points_method='NUTS',
-           num_hmc_warmup=256,
-           num_hmc_samples=4000,
-           mc_points_size=128,
-           thinning=4,
-           num_chains=4,
-           use_clf=False,  # Simple 2D problem doesn't need classifier
-           minus_inf=-1e5,
-           logz_threshold=1e-3,
-           seed=42,
-           save_dir='./results/',
-           save=True,
-           acq=['wipv'],
-           ei_goal=1e-5,
-           do_final_ns=True,
-       )
-       
-       if results is not None:
-           log = get_logger("main")
-           
-           # Extract results
-           gp = results['gp']
-           samples = results['samples']
-           logz_dict = results.get('logz', {})
-           likelihood = results['likelihood']
-           
-           log.info("\n" + "="*60)
-           log.info("RUN COMPLETED")
-           log.info("="*60)
-           log.info(f"Log Evidence: {logz_dict.get('logz', 'N/A'):.4f}")
-           log.info(f"Log Evidence Error: {logz_dict.get('logzerr', 0):.4f}")
-           log.info(f"Number of evaluations: {gp.train_x.shape[0]}")
-           
-           # Create GetDist samples for plotting
-           sample_array = samples['x']
-           sample_weights = samples.get('weights', None)
-           
-           mcs = MCSamples(
-               samples=sample_array,
-               weights=sample_weights,
-               names=param_list,
-               labels=param_labels,
-               ranges=dict(zip(param_list, param_bounds.T))
-           )
-           
-           # Triangle plot
-           import getdist.plots as gdplt
-           g = gdplt.get_subplot_plotter()
-           g.triangle_plot([mcs], filled=True)
-           plt.savefig('./results/banana_triangle.pdf', bbox_inches='tight')
-           log.info("Saved triangle plot to ./results/banana_triangle.pdf")
-           
-           # Summary plots
-           plotter = BOBESummaryPlotter(results)
-           plotter.plot_gp_training_evolution()
-           plotter.plot_logz_evolution()
-           plotter.plot_acquisition_evolution()
-           
-           log.info("Analysis complete!")
+   # Initialize BOBE with setup parameters
+   sampler = BOBE(
+       loglikelihood=my_likelihood,
+       param_list=['x1', 'x2'],
+       param_bounds=np.array([[-1, 1], [-1, 2]]).T,
+       n_sobol_init=2,
+       save_dir='./results',
+   )
    
-   if __name__ == '__main__':
-       main()
+   # Run optimization with convergence and run settings
+   results = sampler.run(
+       min_evals=10,
+       max_evals=100,
+       batch_size=2,
+       fit_n_points=4,
+       ns_n_points=4,
+       logz_threshold=0.1,
+   )
+   
+   # Access results
+   print(f\"Log Evidence: {results['logz']['mean']}\")\n   samples = results['samples']  # dictionary containing keys 'x', 'logl', 'weights'
 
 Expected Results
 ----------------

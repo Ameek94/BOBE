@@ -8,7 +8,7 @@ BOBE Class
 
 The main Bayesian Optimization for Bayesian Evidence class.
 
-.. autoclass:: jaxbo.bo.BOBE
+.. autoclass:: BOBE.bo.BOBE
    :members:
    :undoc-members:
    :show-inheritance:
@@ -18,7 +18,7 @@ BOBEResults Class
 
 Results container for BOBE optimization runs.
 
-.. autoclass:: jaxbo.utils.results.BOBEResults
+.. autoclass:: BOBE.utils.results.BOBEResults
    :members:
    :undoc-members:
    :show-inheritance:
@@ -26,17 +26,7 @@ Results container for BOBE optimization runs.
 Optimization Functions
 ----------------------
 
-.. automodule:: jaxbo.optim
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Run Module
-----------
-
-High-level interfaces for running optimization.
-
-.. automodule:: jaxbo.run
+.. automodule:: BOBE.optim
    :members:
    :undoc-members:
    :show-inheritance:

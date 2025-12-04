@@ -6,7 +6,7 @@ Acquisition functions determine where to sample next in the parameter space.
 Base Acquisition Function
 --------------------------
 
-.. autoclass:: jaxbo.acquisition.AcquisitionFunction
+.. autoclass:: BOBE.acquisition.AcquisitionFunction
    :members:
    :undoc-members:
    :show-inheritance:
@@ -14,7 +14,7 @@ Base Acquisition Function
 Weighted Integrated Posterior Variance (WIPV)
 ----------------------------------------------
 
-.. autoclass:: jaxbo.acquisition.WIPV
+.. autoclass:: BOBE.acquisition.WIPV
    :members:
    :undoc-members:
    :show-inheritance:
@@ -22,7 +22,7 @@ Weighted Integrated Posterior Variance (WIPV)
 Expected Improvement (EI)
 -------------------------
 
-.. autoclass:: jaxbo.acquisition.EI
+.. autoclass:: BOBE.acquisition.EI
    :members:
    :undoc-members:
    :show-inheritance:
@@ -30,7 +30,7 @@ Expected Improvement (EI)
 Log Expected Improvement (LogEI)
 --------------------------------
 
-.. autoclass:: jaxbo.acquisition.LogEI
+.. autoclass:: BOBE.acquisition.LogEI
    :members:
    :undoc-members:
    :show-inheritance:
@@ -40,7 +40,7 @@ Utility Functions
 
 Acquisition-related utility functions.
 
-.. automodule:: jaxbo.acquisition
+.. automodule:: BOBE.acquisition
    :members:
    :exclude-members: AcquisitionFunction, WIPV, EI, LogEI
    :undoc-members:

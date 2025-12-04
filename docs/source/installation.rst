@@ -140,7 +140,7 @@ Using venv
    python -m pip install .
 
 GPU/TPU Support
------------
+---------------
 In progress...
 
 .. For GPU acceleration, you'll need to install the appropriate JAXlib version:

@@ -68,15 +68,7 @@ optim
    :show-inheritance:
    :undoc-members:
 
-run
-----------------
-
-.. automodule:: BOBE.run
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-Contents
+Module Contents
 ---------------
 
 .. automodule:: BOBE

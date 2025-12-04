@@ -19,22 +19,27 @@ Here's a minimal example using a test function:
        return -0.5 * (x**2 + y**2)
    
    # Initialize BOBE with setup parameters
-   bobe = BOBE(
+   sampler = BOBE(
        loglikelihood=my_likelihood,
+       param_list=['x', 'y'],
        param_bounds=np.array([[-3, 3], [-3, 3]]).T,
-       likelihood_name='test',
-       n_sobol_init=4,
-       seed=42,
+       n_sobol_init=2,
+       save_dir='./results',
    )
    
    # Run optimization with convergence and run settings
-   results = bobe.run(
-       acqs='wipv',
+   results = sampler.run(
+       min_evals=10,
        max_evals=100,
+       batch_size=2,
+       fit_n_points=4,
+       ns_n_points=4,
+       logz_threshold=0.1,
    )
    
-   # Get results
-   print(f"Log Evidence: {results['logz']['mean']:.2f}")
+   # Access the evidence and posterior samples
+   print(f"Log Evidence: {results['logz']['mean']}")
+   samples = results['samples']
 
 For detailed examples, see:
 
@@ -50,19 +55,26 @@ For Cobaya cosmological likelihoods, simply pass the YAML file path:
 
    from BOBE import BOBE
    
-   # Initialize BOBE with Cobaya YAML - CobayaLikelihood created internally
-   bobe = BOBE(
-       loglikelihood='planck_lcdm.yaml',
-       likelihood_name='planck_lcdm',
-       confidence_for_unbounded=0.9999995,
+   # Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
+   sampler = BOBE(
+       loglikelihood='path/to/cobaya_input.yaml',
+       likelihood_name='CobayaLikelihood',
+       n_sobol_init=4,
+       n_cobaya_init=4,
+       save_dir='./results',
    )
    
    # Run with optimization settings
-   results = bobe.run(
-       acqs='wipv',
+   results = sampler.run(
+       min_evals=10,
        max_evals=1000,
+       batch_size=2,
+       fit_n_points=4,
+       ns_n_points=4,
+       logz_threshold=0.1,
    )
-   print(f"Log Evidence: {results['logz']['mean']:.2f}")
+   
+   print(f"Log Evidence: {results['logz']['mean']}")
 
 **Expected Output:**
 

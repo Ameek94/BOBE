@@ -97,7 +97,8 @@ def nested_sampling_Dy(gp: GP,
     samples : ndarray
         Equally weighted samples from the nested sampler
     logz_dict : dict
-        Dictionary containing the mean, upper and lower bounds on logZ and the logZ error from the nested sampler
+        Dictionary containing the mean, upper and lower bounds on logZ and the logZ error
+        from the nested sampler
     success : bool
         Whether the nested sampling run was successful
     """

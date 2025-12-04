@@ -128,26 +128,31 @@ Complete Python Code
 
 .. code-block:: python
 
-   import os
-   import sys
-   import time
-   import matplotlib.pyplot as plt
-   
    from BOBE import BOBE
-   from BOBE.utils.log import get_logger
-   from BOBE.utils.plot import BOBESummaryPlotter
-   from getdist import MCSamples, plots as gdplt
    
-   def main():
-       # Configuration
-       cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
-       likelihood_name = 'Planck_DESI_LCDM'
-       
-       print("Starting BOBE run with cosmological likelihood...")
-       start = time.time()
-       
-       # Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
-       bobe = BOBE(
+   # Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
+   sampler = BOBE(
+       loglikelihood='./cosmo_input/LCDM_Planck_DESI.yaml',
+       likelihood_name='Planck_DESI_LCDM',
+       n_cobaya_init=32,
+       n_sobol_init=64,
+       save_dir='./results/',
+   )
+   
+   # Run optimization with convergence and run settings
+   results = sampler.run(
+       min_evals=800,
+       max_evals=2500,
+       batch_size=5,
+       fit_n_points=5,
+       ns_n_points=5,
+       logz_threshold=0.01,
+   )
+   
+   # Access results
+   print(f\"Log Evidence: {results['logz']['mean']} ± {results['logz']['err']}\")\n   samples = results['samples']
+
+Running with MPI
            loglikelihood=cobaya_input_file,
            likelihood_name=likelihood_name,
            confidence_for_unbounded=0.9999995,
@@ -378,4 +383,4 @@ Next Steps
 - Compare evidence to alternative models (e.g., LCDM+Omk, CPL dark energy)
 - Experiment with different acquisition functions
 - Try neural network classifiers: ``clf_type='nn'`` (requires ``[nn]``)
-- See :doc:`../tutorials/advanced` for model comparison workflows
+- See :doc:`../user guide/advanced` for model comparison workflows

@@ -55,9 +55,9 @@ class GPwithClassifier(GP):
             If None, `gp_threshold` might be used or a default calculated.
         gp_threshold : float, optional
             Threshold for adding points to the GP training set. Default is 5000.
-        noise, kernel, optimizer, kernel_variance_bounds, lengthscale_bounds,
-        lengthscale_priors, lengthscales, kernel_variance:
+        noise, kernel, optimizer, kernel_variance_bounds, lengthscale_bounds, lengthscale_priors, lengthscales, kernel_variance:
             GP parameters (see DSLP_GP/SAAS_GP). Note: bounds are now in actual space, not log10.
+
         """
         # Store Data and Classifier Settings
         self.train_x_clf = jnp.array(train_x)

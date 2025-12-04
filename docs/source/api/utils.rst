@@ -43,18 +43,10 @@ Plotting and Visualization
    :undoc-members:
    :show-inheritance:
 
-Timing Utilities
-----------------
-
-.. automodule:: BOBE.utils.timing
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Parallel Computing
 ------------------
 
-.. automodule:: BOBE.utils.pool
+.. automodule:: BOBE.pool
    :members:
    :undoc-members:
    :show-inheritance:

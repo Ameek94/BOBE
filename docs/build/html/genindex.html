@@ -6,7 +6,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Index &mdash; JaxBo 0.1.0 documentation</title>
-      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
       <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
       <link rel="stylesheet" type="text/css" href="_static/custom.css?v=30d0d2dd" />
 
@@ -40,10 +40,31 @@
   </form>
 </div>
         </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
-              <ul>
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
 <li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user%20guide/basic_usage.html">BOBE Basic Tutorial: Computing the Bayesian evidence for the Himmelblau Function</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user%20guide/gp.html">Gaussian Process Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user%20guide/acquisition.html">Acquisition Functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user%20guide/convergence.html">Convergence Criteria</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user%20guide/advanced.html">Advanced Topics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user%20guide/faq.html">Frequently Asked Questions</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul>
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a></li>
-<li class="toctree-l1"><a class="reference internal" href="examples/index.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples/banana.html">Banana Function Example</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples/cosmology.html">Cosmological Likelihood Example</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/index.html">API Reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Additional Resources</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="bibliography.html">Bibliography</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing to BOBE</a></li>
 </ul>
 
         </div>
@@ -102,72 +123,66 @@
 <h2 id="_">_</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.CobayaLikelihood.__call__">__call__() (jaxbo.CobayaLikelihood method)</a>
+      <li><a href="BOBE.html#BOBE.CobayaLikelihood.__call__">__call__() (BOBE.CobayaLikelihood method)</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.Likelihood.__call__">(jaxbo.Likelihood method)</a>
+        <li><a href="BOBE.html#BOBE.Likelihood.__call__">(BOBE.Likelihood method)</a>
 </li>
-        <li><a href="api/likelihood.html#jaxbo.likelihood.CobayaLikelihood.__call__">(jaxbo.likelihood.CobayaLikelihood method)</a>, <a href="jaxbo.html#jaxbo.likelihood.CobayaLikelihood.__call__">[1]</a>
+        <li><a href="BOBE.html#BOBE.likelihood.CobayaLikelihood.__call__">(BOBE.likelihood.CobayaLikelihood method)</a>, <a href="api/likelihood.html#BOBE.likelihood.CobayaLikelihood.__call__">[1]</a>
 </li>
-        <li><a href="api/likelihood.html#jaxbo.likelihood.Likelihood.__call__">(jaxbo.likelihood.Likelihood method)</a>, <a href="jaxbo.html#jaxbo.likelihood.Likelihood.__call__">[1]</a>
+        <li><a href="BOBE.html#BOBE.likelihood.Likelihood.__call__">(BOBE.likelihood.Likelihood method)</a>, <a href="api/likelihood.html#BOBE.likelihood.Likelihood.__call__">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.AcquisitionFunction.__init__">__init__() (jaxbo.acquisition.AcquisitionFunction method)</a>, <a href="jaxbo.html#jaxbo.acquisition.AcquisitionFunction.__init__">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.AcquisitionFunction.__init__">__init__() (BOBE.acquisition.AcquisitionFunction method)</a>, <a href="api/acquisition.html#BOBE.acquisition.AcquisitionFunction.__init__">[1]</a>
 
       <ul>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.EI.__init__">(jaxbo.acquisition.EI method)</a>, <a href="jaxbo.html#jaxbo.acquisition.EI.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.EI.__init__">(BOBE.acquisition.EI method)</a>, <a href="api/acquisition.html#BOBE.acquisition.EI.__init__">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.LogEI.__init__">(jaxbo.acquisition.LogEI method)</a>, <a href="jaxbo.html#jaxbo.acquisition.LogEI.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.LogEI.__init__">(BOBE.acquisition.LogEI method)</a>, <a href="api/acquisition.html#BOBE.acquisition.LogEI.__init__">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPStd.__init__">(jaxbo.acquisition.WIPStd method)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPStd.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.WeightedIntegratedPosteriorBase.__init__">(BOBE.acquisition.WeightedIntegratedPosteriorBase method)</a>, <a href="api/acquisition.html#BOBE.acquisition.WeightedIntegratedPosteriorBase.__init__">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPV.__init__">(jaxbo.acquisition.WIPV method)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPV.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.bo.BOBE.__init__">(BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.__init__">[1]</a>
 </li>
-        <li><a href="api/core.html#jaxbo.bo.BOBE.__init__">(jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.BOBE.__init__">(BOBE.BOBE method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.BOBE.__init__">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBEResults.__init__">(BOBE.BOBEResults method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.BOBEResults.__init__">(jaxbo.BOBEResults method)</a>
+        <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.__init__">(BOBE.BOBESummaryPlotter method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.__init__">(jaxbo.BOBESummaryPlotter method)</a>
+        <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.__init__">(BOBE.clf.EllipsoidClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.__init__">[1]</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.__init__">(jaxbo.clf.EllipsoidClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.__init__">(BOBE.clf.MLPClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.__init__">[1]</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.__init__">(jaxbo.clf.MLPClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.__init__">(BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.__init__">[1]</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.__init__">(jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.CobayaLikelihood.__init__">(BOBE.CobayaLikelihood method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.CobayaLikelihood.__init__">(jaxbo.CobayaLikelihood method)</a>
+        <li><a href="BOBE.html#BOBE.EI.__init__">(BOBE.EI method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.EI.__init__">(jaxbo.EI method)</a>
+        <li><a href="BOBE.html#BOBE.GP.__init__">(BOBE.GP method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GP.__init__">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.__init__">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.__init__">[1]</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.__init__">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.__init__">(BOBE.GPwithClassifier method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.__init__">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.Likelihood.__init__">(BOBE.Likelihood method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.Likelihood.__init__">(jaxbo.Likelihood method)</a>
+        <li><a href="BOBE.html#BOBE.likelihood.CobayaLikelihood.__init__">(BOBE.likelihood.CobayaLikelihood method)</a>, <a href="api/likelihood.html#BOBE.likelihood.CobayaLikelihood.__init__">[1]</a>
 </li>
-        <li><a href="api/likelihood.html#jaxbo.likelihood.CobayaLikelihood.__init__">(jaxbo.likelihood.CobayaLikelihood method)</a>, <a href="jaxbo.html#jaxbo.likelihood.CobayaLikelihood.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.likelihood.Likelihood.__init__">(BOBE.likelihood.Likelihood method)</a>, <a href="api/likelihood.html#BOBE.likelihood.Likelihood.__init__">[1]</a>
 </li>
-        <li><a href="api/likelihood.html#jaxbo.likelihood.Likelihood.__init__">(jaxbo.likelihood.Likelihood method)</a>, <a href="jaxbo.html#jaxbo.likelihood.Likelihood.__init__">[1]</a>
+        <li><a href="BOBE.html#BOBE.LogEI.__init__">(BOBE.LogEI method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.LogEI.__init__">(jaxbo.LogEI method)</a>
+        <li><a href="api/utils.html#BOBE.pool.MPI_Pool.__init__">(BOBE.pool.MPI_Pool method)</a>
 </li>
-        <li><a href="api/utils.html#jaxbo.utils.log.LevelFilter.__init__">(jaxbo.utils.log.LevelFilter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.log.LevelFilter.__init__">(BOBE.utils.log.LevelFilter method)</a>
 </li>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.__init__">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.__init__">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
-        <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.__init__">(jaxbo.utils.pool.MPI_Pool method)</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.__init__">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.__init__">[1]</a>
 </li>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.__init__">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.__init__">[1]</a>
-</li>
-        <li><a href="api/utils.html#jaxbo.utils.results.ConvergenceInfo.__init__">(jaxbo.utils.results.ConvergenceInfo method)</a>
-</li>
-        <li><a href="jaxbo.html#jaxbo.WIPStd.__init__">(jaxbo.WIPStd method)</a>
-</li>
-        <li><a href="jaxbo.html#jaxbo.WIPV.__init__">(jaxbo.WIPV method)</a>
+        <li><a href="api/utils.html#BOBE.utils.results.ConvergenceInfo.__init__">(BOBE.utils.results.ConvergenceInfo method)</a>
 </li>
       </ul></li>
   </ul></td>
@@ -176,13 +191,13 @@
 <h2 id="A">A</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.AcquisitionFunction.acq_optimize">acq_optimize (jaxbo.acquisition.AcquisitionFunction attribute)</a>, <a href="jaxbo.html#jaxbo.acquisition.AcquisitionFunction.acq_optimize">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.AcquisitionFunction.acq_optimize">acq_optimize (BOBE.acquisition.AcquisitionFunction attribute)</a>, <a href="api/acquisition.html#BOBE.acquisition.AcquisitionFunction.acq_optimize">[1]</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="glossary.html#term-Acquisition-Function"><strong>Acquisition Function</strong></a>
 </li>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.AcquisitionFunction">AcquisitionFunction (class in jaxbo.acquisition)</a>, <a href="jaxbo.html#jaxbo.acquisition.AcquisitionFunction">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.AcquisitionFunction">AcquisitionFunction (class in BOBE.acquisition)</a>, <a href="api/acquisition.html#BOBE.acquisition.AcquisitionFunction">[1]</a>
 </li>
   </ul></td>
 </tr></table>
@@ -190,10 +205,10 @@
 <h2 id="B">B</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.batch_size">batch_size (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.batch_size">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.batch_size">batch_size (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.batch_size">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.batch_size">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.batch_size">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.batch_size">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.batch_size">[1]</a>
 </li>
       </ul></li>
       <li><a href="glossary.html#term-Bayesian-Evidence"><strong>Bayesian Evidence</strong></a>
@@ -203,23 +218,125 @@
       <li><a href="glossary.html#term-BOBE"><strong>BOBE</strong></a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE">(class in jaxbo)</a>
+        <li><a href="BOBE.html#module-BOBE">module</a>
 </li>
-        <li><a href="api/core.html#jaxbo.bo.BOBE">(class in jaxbo.bo)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE">[1]</a>
+      </ul></li>
+      <li><a href="BOBE.html#BOBE.BOBE">BOBE (class in BOBE)</a>
+
+      <ul>
+        <li><a href="BOBE.html#BOBE.bo.BOBE">(class in BOBE.bo)</a>, <a href="api/core.html#BOBE.bo.BOBE">[1]</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.acquisition
+
+      <ul>
+        <li><a href="BOBE.html#module-BOBE.acquisition">module</a>, <a href="api/acquisition.html#module-BOBE.acquisition">[1]</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.bo
+
+      <ul>
+        <li><a href="BOBE.html#module-BOBE.bo">module</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.clf
+
+      <ul>
+        <li><a href="BOBE.html#module-BOBE.clf">module</a>, <a href="api/gp_models.html#module-BOBE.clf">[1]</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.clf_gp
+
+      <ul>
+        <li><a href="BOBE.html#module-BOBE.clf_gp">module</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.gp
+
+      <ul>
+        <li><a href="BOBE.html#module-BOBE.gp">module</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.likelihood
+
+      <ul>
+        <li><a href="BOBE.html#module-BOBE.likelihood">module</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults">BOBEResults (class in jaxbo)</a>
+      <li>
+    BOBE.optim
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults">(class in jaxbo.utils.results)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults">[1]</a>
+        <li><a href="BOBE.html#module-BOBE.optim">module</a>, <a href="api/core.html#module-BOBE.optim">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter">BOBESummaryPlotter (class in jaxbo)</a>
+      <li>
+    BOBE.pool
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter">(class in jaxbo.utils.plot)</a>
+        <li><a href="api/utils.html#module-BOBE.pool">module</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.samplers
+
+      <ul>
+        <li><a href="BOBE.html#module-BOBE.samplers">module</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.utils.core
+
+      <ul>
+        <li><a href="api/utils.html#module-BOBE.utils.core">module</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.utils.log
+
+      <ul>
+        <li><a href="api/utils.html#module-BOBE.utils.log">module</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.utils.plot
+
+      <ul>
+        <li><a href="api/utils.html#module-BOBE.utils.plot">module</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.utils.results
+
+      <ul>
+        <li><a href="api/utils.html#module-BOBE.utils.results">module</a>
+</li>
+      </ul></li>
+      <li>
+    BOBE.utils.seed
+
+      <ul>
+        <li><a href="api/utils.html#module-BOBE.utils.seed">module</a>
+</li>
+      </ul></li>
+      <li><a href="BOBE.html#BOBE.BOBEResults">BOBEResults (class in BOBE)</a>
+
+      <ul>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults">(class in BOBE.utils.results)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults">[1]</a>
+</li>
+      </ul></li>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter">BOBESummaryPlotter (class in BOBE)</a>
+
+      <ul>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter">(class in BOBE.utils.plot)</a>
 </li>
       </ul></li>
   </ul></td>
@@ -228,67 +345,69 @@
 <h2 id="C">C</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.check_convergence_ei">check_convergence_ei() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.check_convergence_ei">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.check_convergence_ei">check_convergence_ei() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.check_convergence_ei">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.check_convergence_ei">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.check_convergence_ei">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.check_convergence_WIPV">check_convergence_WIPV() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.check_convergence_WIPV">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.check_convergence_logz">check_convergence_logz() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.check_convergence_logz">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.check_convergence_WIPV">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.check_convergence_logz">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.check_max_evals_and_gpsize">check_max_evals_and_gpsize() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.check_max_evals_and_gpsize">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.check_max_evals_and_gpsize">check_max_evals_and_gpsize() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.check_max_evals_and_gpsize">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.check_max_evals_and_gpsize">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.check_max_evals_and_gpsize">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.clf_data_size">clf_data_size (jaxbo.clf_gp.GPwithClassifier property)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.clf_data_size">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.clf_data_size">clf_data_size (BOBE.clf_gp.GPwithClassifier property)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.clf_data_size">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.clf_data_size">(jaxbo.GPwithClassifier property)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.clf_data_size">(BOBE.GPwithClassifier property)</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.close">close() (jaxbo.utils.pool.MPI_Pool method)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.close">close() (BOBE.pool.MPI_Pool method)</a>
 </li>
       <li><a href="glossary.html#term-Cobaya"><strong>Cobaya</strong></a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.CobayaLikelihood">CobayaLikelihood (class in jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.CobayaLikelihood">CobayaLikelihood (class in BOBE)</a>
 
       <ul>
-        <li><a href="api/likelihood.html#jaxbo.likelihood.CobayaLikelihood">(class in jaxbo.likelihood)</a>, <a href="jaxbo.html#jaxbo.likelihood.CobayaLikelihood">[1]</a>
+        <li><a href="BOBE.html#BOBE.likelihood.CobayaLikelihood">(class in BOBE.likelihood)</a>, <a href="api/likelihood.html#BOBE.likelihood.CobayaLikelihood">[1]</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/utils.html#jaxbo.utils.results.ConvergenceInfo.converged">converged (jaxbo.utils.results.ConvergenceInfo attribute)</a>
+      <li><a href="BOBE.html#BOBE.samplers.compute_integrals">compute_integrals() (in module BOBE.samplers)</a>, <a href="api/samplers.html#BOBE.samplers.compute_integrals">[1]</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.results.ConvergenceInfo">ConvergenceInfo (class in jaxbo.utils.results)</a>
+      <li><a href="api/utils.html#BOBE.utils.results.ConvergenceInfo.converged">converged (BOBE.utils.results.ConvergenceInfo attribute)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.results.convert_jax_to_json_serializable">convert_jax_to_json_serializable() (in module jaxbo.utils.results)</a>
+      <li><a href="api/utils.html#BOBE.utils.results.ConvergenceInfo">ConvergenceInfo (class in BOBE.utils.results)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.copy">copy() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.copy">[1]</a>
+      <li><a href="api/utils.html#BOBE.utils.results.convert_jax_to_json_serializable">convert_jax_to_json_serializable() (in module BOBE.utils.results)</a>
+</li>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.copy">copy() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.copy">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.copy">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.copy">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.copy">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.copy">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.copy">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.copy">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.copy">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.copy">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.results.create_resumable_results">create_resumable_results() (in module jaxbo.utils.results)</a>
+      <li><a href="api/utils.html#BOBE.utils.results.create_resumable_results">create_resumable_results() (in module BOBE.utils.results)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.create_summary_dashboard">create_summary_dashboard() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.create_summary_dashboard">create_summary_dashboard() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.create_summary_dashboard">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.create_summary_dashboard">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.plot.create_summary_plots">create_summary_plots() (in module jaxbo.utils.plot)</a>
+      <li><a href="api/utils.html#BOBE.utils.plot.create_summary_plots">create_summary_plots() (in module BOBE.utils.plot)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -296,21 +415,21 @@
 <h2 id="D">D</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.d">d (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.d">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.d">d (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.d">[1]</a>
 </li>
       <li><a href="glossary.html#term-Deep-Sigmoidal-Location-Process-DSLP"><strong>Deep Sigmoidal Location Process (DSLP)</strong></a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.results.ConvergenceInfo.delta">delta (jaxbo.utils.results.ConvergenceInfo attribute)</a>
+      <li><a href="api/utils.html#BOBE.utils.results.ConvergenceInfo.delta">delta (BOBE.utils.results.ConvergenceInfo attribute)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.gp.dist_sq">dist_sq() (in module jaxbo.gp)</a>
+      <li><a href="BOBE.html#BOBE.gp.dist_sq">dist_sq() (in module BOBE.gp)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.results.ConvergenceInfo.dlogz_sampler">dlogz_sampler (jaxbo.utils.results.ConvergenceInfo attribute)</a>
+      <li><a href="api/utils.html#BOBE.utils.results.ConvergenceInfo.dlogz_sampler">dlogz_sampler (BOBE.utils.results.ConvergenceInfo attribute)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.dropout_rate">dropout_rate (jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.dropout_rate">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.MLPClassifier.dropout_rate">dropout_rate (BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.dropout_rate">[1]</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.gp.DummyDistribution">DummyDistribution (class in jaxbo.gp)</a>
+      <li><a href="BOBE.html#BOBE.gp.DummyDistribution">DummyDistribution (class in BOBE.gp)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -318,30 +437,30 @@
 <h2 id="E">E</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.early_stop_patience">early_stop_patience (jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.early_stop_patience">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.MLPClassifier.early_stop_patience">early_stop_patience (BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.early_stop_patience">[1]</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.EI">EI (class in jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.EI">EI (class in BOBE)</a>
 
       <ul>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.EI">(class in jaxbo.acquisition)</a>, <a href="jaxbo.html#jaxbo.acquisition.EI">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.EI">(class in BOBE.acquisition)</a>, <a href="api/acquisition.html#BOBE.acquisition.EI">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier">EllipsoidClassifier (class in jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier">EllipsoidClassifier (class in BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier">[1]</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.end_timing">end_timing() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.end_timing">end_timing() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.end_timing">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.end_timing">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.end_timing">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.end_timing">[1]</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/utils.html#jaxbo.utils.seed.ensure_reproducibility">ensure_reproducibility() (in module jaxbo.utils.seed)</a>
+      <li><a href="api/utils.html#BOBE.utils.seed.ensure_reproducibility">ensure_reproducibility() (in module BOBE.utils.seed)</a>
 </li>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.evaluate_likelihood">evaluate_likelihood() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.evaluate_likelihood">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.evaluate_likelihood">evaluate_likelihood() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.evaluate_likelihood">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.evaluate_likelihood">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.evaluate_likelihood">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
       <li><a href="glossary.html#term-Expected-Improvement-EI"><strong>Expected Improvement (EI)</strong></a>
@@ -352,68 +471,68 @@
 <h2 id="F">F</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.fantasy_var">fantasy_var() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.fantasy_var">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.fantasy_var">fantasy_var() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.fantasy_var">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.fantasy_var">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.fantasy_var">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.fantasy_var">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.fantasy_var">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.fantasy_var">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.fantasy_var">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.fantasy_var">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.fantasy_var">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.gp.fast_update_cholesky">fast_update_cholesky() (in module jaxbo.gp)</a>
+      <li><a href="BOBE.html#BOBE.gp.fast_update_cholesky">fast_update_cholesky() (in module BOBE.gp)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.log.LevelFilter.filter">filter() (jaxbo.utils.log.LevelFilter method)</a>
+      <li><a href="api/utils.html#BOBE.utils.log.LevelFilter.filter">filter() (BOBE.utils.log.LevelFilter method)</a>
 </li>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.finalise_results">finalise_results() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.finalise_results">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.finalise_results">finalise_results() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.finalise_results">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.finalise_results">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.finalise_results">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.finalize">finalize() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.finalize">finalize() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.finalize">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.finalize">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.finalize">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.finalize">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.GP.fit">fit() (jaxbo.GP method)</a>
+      <li><a href="BOBE.html#BOBE.GP.fit">fit() (BOBE.GP method)</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.fit">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.fit">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.fit">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.fit">[1]</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.from_state_dict">from_state_dict() (jaxbo.clf_gp.GPwithClassifier class method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.from_state_dict">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.from_state_dict">from_state_dict() (BOBE.clf_gp.GPwithClassifier class method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.from_state_dict">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.from_state_dict">(jaxbo.GP class method)</a>
+        <li><a href="BOBE.html#BOBE.GP.from_state_dict">(BOBE.GP class method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.from_state_dict">(jaxbo.gp.GP class method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.from_state_dict">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.from_state_dict">(BOBE.gp.GP class method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.from_state_dict">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.from_state_dict">(jaxbo.GPwithClassifier class method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.from_state_dict">(BOBE.GPwithClassifier class method)</a>
 </li>
       </ul></li>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.AcquisitionFunction.fun">fun() (jaxbo.acquisition.AcquisitionFunction method)</a>, <a href="jaxbo.html#jaxbo.acquisition.AcquisitionFunction.fun">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.AcquisitionFunction.fun">fun() (BOBE.acquisition.AcquisitionFunction method)</a>, <a href="api/acquisition.html#BOBE.acquisition.AcquisitionFunction.fun">[1]</a>
 
       <ul>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.EI.fun">(jaxbo.acquisition.EI method)</a>, <a href="jaxbo.html#jaxbo.acquisition.EI.fun">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.EI.fun">(BOBE.acquisition.EI method)</a>, <a href="api/acquisition.html#BOBE.acquisition.EI.fun">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.LogEI.fun">(jaxbo.acquisition.LogEI method)</a>, <a href="jaxbo.html#jaxbo.acquisition.LogEI.fun">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.LogEI.fun">(BOBE.acquisition.LogEI method)</a>, <a href="api/acquisition.html#BOBE.acquisition.LogEI.fun">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPStd.fun">(jaxbo.acquisition.WIPStd method)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPStd.fun">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.WIPStd.fun">(BOBE.acquisition.WIPStd method)</a>, <a href="api/acquisition.html#BOBE.acquisition.WIPStd.fun">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPV.fun">(jaxbo.acquisition.WIPV method)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPV.fun">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.WIPV.fun">(BOBE.acquisition.WIPV method)</a>, <a href="api/acquisition.html#BOBE.acquisition.WIPV.fun">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.EI.fun">(jaxbo.EI method)</a>
+        <li><a href="BOBE.html#BOBE.EI.fun">(BOBE.EI method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.LogEI.fun">(jaxbo.LogEI method)</a>
+        <li><a href="BOBE.html#BOBE.LogEI.fun">(BOBE.LogEI method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.WIPStd.fun">(jaxbo.WIPStd method)</a>
+        <li><a href="BOBE.html#BOBE.WIPStd.fun">(BOBE.WIPStd method)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.WIPV.fun">(jaxbo.WIPV method)</a>
+        <li><a href="BOBE.html#BOBE.WIPV.fun">(BOBE.WIPV method)</a>
 </li>
       </ul></li>
   </ul></td>
@@ -424,146 +543,130 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="glossary.html#term-Gaussian-Process-GP"><strong>Gaussian Process (GP)</strong></a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.CobayaLikelihood.generate_cobaya_points">generate_cobaya_points() (jaxbo.CobayaLikelihood method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.get_acquisition_data">get_acquisition_data() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/likelihood.html#jaxbo.likelihood.CobayaLikelihood.generate_cobaya_points">(jaxbo.likelihood.CobayaLikelihood method)</a>, <a href="jaxbo.html#jaxbo.likelihood.CobayaLikelihood.generate_cobaya_points">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.get_acquisition_data">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.get_acquisition_data">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.Likelihood.generate_initial_points">generate_initial_points() (jaxbo.Likelihood method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.get_best_loglike_data">get_best_loglike_data() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/likelihood.html#jaxbo.likelihood.Likelihood.generate_initial_points">(jaxbo.likelihood.Likelihood method)</a>, <a href="jaxbo.html#jaxbo.likelihood.Likelihood.generate_initial_points">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.get_best_loglike_data">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.get_best_loglike_data">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.get_acquisition_data">get_acquisition_data() (jaxbo.BOBEResults method)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.get_cobaya_initial_points">get_cobaya_initial_points() (BOBE.pool.MPI_Pool method)</a>
+</li>
+      <li><a href="api/utils.html#BOBE.utils.plot.get_data_format_examples">get_data_format_examples() (in module BOBE.utils.plot)</a>
+</li>
+      <li><a href="BOBE.html#BOBE.clf.get_ellipsoid_predict_proba_fn">get_ellipsoid_predict_proba_fn() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.get_ellipsoid_predict_proba_fn">[1]</a>
+</li>
+      <li><a href="BOBE.html#BOBE.BOBEResults.get_getdist_samples">get_getdist_samples() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.get_acquisition_data">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.get_acquisition_data">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.get_getdist_samples">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.get_getdist_samples">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.get_best_loglike_data">get_best_loglike_data() (jaxbo.BOBEResults method)</a>
+      <li><a href="api/utils.html#BOBE.utils.seed.get_global_seed">get_global_seed() (in module BOBE.utils.seed)</a>
+</li>
+      <li><a href="BOBE.html#BOBE.BOBEResults.get_gp_data">get_gp_data() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.get_best_loglike_data">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.get_best_loglike_data">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.get_gp_data">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.get_gp_data">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.get_cobaya_initial_points">get_cobaya_initial_points() (jaxbo.utils.pool.MPI_Pool method)</a>
+      <li><a href="BOBE.html#BOBE.samplers.get_hmc_settings">get_hmc_settings() (in module BOBE.samplers)</a>, <a href="api/samplers.html#BOBE.samplers.get_hmc_settings">[1]</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.plot.get_data_format_examples">get_data_format_examples() (in module jaxbo.utils.plot)</a>
-</li>
-      <li><a href="api/gp_models.html#jaxbo.clf.get_ellipsoid_predict_proba_fn">get_ellipsoid_predict_proba_fn() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.get_ellipsoid_predict_proba_fn">[1]</a>
-</li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.get_getdist_samples">get_getdist_samples() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.GP.get_hyperparams">get_hyperparams() (BOBE.GP method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.get_getdist_samples">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.get_getdist_samples">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.get_hyperparams">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.get_hyperparams">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.seed.get_global_seed">get_global_seed() (in module jaxbo.utils.seed)</a>
+      <li><a href="api/utils.html#BOBE.utils.seed.get_jax_key">get_jax_key() (in module BOBE.utils.seed)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.get_gp_data">get_gp_data() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.get_last_iteration">get_last_iteration() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.get_gp_data">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.get_gp_data">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.get_last_iteration">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.get_last_iteration">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.GP.get_hyperparams">get_hyperparams() (jaxbo.GP method)</a>
+      <li><a href="BOBE.html#BOBE.get_logger">get_logger() (in module BOBE)</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.get_hyperparams">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.get_hyperparams">[1]</a>
+        <li><a href="api/utils.html#BOBE.utils.log.get_logger">(in module BOBE.utils.log)</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.seed.get_jax_key">get_jax_key() (in module jaxbo.utils.seed)</a>
+      <li><a href="BOBE.html#BOBE.acquisition.get_mc_points">get_mc_points() (in module BOBE.acquisition)</a>, <a href="api/acquisition.html#BOBE.acquisition.get_mc_points">[1]</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.get_last_iteration">get_last_iteration() (jaxbo.BOBEResults method)</a>
-
-      <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.get_last_iteration">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.get_last_iteration">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.get_mc_samples">get_mc_samples() (in module BOBE.acquisition)</a>, <a href="api/acquisition.html#BOBE.acquisition.get_mc_samples">[1]</a>
 </li>
-      </ul></li>
-      <li><a href="jaxbo.html#jaxbo.get_logger">get_logger() (in module jaxbo)</a>
-
-      <ul>
-        <li><a href="api/utils.html#jaxbo.utils.log.get_logger">(in module jaxbo.utils.log)</a>
-</li>
-      </ul></li>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.get_mc_points">get_mc_points() (in module jaxbo.acquisition)</a>, <a href="jaxbo.html#jaxbo.acquisition.get_mc_points">[1]</a>
-</li>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.get_mc_samples">get_mc_samples() (in module jaxbo.acquisition)</a>, <a href="jaxbo.html#jaxbo.acquisition.get_mc_samples">[1]</a>
-</li>
-      <li><a href="api/utils.html#jaxbo.utils.seed.get_new_jax_key">get_new_jax_key() (in module jaxbo.utils.seed)</a>
+      <li><a href="api/utils.html#BOBE.utils.seed.get_new_jax_key">get_new_jax_key() (in module BOBE.utils.seed)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.AcquisitionFunction.get_next_batch">get_next_batch() (jaxbo.acquisition.AcquisitionFunction method)</a>, <a href="jaxbo.html#jaxbo.acquisition.AcquisitionFunction.get_next_batch">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.AcquisitionFunction.get_next_batch">get_next_batch() (BOBE.acquisition.AcquisitionFunction method)</a>, <a href="api/acquisition.html#BOBE.acquisition.AcquisitionFunction.get_next_batch">[1]</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.bo.BOBE.get_next_batch">(jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.get_next_batch">[1]</a>
+        <li><a href="BOBE.html#BOBE.bo.BOBE.get_next_batch">(BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.get_next_batch">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.BOBE.get_next_batch">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.get_next_batch">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.AcquisitionFunction.get_next_point">get_next_point() (jaxbo.acquisition.AcquisitionFunction method)</a>, <a href="jaxbo.html#jaxbo.acquisition.AcquisitionFunction.get_next_point">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.AcquisitionFunction.get_next_point">get_next_point() (BOBE.acquisition.AcquisitionFunction method)</a>, <a href="api/acquisition.html#BOBE.acquisition.AcquisitionFunction.get_next_point">[1]</a>
 
       <ul>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.EI.get_next_point">(jaxbo.acquisition.EI method)</a>, <a href="jaxbo.html#jaxbo.acquisition.EI.get_next_point">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.EI.get_next_point">(BOBE.acquisition.EI method)</a>, <a href="api/acquisition.html#BOBE.acquisition.EI.get_next_point">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPStd.get_next_point">(jaxbo.acquisition.WIPStd method)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPStd.get_next_point">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.WeightedIntegratedPosteriorBase.get_next_point">(BOBE.acquisition.WeightedIntegratedPosteriorBase method)</a>, <a href="api/acquisition.html#BOBE.acquisition.WeightedIntegratedPosteriorBase.get_next_point">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPV.get_next_point">(jaxbo.acquisition.WIPV method)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPV.get_next_point">[1]</a>
-</li>
-        <li><a href="jaxbo.html#jaxbo.EI.get_next_point">(jaxbo.EI method)</a>
-</li>
-        <li><a href="jaxbo.html#jaxbo.WIPStd.get_next_point">(jaxbo.WIPStd method)</a>
-</li>
-        <li><a href="jaxbo.html#jaxbo.WIPV.get_next_point">(jaxbo.WIPV method)</a>
+        <li><a href="BOBE.html#BOBE.EI.get_next_point">(BOBE.EI method)</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf.get_nn_predict_proba_fn">get_nn_predict_proba_fn() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.get_nn_predict_proba_fn">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.get_nn_predict_proba_fn">get_nn_predict_proba_fn() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.get_nn_predict_proba_fn">[1]</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.seed.get_numpy_rng">get_numpy_rng() (in module jaxbo.utils.seed)</a>
+      <li><a href="api/utils.html#BOBE.utils.seed.get_numpy_rng">get_numpy_rng() (in module BOBE.utils.seed)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.get_random_point">get_random_point() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.get_random_point">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.get_random_point">get_random_point() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.get_random_point">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.get_random_point">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.get_random_point">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.get_random_point">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.get_random_point">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.get_random_point">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.get_random_point">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.get_random_point">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.get_random_point">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.get_results_dict">get_results_dict() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.get_results_dict">get_results_dict() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.get_results_dict">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.get_results_dict">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.get_results_dict">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.get_results_dict">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf.get_svm_predict_proba_fn">get_svm_predict_proba_fn() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.get_svm_predict_proba_fn">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.get_svm_predict_proba_fn">get_svm_predict_proba_fn() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.get_svm_predict_proba_fn">[1]</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.core.get_threshold_for_nsigma">get_threshold_for_nsigma() (in module jaxbo.utils.core)</a>
+      <li><a href="api/utils.html#BOBE.utils.core.get_threshold_for_nsigma">get_threshold_for_nsigma() (in module BOBE.utils.core)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.get_timing_summary">get_timing_summary() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.get_timing_summary">get_timing_summary() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.get_timing_summary">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.get_timing_summary">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.get_timing_summary">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.get_timing_summary">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.GP">GP (class in jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.GP">GP (class in BOBE)</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP">(class in jaxbo.gp)</a>, <a href="jaxbo.html#jaxbo.gp.GP">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP">(class in BOBE.gp)</a>, <a href="api/gp_models.html#BOBE.gp.GP">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.gp_fit">gp_fit() (jaxbo.utils.pool.MPI_Pool method)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.gp_fit">gp_fit() (BOBE.pool.MPI_Pool method)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.gp.gp_mll">gp_mll() (in module jaxbo.gp)</a>
+      <li><a href="BOBE.html#BOBE.gp.gp_mll">gp_mll() (in module BOBE.gp)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.GPwithClassifier">GPwithClassifier (class in jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.GPwithClassifier">GPwithClassifier (class in BOBE)</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier">(class in jaxbo.clf_gp)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier">(class in BOBE.clf_gp)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier">[1]</a>
 </li>
       </ul></li>
   </ul></td>
@@ -572,14 +675,14 @@
 <h2 id="H">H</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.hidden_dims">hidden_dims (jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.hidden_dims">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.MLPClassifier.hidden_dims">hidden_dims (BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.hidden_dims">[1]</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.GP.hyperparams_dict">hyperparams_dict() (jaxbo.GP method)</a>
+      <li><a href="BOBE.html#BOBE.GP.hyperparams_dict">hyperparams_dict() (BOBE.GP method)</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.hyperparams_dict">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.hyperparams_dict">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.hyperparams_dict">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.hyperparams_dict">[1]</a>
 </li>
       </ul></li>
   </ul></td>
@@ -588,19 +691,19 @@
 <h2 id="I">I</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.init_scale">init_scale (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.init_scale">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.init_scale">init_scale (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.init_scale">[1]</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.core.is_cluster_environment">is_cluster_environment() (in module jaxbo.utils.core)</a>
+      <li><a href="api/utils.html#BOBE.utils.core.is_cluster_environment">is_cluster_environment() (in module BOBE.utils.core)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.is_resuming">is_resuming() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.is_resuming">is_resuming() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.is_resuming">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.is_resuming">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.is_resuming">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.is_resuming">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.results.ConvergenceInfo.iteration">iteration (jaxbo.utils.results.ConvergenceInfo attribute)</a>
+      <li><a href="api/utils.html#BOBE.utils.results.ConvergenceInfo.iteration">iteration (BOBE.utils.results.ConvergenceInfo attribute)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -610,132 +713,25 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="glossary.html#term-JAX"><strong>JAX</strong></a>
 </li>
-      <li>
-    jaxbo
-
-      <ul>
-        <li><a href="jaxbo.html#module-jaxbo">module</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.acquisition
-
-      <ul>
-        <li><a href="api/acquisition.html#module-jaxbo.acquisition">module</a>, <a href="jaxbo.html#module-jaxbo.acquisition">[1]</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.bo
-
-      <ul>
-        <li><a href="jaxbo.html#module-jaxbo.bo">module</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.clf
-
-      <ul>
-        <li><a href="api/gp_models.html#module-jaxbo.clf">module</a>, <a href="jaxbo.html#module-jaxbo.clf">[1]</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.clf_gp
-
-      <ul>
-        <li><a href="jaxbo.html#module-jaxbo.clf_gp">module</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.gp
-
-      <ul>
-        <li><a href="jaxbo.html#module-jaxbo.gp">module</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.likelihood
-
-      <ul>
-        <li><a href="jaxbo.html#module-jaxbo.likelihood">module</a>
-</li>
-      </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
-      <li>
-    jaxbo.optim
-
-      <ul>
-        <li><a href="api/core.html#module-jaxbo.optim">module</a>, <a href="jaxbo.html#module-jaxbo.optim">[1]</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.run
-
-      <ul>
-        <li><a href="api/core.html#module-jaxbo.run">module</a>, <a href="jaxbo.html#module-jaxbo.run">[1]</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.utils.core
-
-      <ul>
-        <li><a href="api/utils.html#module-jaxbo.utils.core">module</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.utils.log
-
-      <ul>
-        <li><a href="api/utils.html#module-jaxbo.utils.log">module</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.utils.plot
-
-      <ul>
-        <li><a href="api/utils.html#module-jaxbo.utils.plot">module</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.utils.pool
-
-      <ul>
-        <li><a href="api/utils.html#module-jaxbo.utils.pool">module</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.utils.results
-
-      <ul>
-        <li><a href="api/utils.html#module-jaxbo.utils.results">module</a>
-</li>
-      </ul></li>
-      <li>
-    jaxbo.utils.seed
-
-      <ul>
-        <li><a href="api/utils.html#module-jaxbo.utils.seed">module</a>
-</li>
-      </ul></li>
   </ul></td>
 </tr></table>
 
 <h2 id="K">K</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.kernel">kernel() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.kernel">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.kernel">kernel() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.kernel">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.kernel">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.kernel">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.gp.kernel_diag">kernel_diag() (in module jaxbo.gp)</a>
+      <li><a href="BOBE.html#BOBE.gp.kernel_diag">kernel_diag() (in module BOBE.gp)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.core.kl_divergence_gaussian">kl_divergence_gaussian() (in module jaxbo.utils.core)</a>
+      <li><a href="api/utils.html#BOBE.utils.core.kl_divergence_gaussian">kl_divergence_gaussian() (in module BOBE.utils.core)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.core.kl_divergence_samples">kl_divergence_samples() (in module jaxbo.utils.core)</a>
+      <li><a href="api/utils.html#BOBE.utils.core.kl_divergence_samples">kl_divergence_samples() (in module BOBE.utils.core)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -743,56 +739,54 @@
 <h2 id="L">L</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/utils.html#jaxbo.utils.log.LevelFilter">LevelFilter (class in jaxbo.utils.log)</a>
+      <li><a href="api/utils.html#BOBE.utils.log.LevelFilter">LevelFilter (class in BOBE.utils.log)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.Likelihood">Likelihood (class in jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.Likelihood">Likelihood (class in BOBE)</a>
 
       <ul>
-        <li><a href="api/likelihood.html#jaxbo.likelihood.Likelihood">(class in jaxbo.likelihood)</a>, <a href="jaxbo.html#jaxbo.likelihood.Likelihood">[1]</a>
+        <li><a href="BOBE.html#BOBE.likelihood.Likelihood">(class in BOBE.likelihood)</a>, <a href="api/likelihood.html#BOBE.likelihood.Likelihood">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.load">load() (jaxbo.clf_gp.GPwithClassifier class method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.load">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.load">load() (BOBE.clf_gp.GPwithClassifier class method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.load">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.load">(jaxbo.GP class method)</a>
+        <li><a href="BOBE.html#BOBE.GP.load">(BOBE.GP class method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.load">(jaxbo.gp.GP class method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.load">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.load">(BOBE.gp.GP class method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.load">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.load">(jaxbo.GPwithClassifier class method)</a>
-</li>
-      </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.results.load_bobe_results">load_bobe_results() (in module jaxbo.utils.results)</a>
-</li>
-      <li><a href="jaxbo.html#jaxbo.load_gp">load_gp() (in module jaxbo)</a>
-
-      <ul>
-        <li><a href="jaxbo.html#jaxbo.bo.load_gp">(in module jaxbo.bo)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.load">(BOBE.GPwithClassifier class method)</a>
 </li>
       </ul></li>
+      <li><a href="api/utils.html#BOBE.utils.results.load_bobe_results">load_bobe_results() (in module BOBE.utils.results)</a>
+</li>
+      <li><a href="BOBE.html#BOBE.bo.load_gp_file">load_gp_file() (in module BOBE.bo)</a>
+</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.load_results">load_results() (jaxbo.BOBEResults class method)</a>
+      <li><a href="BOBE.html#BOBE.bo.load_gp_statedict">load_gp_statedict() (in module BOBE.bo)</a>
+</li>
+      <li><a href="BOBE.html#BOBE.BOBEResults.load_results">load_results() (BOBE.BOBEResults class method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.load_results">(jaxbo.utils.results.BOBEResults class method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.load_results">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.load_results">(BOBE.utils.results.BOBEResults class method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.load_results">[1]</a>
 </li>
       </ul></li>
       <li><a href="glossary.html#term-Log-Evidence"><strong>Log Evidence</strong></a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.gp.DummyDistribution.log_prob">log_prob() (jaxbo.gp.DummyDistribution method)</a>
+      <li><a href="BOBE.html#BOBE.gp.DummyDistribution.log_prob">log_prob() (BOBE.gp.DummyDistribution method)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.LogEI">LogEI (class in jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.LogEI">LogEI (class in BOBE)</a>
 
       <ul>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.LogEI">(class in jaxbo.acquisition)</a>, <a href="jaxbo.html#jaxbo.acquisition.LogEI">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.LogEI">(class in BOBE.acquisition)</a>, <a href="api/acquisition.html#BOBE.acquisition.LogEI">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.results.ConvergenceInfo.logz_dict">logz_dict (jaxbo.utils.results.ConvergenceInfo attribute)</a>
+      <li><a href="api/utils.html#BOBE.utils.results.ConvergenceInfo.logz_dict">logz_dict (BOBE.utils.results.ConvergenceInfo attribute)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.lr">lr (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.lr">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.lr">lr (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.lr">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.lr">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.lr">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.lr">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.lr">[1]</a>
 </li>
       </ul></li>
   </ul></td>
@@ -801,54 +795,54 @@
 <h2 id="M">M</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.gp.make_distribution">make_distribution() (in module jaxbo.gp)</a>
+      <li><a href="BOBE.html#BOBE.gp.make_distribution">make_distribution() (in module BOBE.gp)</a>
 </li>
       <li><a href="glossary.html#term-Marginal-Likelihood"><strong>Marginal Likelihood</strong></a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.gp.matern_kernel">matern_kernel() (in module jaxbo.gp)</a>
+      <li><a href="BOBE.html#BOBE.gp.matern_kernel">matern_kernel() (in module BOBE.gp)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier">MLPClassifier (class in jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.MLPClassifier">MLPClassifier (class in BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier">[1]</a>
 </li>
       <li>
     module
 
       <ul>
-        <li><a href="jaxbo.html#module-jaxbo">jaxbo</a>
+        <li><a href="BOBE.html#module-BOBE">BOBE</a>
 </li>
-        <li><a href="api/acquisition.html#module-jaxbo.acquisition">jaxbo.acquisition</a>, <a href="jaxbo.html#module-jaxbo.acquisition">[1]</a>
+        <li><a href="BOBE.html#module-BOBE.acquisition">BOBE.acquisition</a>, <a href="api/acquisition.html#module-BOBE.acquisition">[1]</a>
 </li>
-        <li><a href="jaxbo.html#module-jaxbo.bo">jaxbo.bo</a>
+        <li><a href="BOBE.html#module-BOBE.bo">BOBE.bo</a>
 </li>
-        <li><a href="api/gp_models.html#module-jaxbo.clf">jaxbo.clf</a>, <a href="jaxbo.html#module-jaxbo.clf">[1]</a>
+        <li><a href="BOBE.html#module-BOBE.clf">BOBE.clf</a>, <a href="api/gp_models.html#module-BOBE.clf">[1]</a>
 </li>
-        <li><a href="jaxbo.html#module-jaxbo.clf_gp">jaxbo.clf_gp</a>
+        <li><a href="BOBE.html#module-BOBE.clf_gp">BOBE.clf_gp</a>
 </li>
-        <li><a href="jaxbo.html#module-jaxbo.gp">jaxbo.gp</a>
+        <li><a href="BOBE.html#module-BOBE.gp">BOBE.gp</a>
 </li>
-        <li><a href="jaxbo.html#module-jaxbo.likelihood">jaxbo.likelihood</a>
+        <li><a href="BOBE.html#module-BOBE.likelihood">BOBE.likelihood</a>
 </li>
-        <li><a href="api/core.html#module-jaxbo.optim">jaxbo.optim</a>, <a href="jaxbo.html#module-jaxbo.optim">[1]</a>
+        <li><a href="BOBE.html#module-BOBE.optim">BOBE.optim</a>, <a href="api/core.html#module-BOBE.optim">[1]</a>
 </li>
-        <li><a href="api/core.html#module-jaxbo.run">jaxbo.run</a>, <a href="jaxbo.html#module-jaxbo.run">[1]</a>
+        <li><a href="api/utils.html#module-BOBE.pool">BOBE.pool</a>
 </li>
-        <li><a href="api/utils.html#module-jaxbo.utils.core">jaxbo.utils.core</a>
+        <li><a href="BOBE.html#module-BOBE.samplers">BOBE.samplers</a>
 </li>
-        <li><a href="api/utils.html#module-jaxbo.utils.log">jaxbo.utils.log</a>
+        <li><a href="api/utils.html#module-BOBE.utils.core">BOBE.utils.core</a>
 </li>
-        <li><a href="api/utils.html#module-jaxbo.utils.plot">jaxbo.utils.plot</a>
+        <li><a href="api/utils.html#module-BOBE.utils.log">BOBE.utils.log</a>
 </li>
-        <li><a href="api/utils.html#module-jaxbo.utils.pool">jaxbo.utils.pool</a>
+        <li><a href="api/utils.html#module-BOBE.utils.plot">BOBE.utils.plot</a>
 </li>
-        <li><a href="api/utils.html#module-jaxbo.utils.results">jaxbo.utils.results</a>
+        <li><a href="api/utils.html#module-BOBE.utils.results">BOBE.utils.results</a>
 </li>
-        <li><a href="api/utils.html#module-jaxbo.utils.seed">jaxbo.utils.seed</a>
+        <li><a href="api/utils.html#module-BOBE.utils.seed">BOBE.utils.seed</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool">MPI_Pool (class in jaxbo.utils.pool)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool">MPI_Pool (class in BOBE.pool)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.mu">mu (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.mu">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.mu">mu (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.mu">[1]</a>
 </li>
   </ul></td>
 </tr></table>
@@ -856,60 +850,62 @@
 <h2 id="N">N</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.n_epochs">n_epochs (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.n_epochs">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.n_epochs">n_epochs (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.n_epochs">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.n_epochs">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.n_epochs">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.n_epochs">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.n_epochs">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.n_restarts">n_restarts (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.n_restarts">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.n_restarts">n_restarts (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.n_restarts">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.n_restarts">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.n_restarts">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.n_restarts">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.n_restarts">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/acquisition.html#id0">name (jaxbo.acquisition.AcquisitionFunction attribute)</a>, <a href="api/acquisition.html#jaxbo.acquisition.AcquisitionFunction.name">[1]</a>, <a href="jaxbo.html#id0">[2]</a>, <a href="jaxbo.html#jaxbo.acquisition.AcquisitionFunction.name">[3]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.AcquisitionFunction.name">name (BOBE.acquisition.AcquisitionFunction attribute)</a>, <a href="BOBE.html#id0">[1]</a>, <a href="api/acquisition.html#BOBE.acquisition.AcquisitionFunction.name">[2]</a>, <a href="api/acquisition.html#id0">[3]</a>
 
       <ul>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.EI.name">(jaxbo.acquisition.EI attribute)</a>, <a href="jaxbo.html#jaxbo.acquisition.EI.name">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.EI.name">(BOBE.acquisition.EI attribute)</a>, <a href="api/acquisition.html#BOBE.acquisition.EI.name">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.LogEI.name">(jaxbo.acquisition.LogEI attribute)</a>, <a href="jaxbo.html#jaxbo.acquisition.LogEI.name">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.LogEI.name">(BOBE.acquisition.LogEI attribute)</a>, <a href="api/acquisition.html#BOBE.acquisition.LogEI.name">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPStd.name">(jaxbo.acquisition.WIPStd attribute)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPStd.name">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.WIPStd.name">(BOBE.acquisition.WIPStd attribute)</a>, <a href="api/acquisition.html#BOBE.acquisition.WIPStd.name">[1]</a>
 </li>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPV.name">(jaxbo.acquisition.WIPV attribute)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPV.name">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.WIPV.name">(BOBE.acquisition.WIPV attribute)</a>, <a href="api/acquisition.html#BOBE.acquisition.WIPV.name">[1]</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.name">(jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.name">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.name">(BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.name">[1]</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.name">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.name">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.name">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.name">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.EI.name">(jaxbo.EI attribute)</a>
+        <li><a href="BOBE.html#BOBE.EI.name">(BOBE.EI attribute)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.LogEI.name">(jaxbo.LogEI attribute)</a>
+        <li><a href="BOBE.html#BOBE.LogEI.name">(BOBE.LogEI attribute)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.WIPStd.name">(jaxbo.WIPStd attribute)</a>
+        <li><a href="BOBE.html#BOBE.WIPStd.name">(BOBE.WIPStd attribute)</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.WIPV.name">(jaxbo.WIPV attribute)</a>
+        <li><a href="BOBE.html#BOBE.WIPV.name">(BOBE.WIPV attribute)</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.GP.neg_mll">neg_mll() (jaxbo.GP method)</a>
+      <li><a href="BOBE.html#BOBE.GP.neg_mll">neg_mll() (BOBE.GP method)</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.neg_mll">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.neg_mll">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.neg_mll">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.neg_mll">[1]</a>
 </li>
       </ul></li>
       <li><a href="glossary.html#term-Nested-Sampling"><strong>Nested Sampling</strong></a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.npoints">npoints (jaxbo.clf_gp.GPwithClassifier property)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.npoints">[1]</a>
+      <li><a href="BOBE.html#BOBE.samplers.nested_sampling_Dy">nested_sampling_Dy() (in module BOBE.samplers)</a>, <a href="api/samplers.html#BOBE.samplers.nested_sampling_Dy">[1]</a>
+</li>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.npoints">npoints (BOBE.clf_gp.GPwithClassifier property)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.npoints">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.npoints">(jaxbo.GP property)</a>
+        <li><a href="BOBE.html#BOBE.GP.npoints">(BOBE.GP property)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.npoints">(jaxbo.gp.GP property)</a>, <a href="jaxbo.html#jaxbo.gp.GP.npoints">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.npoints">(BOBE.gp.GP property)</a>, <a href="api/gp_models.html#BOBE.gp.GP.npoints">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.npoints">(jaxbo.GPwithClassifier property)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.npoints">(BOBE.GPwithClassifier property)</a>
 </li>
       </ul></li>
       <li><a href="glossary.html#term-NumPyro"><strong>NumPyro</strong></a>
@@ -920,17 +916,17 @@
 <h2 id="O">O</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/core.html#jaxbo.optim.optimize_optax">optimize_optax() (in module jaxbo.optim)</a>, <a href="jaxbo.html#jaxbo.optim.optimize_optax">[1]</a>
+      <li><a href="BOBE.html#BOBE.optim.optimize_optax">optimize_optax() (in module BOBE.optim)</a>, <a href="api/core.html#BOBE.optim.optimize_optax">[1]</a>
 </li>
-      <li><a href="api/core.html#jaxbo.optim.optimize_optax_vmap">optimize_optax_vmap() (in module jaxbo.optim)</a>, <a href="jaxbo.html#jaxbo.optim.optimize_optax_vmap">[1]</a>
+      <li><a href="BOBE.html#BOBE.optim.optimize_optax_vmap">optimize_optax_vmap() (in module BOBE.optim)</a>, <a href="api/core.html#BOBE.optim.optimize_optax_vmap">[1]</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/core.html#jaxbo.optim.optimize_scipy">optimize_scipy() (in module jaxbo.optim)</a>, <a href="jaxbo.html#jaxbo.optim.optimize_scipy">[1]</a>
+      <li><a href="BOBE.html#BOBE.optim.optimize_scipy">optimize_scipy() (in module BOBE.optim)</a>, <a href="api/core.html#BOBE.optim.optimize_scipy">[1]</a>
 </li>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.AcquisitionFunction.optimizer">optimizer (jaxbo.acquisition.AcquisitionFunction attribute)</a>, <a href="jaxbo.html#jaxbo.acquisition.AcquisitionFunction.optimizer">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.AcquisitionFunction.optimizer">optimizer (BOBE.acquisition.AcquisitionFunction attribute)</a>, <a href="api/acquisition.html#BOBE.acquisition.AcquisitionFunction.optimizer">[1]</a>
 </li>
-      <li><a href="api/acquisition.html#jaxbo.acquisition.AcquisitionFunction.optimizer_options">optimizer_options (jaxbo.acquisition.AcquisitionFunction attribute)</a>, <a href="jaxbo.html#jaxbo.acquisition.AcquisitionFunction.optimizer_options">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.AcquisitionFunction.optimizer_options">optimizer_options (BOBE.acquisition.AcquisitionFunction attribute)</a>, <a href="api/acquisition.html#BOBE.acquisition.AcquisitionFunction.optimizer_options">[1]</a>
 </li>
   </ul></td>
 </tr></table>
@@ -938,143 +934,145 @@
 <h2 id="P">P</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.parent">parent (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.parent">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.parent">parent (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.parent">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.parent">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.parent">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.parent">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.parent">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.patience">patience (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.patience">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.patience">patience (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.patience">[1]</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_acquisition_evolution">plot_acquisition_evolution() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_acquisition_evolution">plot_acquisition_evolution() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_acquisition_evolution">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_acquisition_evolution">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_best_loglike_evolution">plot_best_loglike_evolution() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_best_loglike_evolution">plot_best_loglike_evolution() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_best_loglike_evolution">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_best_loglike_evolution">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_convergence_diagnostics">plot_convergence_diagnostics() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_convergence_diagnostics">plot_convergence_diagnostics() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_convergence_diagnostics">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_convergence_diagnostics">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_evidence_evolution">plot_evidence_evolution() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_evidence_evolution">plot_evidence_evolution() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_evidence_evolution">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_evidence_evolution">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.plot.plot_final_samples">plot_final_samples() (in module jaxbo.utils.plot)</a>
+      <li><a href="api/utils.html#BOBE.utils.plot.plot_final_samples">plot_final_samples() (in module BOBE.utils.plot)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_gp_hyperparameters">plot_gp_hyperparameters() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_gp_hyperparameters">plot_gp_hyperparameters() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_gp_hyperparameters">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
-</li>
-      </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_gp_kernel_variance">plot_gp_kernel_variance() (jaxbo.BOBESummaryPlotter method)</a>
-
-      <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_gp_kernel_variance">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_gp_hyperparameters">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_gp_lengthscales">plot_gp_lengthscales() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_gp_kernel_variance">plot_gp_kernel_variance() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_gp_lengthscales">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_gp_kernel_variance">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_kl_divergences">plot_kl_divergences() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_gp_lengthscales">plot_gp_lengthscales() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_kl_divergences">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_gp_lengthscales">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_parameter_evolution">plot_parameter_evolution() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_kl_divergences">plot_kl_divergences() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_parameter_evolution">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_kl_divergences">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_summary_stats">plot_summary_stats() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_parameter_evolution">plot_parameter_evolution() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_summary_stats">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_parameter_evolution">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.plot_timing_breakdown">plot_timing_breakdown() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_summary_stats">plot_summary_stats() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.plot_timing_breakdown">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_summary_stats">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
+</li>
+      </ul></li>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.plot_timing_breakdown">plot_timing_breakdown() (BOBE.BOBESummaryPlotter method)</a>
+
+      <ul>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.plot_timing_breakdown">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="glossary.html#term-Posterior"><strong>Posterior</strong></a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.GP.predict_batched">predict_batched() (jaxbo.GP method)</a>
+      <li><a href="BOBE.html#BOBE.GP.predict_batched">predict_batched() (BOBE.GP method)</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.predict_batched">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.predict_batched">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.predict_batched">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.predict_batched">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.predict_mean_batched">predict_mean_batched() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.predict_mean_batched">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.predict_mean_batched">predict_mean_batched() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.predict_mean_batched">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.predict_mean_batched">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.predict_mean_batched">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.predict_mean_batched">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.predict_mean_batched">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.predict_mean_batched">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.predict_mean_batched">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.predict_mean_batched">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.predict_mean_batched">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.predict_mean_single">predict_mean_single() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.predict_mean_single">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.predict_mean_single">predict_mean_single() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.predict_mean_single">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.predict_mean_single">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.predict_mean_single">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.predict_mean_single">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.predict_mean_single">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.predict_mean_single">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.predict_mean_single">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.predict_mean_single">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.predict_mean_single">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.predict_single">predict_single() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.predict_single">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.predict_single">predict_single() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.predict_single">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.predict_single">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.predict_single">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.predict_single">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.predict_single">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.predict_single">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.predict_single">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.predict_single">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.predict_single">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.predict_var_batched">predict_var_batched() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.predict_var_batched">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.predict_var_batched">predict_var_batched() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.predict_var_batched">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.predict_var_batched">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.predict_var_batched">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.predict_var_batched">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.predict_var_batched">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.predict_var_batched">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.predict_var_batched">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.predict_var_batched">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.predict_var_batched">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.predict_var_single">predict_var_single() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.predict_var_single">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.predict_var_single">predict_var_single() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.predict_var_single">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.predict_var_single">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.predict_var_single">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.predict_var_single">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.predict_var_single">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.predict_var_single">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.predict_var_single">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.predict_var_single">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.predict_var_single">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
       <li><a href="glossary.html#term-Prior"><strong>Prior</strong></a>
+</li>
+      <li><a href="BOBE.html#BOBE.samplers.prior_transform">prior_transform() (in module BOBE.samplers)</a>, <a href="api/samplers.html#BOBE.samplers.prior_transform">[1]</a>
 </li>
   </ul></td>
 </tr></table>
@@ -1082,46 +1080,50 @@
 <h2 id="R">R</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.gp.rbf_kernel">rbf_kernel() (in module jaxbo.gp)</a>
+      <li><a href="BOBE.html#BOBE.gp.rbf_kernel">rbf_kernel() (in module BOBE.gp)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.GP.recompute_cholesky">recompute_cholesky() (jaxbo.GP method)</a>
+      <li><a href="BOBE.html#BOBE.GP.recompute_cholesky">recompute_cholesky() (BOBE.GP method)</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.recompute_cholesky">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.recompute_cholesky">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.recompute_cholesky">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.recompute_cholesky">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.core.renormalise_log_weights">renormalise_log_weights() (in module jaxbo.utils.core)</a>
+      <li><a href="api/utils.html#BOBE.utils.core.renormalise_log_weights">renormalise_log_weights() (in module BOBE.utils.core)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.core.resample_equal">resample_equal() (in module jaxbo.utils.core)</a>
+      <li><a href="api/utils.html#BOBE.utils.core.resample_equal">resample_equal() (in module BOBE.utils.core)</a>
 </li>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.run">run() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.run">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.run">run() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.run">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.run">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.run">(BOBE.BOBE method)</a>
+</li>
+      </ul></li>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.run_EI">run_EI() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.run_EI">[1]</a>
+
+      <ul>
+        <li><a href="BOBE.html#BOBE.BOBE.run_EI">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/core.html#jaxbo.run.run_bobe">run_bobe() (in module jaxbo.run)</a>, <a href="jaxbo.html#jaxbo.run.run_bobe">[1]</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.run_map_objective">run_map_objective() (BOBE.pool.MPI_Pool method)</a>
 </li>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.run_EI">run_EI() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.run_EI">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.run_weighted_integrated_posterior">run_weighted_integrated_posterior() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.run_weighted_integrated_posterior">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.run_EI">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.run_weighted_integrated_posterior">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.run_map_objective">run_map_objective() (jaxbo.utils.pool.MPI_Pool method)</a>
-</li>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.run_WIPStd">run_WIPStd() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.run_WIPStd">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.run_WIPStd">run_WIPStd() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.run_WIPStd">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.run_WIPStd">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.run_WIPStd">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.run_WIPV">run_WIPV() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.run_WIPV">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.run_WIPV">run_WIPV() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.run_WIPV">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.run_WIPV">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.run_WIPV">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
   </ul></td>
@@ -1130,131 +1132,133 @@
 <h2 id="S">S</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.gp.saas_prior_logprob">saas_prior_logprob() (in module jaxbo.gp)</a>
+      <li><a href="BOBE.html#BOBE.gp.saas_prior_logprob">saas_prior_logprob() (in module BOBE.gp)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.save">save() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.save">[1]</a>
+      <li><a href="BOBE.html#BOBE.samplers.sample_GP_NUTS">sample_GP_NUTS() (in module BOBE.samplers)</a>, <a href="api/samplers.html#BOBE.samplers.sample_GP_NUTS">[1]</a>
+</li>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.save">save() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.save">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.save">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.save">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.save">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.save">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.save">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.save">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.save">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.save">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.save_all_formats">save_all_formats() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.save_all_formats">save_all_formats() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.save_all_formats">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.save_all_formats">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.save_all_formats">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.save_all_formats">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBESummaryPlotter.save_all_plots">save_all_plots() (jaxbo.BOBESummaryPlotter method)</a>
+      <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.save_all_plots">save_all_plots() (BOBE.BOBESummaryPlotter method)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.plot.BOBESummaryPlotter.save_all_plots">(jaxbo.utils.plot.BOBESummaryPlotter method)</a>
+        <li><a href="api/utils.html#BOBE.utils.plot.BOBESummaryPlotter.save_all_plots">(BOBE.utils.plot.BOBESummaryPlotter method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.save_chain_files">save_chain_files() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.save_chain_files">save_chain_files() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.save_chain_files">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.save_chain_files">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.save_chain_files">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.save_chain_files">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.save_intermediate">save_intermediate() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.save_intermediate">save_intermediate() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.save_intermediate">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.save_intermediate">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.save_intermediate">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.save_intermediate">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.save_main_results">save_main_results() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.save_main_results">save_main_results() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.save_main_results">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.save_main_results">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.save_main_results">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.save_main_results">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.save_summary_stats">save_summary_stats() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.save_summary_stats">save_summary_stats() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.save_summary_stats">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.save_summary_stats">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.save_summary_stats">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.save_summary_stats">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.save_timing_data">save_timing_data() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.save_timing_data">save_timing_data() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.save_timing_data">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.save_timing_data">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.save_timing_data">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.save_timing_data">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.scale_from_unit">scale_from_unit() (in module jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.scale_from_unit">scale_from_unit() (in module BOBE)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.core.scale_from_unit">(in module jaxbo.utils.core)</a>
+        <li><a href="api/utils.html#BOBE.utils.core.scale_from_unit">(in module BOBE.utils.core)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.scale_to_unit">scale_to_unit() (in module jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.scale_to_unit">scale_to_unit() (in module BOBE)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.core.scale_to_unit">(in module jaxbo.utils.core)</a>
+        <li><a href="api/utils.html#BOBE.utils.core.scale_to_unit">(in module BOBE.utils.core)</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.scope">scope (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.scope">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.scope">scope (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.scope">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.scope">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.scope">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.scope">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.scope">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.seed_offset">seed_offset (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.seed_offset">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.seed_offset">seed_offset (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.seed_offset">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.seed_offset">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.seed_offset">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.seed_offset">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.seed_offset">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.seed.set_global_seed">set_global_seed() (in module jaxbo.utils.seed)</a>
+      <li><a href="api/utils.html#BOBE.utils.seed.set_global_seed">set_global_seed() (in module BOBE.utils.seed)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.setup">setup() (jaxbo.clf.EllipsoidClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.setup">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.setup">setup() (BOBE.clf.EllipsoidClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.setup">[1]</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.setup_logging">setup_logging() (in module jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.setup_logging">setup_logging() (in module BOBE)</a>
 
       <ul>
-        <li><a href="api/utils.html#jaxbo.utils.log.setup_logging">(in module jaxbo.utils.log)</a>
+        <li><a href="api/utils.html#BOBE.utils.log.setup_logging">(in module BOBE.utils.log)</a>
 </li>
       </ul></li>
       <li><a href="glossary.html#term-Sparse-Axis-Aligned-Subspace-SAAS"><strong>Sparse Axis-Aligned Subspace (SAAS)</strong></a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.seed.split_jax_key">split_jax_key() (in module jaxbo.utils.seed)</a>
+      <li><a href="api/utils.html#BOBE.utils.seed.split_jax_key">split_jax_key() (in module BOBE.utils.seed)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.split_seed">split_seed (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.split_seed">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.split_seed">split_seed (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.split_seed">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.split_seed">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.split_seed">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.split_seed">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.split_seed">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.core.split_vmap">split_vmap() (in module jaxbo.utils.core)</a>
+      <li><a href="api/utils.html#BOBE.utils.core.split_vmap">split_vmap() (in module BOBE.utils.core)</a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.start_timing">start_timing() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.start_timing">start_timing() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.start_timing">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.start_timing">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.start_timing">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.start_timing">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.state_dict">state_dict() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.state_dict">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.state_dict">state_dict() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.state_dict">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.state_dict">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.state_dict">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.state_dict">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.state_dict">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.state_dict">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.state_dict">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.state_dict">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.state_dict">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.core.suppress_stdout_stderr">suppress_stdout_stderr() (in module jaxbo.utils.core)</a>
+      <li><a href="api/utils.html#BOBE.utils.core.suppress_stdout_stderr">suppress_stdout_stderr() (in module BOBE.utils.core)</a>
 </li>
       <li><a href="glossary.html#term-Surrogate-Model"><strong>Surrogate Model</strong></a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.svm_predict">svm_predict() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.svm_predict">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.svm_predict">svm_predict() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.svm_predict">[1]</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.svm_predict_proba">svm_predict_proba() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.svm_predict_proba">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.svm_predict_proba">svm_predict_proba() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.svm_predict_proba">[1]</a>
 </li>
   </ul></td>
 </tr></table>
@@ -1262,45 +1266,45 @@
 <h2 id="T">T</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.TASK_ACQUISITION_OPT">TASK_ACQUISITION_OPT (jaxbo.utils.pool.MPI_Pool attribute)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.TASK_ACQUISITION_OPT">TASK_ACQUISITION_OPT (BOBE.pool.MPI_Pool attribute)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.TASK_COBAYA_INIT">TASK_COBAYA_INIT (jaxbo.utils.pool.MPI_Pool attribute)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.TASK_COBAYA_INIT">TASK_COBAYA_INIT (BOBE.pool.MPI_Pool attribute)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.TASK_EXIT">TASK_EXIT (jaxbo.utils.pool.MPI_Pool attribute)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.TASK_EXIT">TASK_EXIT (BOBE.pool.MPI_Pool attribute)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.TASK_GP_FIT">TASK_GP_FIT (jaxbo.utils.pool.MPI_Pool attribute)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.TASK_GP_FIT">TASK_GP_FIT (BOBE.pool.MPI_Pool attribute)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.TASK_INIT">TASK_INIT (jaxbo.utils.pool.MPI_Pool attribute)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.TASK_INIT">TASK_INIT (BOBE.pool.MPI_Pool attribute)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.TASK_OBJECTIVE_EVAL">TASK_OBJECTIVE_EVAL (jaxbo.utils.pool.MPI_Pool attribute)</a>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.TASK_OBJECTIVE_EVAL">TASK_OBJECTIVE_EVAL (BOBE.pool.MPI_Pool attribute)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.results.ConvergenceInfo.threshold">threshold (jaxbo.utils.results.ConvergenceInfo attribute)</a>
+      <li><a href="api/utils.html#BOBE.utils.results.ConvergenceInfo.threshold">threshold (BOBE.utils.results.ConvergenceInfo attribute)</a>
 </li>
-      <li><a href="api/utils.html#jaxbo.utils.results.ConvergenceInfo.to_dict">to_dict() (jaxbo.utils.results.ConvergenceInfo method)</a>
+      <li><a href="api/utils.html#BOBE.utils.results.ConvergenceInfo.to_dict">to_dict() (BOBE.utils.results.ConvergenceInfo method)</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.train_classifier">train_classifier() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.train_classifier">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.train_classifier">train_classifier() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.train_classifier">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.train_classifier">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.train_classifier">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.train_ellipsoid">train_ellipsoid() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.train_ellipsoid">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.train_ellipsoid">train_ellipsoid() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.train_ellipsoid">[1]</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.train_ellipsoid_classifier">train_ellipsoid_classifier() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.train_ellipsoid_classifier">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.train_ellipsoid_classifier">train_ellipsoid_classifier() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.train_ellipsoid_classifier">[1]</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.train_ellipsoid_multiple_restarts">train_ellipsoid_multiple_restarts() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.train_ellipsoid_multiple_restarts">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.train_ellipsoid_multiple_restarts">train_ellipsoid_multiple_restarts() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.train_ellipsoid_multiple_restarts">[1]</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.train_nn">train_nn() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.train_nn">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.train_nn">train_nn() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.train_nn">[1]</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.train_nn_classifier">train_nn_classifier() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.train_nn_classifier">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.train_nn_classifier">train_nn_classifier() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.train_nn_classifier">[1]</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.train_nn_multiple_restarts">train_nn_multiple_restarts() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.train_nn_multiple_restarts">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.train_nn_multiple_restarts">train_nn_multiple_restarts() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.train_nn_multiple_restarts">[1]</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.train_svm_classifier">train_svm_classifier() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.train_svm_classifier">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.train_svm_classifier">train_svm_classifier() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.train_svm_classifier">[1]</a>
 </li>
-      <li><a href="api/gp_models.html#jaxbo.clf.train_with_restarts">train_with_restarts() (in module jaxbo.clf)</a>, <a href="jaxbo.html#jaxbo.clf.train_with_restarts">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.train_with_restarts">train_with_restarts() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.train_with_restarts">[1]</a>
 </li>
   </ul></td>
 </tr></table>
@@ -1308,61 +1312,61 @@
 <h2 id="U">U</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf_gp.GPwithClassifier.update">update() (jaxbo.clf_gp.GPwithClassifier method)</a>, <a href="jaxbo.html#jaxbo.clf_gp.GPwithClassifier.update">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.update">update() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.update">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.GP.update">(jaxbo.GP method)</a>
+        <li><a href="BOBE.html#BOBE.GP.update">(BOBE.GP method)</a>
 </li>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.update">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.update">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.update">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.update">[1]</a>
 </li>
-        <li><a href="jaxbo.html#jaxbo.GPwithClassifier.update">(jaxbo.GPwithClassifier method)</a>
+        <li><a href="BOBE.html#BOBE.GPwithClassifier.update">(BOBE.GPwithClassifier method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.update_acquisition">update_acquisition() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.update_acquisition">update_acquisition() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.update_acquisition">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.update_acquisition">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.update_acquisition">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.update_acquisition">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.update_best_loglike">update_best_loglike() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.update_best_loglike">update_best_loglike() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.update_best_loglike">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.update_best_loglike">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.update_best_loglike">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.update_best_loglike">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.update_convergence">update_convergence() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.update_convergence">update_convergence() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.update_convergence">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.update_convergence">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.update_convergence">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.update_convergence">[1]</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/core.html#jaxbo.bo.BOBE.update_gp">update_gp() (jaxbo.bo.BOBE method)</a>, <a href="jaxbo.html#jaxbo.bo.BOBE.update_gp">[1]</a>
+      <li><a href="BOBE.html#BOBE.bo.BOBE.update_gp">update_gp() (BOBE.bo.BOBE method)</a>, <a href="api/core.html#BOBE.bo.BOBE.update_gp">[1]</a>
 
       <ul>
-        <li><a href="jaxbo.html#jaxbo.BOBE.update_gp">(jaxbo.BOBE method)</a>
+        <li><a href="BOBE.html#BOBE.BOBE.update_gp">(BOBE.BOBE method)</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.update_gp_hyperparams">update_gp_hyperparams() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.update_gp_hyperparams">update_gp_hyperparams() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.update_gp_hyperparams">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.update_gp_hyperparams">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.update_gp_hyperparams">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.update_gp_hyperparams">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.GP.update_hyperparams">update_hyperparams() (jaxbo.GP method)</a>
+      <li><a href="BOBE.html#BOBE.GP.update_hyperparams">update_hyperparams() (BOBE.GP method)</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.gp.GP.update_hyperparams">(jaxbo.gp.GP method)</a>, <a href="jaxbo.html#jaxbo.gp.GP.update_hyperparams">[1]</a>
+        <li><a href="BOBE.html#BOBE.gp.GP.update_hyperparams">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.update_hyperparams">[1]</a>
 </li>
       </ul></li>
-      <li><a href="jaxbo.html#jaxbo.BOBEResults.update_kl_divergences">update_kl_divergences() (jaxbo.BOBEResults method)</a>
+      <li><a href="BOBE.html#BOBE.BOBEResults.update_kl_divergences">update_kl_divergences() (BOBE.BOBEResults method)</a>
 
       <ul>
-        <li><a href="api/core.html#jaxbo.utils.results.BOBEResults.update_kl_divergences">(jaxbo.utils.results.BOBEResults method)</a>, <a href="api/utils.html#jaxbo.utils.results.BOBEResults.update_kl_divergences">[1]</a>
+        <li><a href="api/core.html#BOBE.utils.results.BOBEResults.update_kl_divergences">(BOBE.utils.results.BOBEResults method)</a>, <a href="api/utils.html#BOBE.utils.results.BOBEResults.update_kl_divergences">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.log.update_verbosity">update_verbosity() (in module jaxbo.utils.log)</a>
+      <li><a href="api/utils.html#BOBE.utils.log.update_verbosity">update_verbosity() (in module BOBE.utils.log)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -1370,10 +1374,10 @@
 <h2 id="V">V</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.val_frac">val_frac (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.val_frac">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.val_frac">val_frac (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.val_frac">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.val_frac">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.val_frac">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.val_frac">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.val_frac">[1]</a>
 </li>
       </ul></li>
   </ul></td>
@@ -1382,29 +1386,31 @@
 <h2 id="W">W</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/gp_models.html#jaxbo.clf.EllipsoidClassifier.weight_decay">weight_decay (jaxbo.clf.EllipsoidClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.EllipsoidClassifier.weight_decay">[1]</a>
+      <li><a href="BOBE.html#BOBE.clf.EllipsoidClassifier.weight_decay">weight_decay (BOBE.clf.EllipsoidClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.EllipsoidClassifier.weight_decay">[1]</a>
 
       <ul>
-        <li><a href="api/gp_models.html#jaxbo.clf.MLPClassifier.weight_decay">(jaxbo.clf.MLPClassifier attribute)</a>, <a href="jaxbo.html#jaxbo.clf.MLPClassifier.weight_decay">[1]</a>
+        <li><a href="BOBE.html#BOBE.clf.MLPClassifier.weight_decay">(BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.weight_decay">[1]</a>
 </li>
       </ul></li>
       <li><a href="glossary.html#term-Weighted-Integrated-Posterior-Variance-WIPV"><strong>Weighted Integrated Posterior Variance (WIPV)</strong></a>
 </li>
-      <li><a href="jaxbo.html#jaxbo.WIPStd">WIPStd (class in jaxbo)</a>
-
-      <ul>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPStd">(class in jaxbo.acquisition)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPStd">[1]</a>
+      <li><a href="BOBE.html#BOBE.acquisition.WeightedIntegratedPosteriorBase">WeightedIntegratedPosteriorBase (class in BOBE.acquisition)</a>, <a href="api/acquisition.html#BOBE.acquisition.WeightedIntegratedPosteriorBase">[1]</a>
 </li>
-      </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="jaxbo.html#jaxbo.WIPV">WIPV (class in jaxbo)</a>
+      <li><a href="BOBE.html#BOBE.WIPStd">WIPStd (class in BOBE)</a>
 
       <ul>
-        <li><a href="api/acquisition.html#jaxbo.acquisition.WIPV">(class in jaxbo.acquisition)</a>, <a href="jaxbo.html#jaxbo.acquisition.WIPV">[1]</a>
+        <li><a href="BOBE.html#BOBE.acquisition.WIPStd">(class in BOBE.acquisition)</a>, <a href="api/acquisition.html#BOBE.acquisition.WIPStd">[1]</a>
 </li>
       </ul></li>
-      <li><a href="api/utils.html#jaxbo.utils.pool.MPI_Pool.worker_wait">worker_wait() (jaxbo.utils.pool.MPI_Pool method)</a>
+      <li><a href="BOBE.html#BOBE.WIPV">WIPV (class in BOBE)</a>
+
+      <ul>
+        <li><a href="BOBE.html#BOBE.acquisition.WIPV">(class in BOBE.acquisition)</a>, <a href="api/acquisition.html#BOBE.acquisition.WIPV">[1]</a>
+</li>
+      </ul></li>
+      <li><a href="api/utils.html#BOBE.pool.MPI_Pool.worker_wait">worker_wait() (BOBE.pool.MPI_Pool method)</a>
 </li>
   </ul></td>
 </tr></table>

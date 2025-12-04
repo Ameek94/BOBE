@@ -1,5 +1,5 @@
-User guide
-=========
+User Guide
+==========
 
 Step-by-step tutorials to help you learn BOBE.
 
