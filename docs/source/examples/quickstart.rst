@@ -1,4 +1,4 @@
-Quick Start Guide
+Quick Start
 =================
 
 BOBE estimates Bayesian evidence for expensive likelihood functions using Gaussian Process (GP) surrogates. The GP is trained using Bayesian optimisation with an acquisition function.
@@ -10,36 +10,36 @@ Here's a minimal example using a test function:
 
 .. code-block:: python
 
-   import numpy as np
-   from BOBE import BOBE
-   
-   # Define a simple 2D likelihood
+   # Define your likelihood function
    def my_likelihood(X):
-       x, y = X[0], X[1]
-       return -0.5 * (x**2 + y**2)
-   
+      x, y = X[0], X[1]
+      logpdf = -0.25 * (5 * (0.2 - x))**2 - (20 * (y/4 - x**4))**2 # Example: a likelihood with a curved degeneracy
+      return logpdf 
+
+
    # Initialize BOBE with setup parameters
    sampler = BOBE(
-       loglikelihood=my_likelihood,
-       param_list=['x', 'y'],
-       param_bounds=np.array([[-3, 3], [-3, 3]]).T,
-       n_sobol_init=2,
-       save_dir='./results',
+      loglikelihood=my_likelihood,
+      param_list=['x1', 'x2'], # list of parameter names
+      param_bounds=np.array([[-1, 1], [-1, 2]]).T, # lower and upper bounds for parameters (2, ndim) shaped
+      n_sobol_init=2, # number of initial Sobol samples to start the run from
+      save_dir='./results',
+
    )
-   
+
    # Run optimization with convergence and run settings
    results = sampler.run(
-       min_evals=10,
-       max_evals=100,
-       batch_size=2,
-       fit_n_points=4,
-       ns_n_points=4,
-       logz_threshold=0.1,
+      min_evals=10, # do at least 20 evaluations
+      max_evals=100, # max evaluation budget
+      batch_size=2, # acquisition function batch size
+      fit_n_points=4, # fit gp after every 4 likelihood evaluations
+      ns_n_points=4, # run nested sampling after every 4 likelihood evaluations
+      logz_threshold=0.1, # target logz uncertainty from GP
    )
-   
+
    # Access the evidence and posterior samples
    print(f"Log Evidence: {results['logz']['mean']}")
-   samples = results['samples']
+   samples = results['samples'] # dictionary containing keys 'x', 'logl', 'weights'
 
 For detailed examples, see:
 

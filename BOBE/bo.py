@@ -964,7 +964,7 @@ class BOBE:
             ei_goal: float = 1e-10,
             do_final_ns: bool = False,
             fit_n_points: int = 10,
-            wipv_batch_size: int = 4,
+            batch_size: int = 4,
             ns_n_points: int = 10,
             num_hmc_warmup: int = 512,
             num_hmc_samples: int = 512,
@@ -996,7 +996,7 @@ class BOBE:
             Whether to run final nested sampling at convergence (WIPV/WIPStd). Default is False.
         fit_n_points : int, optional
             Refit GP hyperparameters after adding this many new points to the GP. Default is 10.
-        wipv_batch_size : int, optional
+        batch_size : int, optional
             Batch size for WIPV/WIPStd acquisition. Default is 4.
         ns_n_points : int, optional
             Run nested sampling after adding this many new points to the GP (for WIPV/WIPStd). Default is 10.
@@ -1075,7 +1075,7 @@ class BOBE:
         # Store run settings
         self.fit_n_points = fit_n_points
         self.ns_n_points = ns_n_points
-        self.wipv_batch_size = wipv_batch_size
+        self.batch_size = batch_size
         
         # Initialize point counters for triggering GP refit and NS
         self.n_points_since_last_fit = 0
@@ -1088,15 +1088,15 @@ class BOBE:
         self.mc_points_method = mc_points_method
         self.zeta_ei = zeta_ei
         
-        # Adjust wipv_batch_size for MPI load balancing
+        # Adjust batch_size for MPI load balancing
         if self.is_mpi:
             n_processes = self.pool.size
-            original_batch = self.wipv_batch_size
-            if self.wipv_batch_size % n_processes != 0:
-                self.wipv_batch_size = (self.wipv_batch_size // n_processes) * n_processes
-                if self.wipv_batch_size < n_processes:
-                    self.wipv_batch_size = n_processes
-                log.info(f" Adjusted wipv_batch_size from {original_batch} to {self.wipv_batch_size} "
+            original_batch = self.batch_size
+            if self.batch_size % n_processes != 0:
+                self.batch_size = (self.batch_size // n_processes) * n_processes
+                if self.batch_size < n_processes:
+                    self.batch_size = n_processes
+                log.info(f" Adjusted batch_size from {original_batch} to {self.batch_size} "
                         f"(multiple of {n_processes} processes)")
         
         # Initialize convergence state
@@ -1116,7 +1116,7 @@ class BOBE:
             'ei_goal': ei_goal,
             'do_final_ns': do_final_ns,
             'fit_n_points': fit_n_points,
-            'wipv_batch_size': wipv_batch_size,
+            'batch_size': batch_size,
             'ns_n_points': ns_n_points,
             'num_hmc_warmup': num_hmc_warmup,
             'num_hmc_samples': num_hmc_samples,
@@ -1250,7 +1250,7 @@ class BOBE:
         while not self.converged:
             ii += 1
             # Check if we should run nested sampling based on points added
-            self.n_points_since_last_ns += self.wipv_batch_size
+            self.n_points_since_last_ns += self.batch_size
             ns_flag = (self.n_points_since_last_ns >= self.ns_n_points) and current_evals >= self.min_evals
             verbose = True
 
@@ -1258,10 +1258,10 @@ class BOBE:
                 log.info(f"Iteration {ii} of {acq_name}, objective evals {current_evals}/{self.max_evals}, ns={ns_flag}")
 
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
-            new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.wipv_batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
+            new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
             new_pts_u = jnp.atleast_2d(new_pts_u)
             new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
-            current_evals += self.wipv_batch_size
+            current_evals += self.batch_size
 
             self.update_gp(new_pts_u, new_vals, step = ii)
             self.results_manager.update_best_loglike(ii, self.best_f)

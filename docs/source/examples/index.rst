@@ -6,5 +6,6 @@ Example applications of BOBE to different problems.
 .. toctree::
    :maxdepth: 1
 
-   banana
+   quickstart
+   detailed_usage
    cosmology

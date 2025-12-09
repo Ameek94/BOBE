@@ -6,40 +6,20 @@ All notable changes to BOBE will be documented in this file.
 The format is based on `Keep a Changelog <https://keepachangelog.com/en/1.0.0/>`_,
 and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0.html>`_.
 
-[Unreleased]
-------------
+[0.1.0] - 2025-12-XX
+--------------------
+
+Initial release of BOBE (Bayesian Optimization for Bayesian Evidence).
 
 Added
 ~~~~~
-- ReadTheDocs style documentation
-- Comprehensive API documentation
-- Tutorial system
-- Contributing guidelines
-
-[0.1.0] - 2025-XX-XX
----------------------
-
-Added
-~~~~~
-- Initial release of BOBE
-- Core BOBE (Bayesian Optimization for Bayesian Evidence) implementation
-- Deep Sigmoidal Location Process (DSLP) Gaussian Process
-- Sparse Axis-Aligned Subspace (SAAS) Gaussian Process
-- Gaussian Process with Classifier for constraint handling
-- Multiple acquisition functions: WIPV, EI, LogEI
-- Cobaya integration for cosmological parameter estimation
-- MPI support for parallel computing
-- Comprehensive result analysis and visualization tools
-- Nested sampling integration
-- Convergence monitoring and early stopping
-- Configurable logging system
-- Seed management for reproducibility
-
-Features
-~~~~~~~~
-- JAX-based implementation for GPU acceleration
-- Flexible likelihood interfaces
-- Automated hyperparameter optimization
-- Built-in plotting and analysis tools
-- Memory-efficient GP training with subset selection
-- Support for constrained optimization problems
+- Bayesian optimization for efficient Bayesian evidence estimation
+- JAX-powered Gaussian Process surrogates with RBF and Matérn kernels
+- GP priors: DSLP (Deep Sigmoidal Location Process) and SAAS (Sparse Axis-Aligned Subspace)
+- Classifier-augmented GP (SVM, neural network, ellipsoid) for filtering low-likelihood regions
+- Acquisition functions: WIPV, WIPStd, EI, LogEI
+- Nested sampling via Dynesty for evidence computation on GP surrogate
+- Cobaya integration for cosmological likelihoods
+- MPI parallelization for likelihood evaluations and GP fitting
+- Result saving and visualization utilities
+- Convergence monitoring via KL divergence and log-evidence thresholds

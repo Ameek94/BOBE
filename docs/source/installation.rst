@@ -51,7 +51,6 @@ Additional Dependencies
 .. **All Optional Dependencies**
 ..   Install with: ``pip install 'jaxbo[all]'``
 
-.. .. note::
 ..    By default, only SVM classifiers are available. The core BO functionality 
 ..    works with scipy optimization and does not require optax.
 
@@ -72,7 +71,11 @@ From Source (Recommended)
 
 .. code-block:: bash
 
-   python -m pip install .
+   # For regular install
+   pip install . 
+
+   # For development mode
+   pip install -e .
 
 3. (Optional) Install with additional features:
 
@@ -91,35 +94,12 @@ From Source (Recommended)
    pip install -e '.[all]'
 
 .. note::
-   The ``-e`` flag installs in editable mode. For a regular install, use ``pip install '.[nn]'`` instead.
-
-For development installation (allows editing the source code):
-
-.. code-block:: bash
-
-   python -m pip install -e .
-
-Using Conda (Development)
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-If you face installation issues related to incompatible versions of packages, you can set up 
-an environment with the exact package versions BOBE was developed and tested with:
-
-.. code-block:: bash
-
-   # Create environment from the minimal essential packages
-   conda env create -f environment.yml
-   
-   # Activate the environment
-   conda activate BOBE
-   
-   # Install BOBE in development mode
-   pip install -e .
+   The ``-e`` flag installs in editable mode. For a regular install, use ``pip install '.[extra]'`` instead (replace extra with desired optional dependency).
 
 Virtual Environment Setup
 --------------------------
 
-It's recommended to use a virtual environment to avoid dependency conflicts:
+It's typically recommended to use a virtual environment to avoid dependency conflicts:
 
 Using conda
 ~~~~~~~~~~~
@@ -128,7 +108,7 @@ Using conda
 
    conda create -n BOBE python=3.12
    conda activate BOBE
-   python -m pip install .
+   python -m pip install -e .
 
 Using venv
 ~~~~~~~~~~
@@ -136,8 +116,8 @@ Using venv
 .. code-block:: bash
 
    python -m venv BOBE_env
-   source BOBE_env/bin/activate  # On Windows: BOBE_env\Scripts\activate
-   python -m pip install .
+   source BOBE_env/bin/activate
+   python -m pip install -e .
 
 GPU/TPU Support
 ---------------
@@ -176,10 +156,21 @@ To verify your installation, run:
    import BOBE
    print(f"BOBE version: {BOBE.__version__}")
    
-   # Check JAX backend
-   import jax
-   print(f"JAX backend: {jax.default_backend()}")
-   print(f"JAX devices: {jax.device_count()}")
+Troubleshooting
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In case of installation issues, you can also create a virtual environment with the exact package versions BOBE was developed and tested with:
+
+.. code-block:: bash
+
+   # Create environment from the minimal essential packages
+   conda env create -f environment.yml
+   
+   # Activate the environment
+   conda activate BOBE
+   
+   # Install BOBE in development mode
+   pip install -e .
 
 .. Troubleshooting
 .. ---------------
@@ -219,5 +210,5 @@ Getting Help
 If you encounter installation issues:
 
 1. Check the `JAX installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_
-2. Review the `GitHub Issues <https://github.com/Ameek94/BOBE/issues>`_
+2. Review the `GitHub Issues <https://github.com/Ameek94/BOBE/issues>`_, create a new issue if needed
 3. Contact the developers (see main documentation page)

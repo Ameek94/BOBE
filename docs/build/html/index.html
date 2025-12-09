@@ -6,7 +6,7 @@
   <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BOBE &mdash; JaxBo 0.1.0 documentation</title>
+  <title>BOBE &mdash; BOBE 0.1.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
       <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
       <link rel="stylesheet" type="text/css" href="_static/custom.css?v=30d0d2dd" />
@@ -33,7 +33,7 @@
           
           
           <a href="#" class="icon icon-home">
-            JaxBo
+            BOBE
           </a>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
@@ -43,21 +43,23 @@
   </form>
 </div>
         </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
-              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+              <p class="caption" role="heading"><span class="caption-text">Install</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a></li>
-<li class="toctree-l1"><a class="reference internal" href="user%20guide/basic_usage.html">BOBE Basic Tutorial: Computing the Bayesian evidence for the Himmelblau Function</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="examples/quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples/detailed_usage.html">In Depth Tutorial: Computing the Bayesian evidence for the Himmelblau Function</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples/cosmology.html">Cosmological Likelihoods (through Cobaya)</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
 <li class="toctree-l1"><a class="reference internal" href="user%20guide/gp.html">Gaussian Process Models</a></li>
 <li class="toctree-l1"><a class="reference internal" href="user%20guide/acquisition.html">Acquisition Functions</a></li>
 <li class="toctree-l1"><a class="reference internal" href="user%20guide/convergence.html">Convergence Criteria</a></li>
 <li class="toctree-l1"><a class="reference internal" href="user%20guide/advanced.html">Advanced Topics</a></li>
 <li class="toctree-l1"><a class="reference internal" href="user%20guide/faq.html">Frequently Asked Questions</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a></li>
-<li class="toctree-l1"><a class="reference internal" href="examples/banana.html">Banana Function Example</a></li>
-<li class="toctree-l1"><a class="reference internal" href="examples/cosmology.html">Cosmological Likelihood Example</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
@@ -76,7 +78,7 @@
 
     <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
           <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
-          <a href="#">JaxBo</a>
+          <a href="#">BOBE</a>
       </nav>
 
       <div class="wy-nav-content">
@@ -96,78 +98,51 @@
              
   <section id="bobe">
 <h1>BOBE<a class="headerlink" href="#bobe" title="Link to this heading"></a></h1>
-<p>BOBE is a JAX-powered Bayesian Optimization package for efficiently estimating Bayesian evidence
-from expensive likelihood functions. It’s designed primarily for cosmological applications but works
-with any likelihood that can be called from Python.</p>
-<p>BOBE trains Gaussian Process surrogates for expensive likelihoods and runs nested sampling on the
-surrogate to compute Bayesian Evidence efficiently. This documentation will show you how to use it.</p>
-<p>This documentation won’t teach you Bayesian Optimization or nested sampling in detail, but there
-are many excellent resources available. We recommend checking out the references in our bibliography.</p>
-<p>BOBE is being actively developed on <a class="reference external" href="https://github.com/Ameek94/BOBE">GitHub</a>.</p>
-<section id="basic-usage">
-<h2>Basic Usage<a class="headerlink" href="#basic-usage" title="Link to this heading"></a></h2>
-<p>If you wanted to compute the Bayesian evidence for a simple likelihood, you would do something like:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
-<span class="kn">from</span> <span class="nn">BOBE.bo</span> <span class="kn">import</span> <span class="n">BOBE</span>
-<span class="kn">from</span> <span class="nn">BOBE.likelihood</span> <span class="kn">import</span> <span class="n">Likelihood</span>
-
-<span class="k">class</span> <span class="nc">MyLikelihood</span><span class="p">(</span><span class="n">Likelihood</span><span class="p">):</span>
-    <span class="k">def</span> <span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">theta</span><span class="p">):</span>
-        <span class="c1"># Your likelihood function here</span>
-        <span class="k">return</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">((</span><span class="n">theta</span> <span class="o">-</span> <span class="mf">0.5</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">/</span> <span class="mf">0.1</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
-
-<span class="c1"># Setup</span>
-<span class="n">likelihood</span> <span class="o">=</span> <span class="n">MyLikelihood</span><span class="p">(</span>
-    <span class="n">param_names</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;x&#39;</span><span class="p">,</span> <span class="s1">&#39;y&#39;</span><span class="p">,</span> <span class="s1">&#39;z&#39;</span><span class="p">],</span>
-    <span class="n">bounds</span><span class="o">=</span><span class="p">[(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)]</span>
-<span class="p">)</span>
-
-<span class="n">bobe</span> <span class="o">=</span> <span class="n">BOBE</span><span class="p">(</span>
-    <span class="n">likelihood</span><span class="o">=</span><span class="n">likelihood</span><span class="p">,</span>
-    <span class="n">use_clf</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-    <span class="n">clf_type</span><span class="o">=</span><span class="s1">&#39;svm&#39;</span>
-<span class="p">)</span>
-
-<span class="c1"># Run Bayesian Optimization with nested sampling</span>
-<span class="n">results</span> <span class="o">=</span> <span class="n">bobe</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">acqs</span><span class="o">=</span><span class="s1">&#39;wipv&#39;</span><span class="p">,</span> <span class="n">max_evals</span><span class="o">=</span><span class="mi">500</span><span class="p">)</span>
-
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Log Evidence: </span><span class="si">{</span><span class="n">results</span><span class="p">[</span><span class="s1">&#39;logz&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">results</span><span class="p">[</span><span class="s1">&#39;logz_err&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>A more complete example is available in the <a class="reference internal" href="quickstart.html"><span class="doc">Quick Start Guide</span></a> tutorial.</p>
-</section>
-<section id="how-to-use-this-guide">
-<h2>How to Use This Guide<a class="headerlink" href="#how-to-use-this-guide" title="Link to this heading"></a></h2>
-<p>To start, you’ll need to follow the <a class="reference internal" href="installation.html"><span class="doc">Installation Guide</span></a> guide to get BOBE installed on your computer.
-After that, you can learn most of what you need from the tutorials listed below (start with
-<a class="reference internal" href="quickstart.html"><span class="doc">Quick Start Guide</span></a> and go from there). If you need more details about specific functionality,
-the User Guide should have what you need.</p>
-<p>We welcome bug reports, patches, feature requests, and other comments via the
+<p>BOBE (Bayesian Optimisation for Bayesian Evidence) is a JAX-powered Bayesian Optimisation package for efficiently estimating the Bayesian evidence
+for expensive likelihood functions. It is designed primarily for cosmological applications but works
+with any likelihood that can be called from Python. BOBE trains a Gaussian Process surrogate for the expensive likelihood and runs nested sampling on the
+surrogate to compute Bayesian Evidence (and parameter posteriors) efficiently. The code is implemented in JAX for high performance and automatic differentiation support.
+BOBE is available for download from <a class="reference external" href="https://github.com/Ameek94/BOBE">GitHub</a> and its core algorithm is explained in detail in our accompanying <a class="reference external" href="https://arxiv.org/abs/2512.xxxxx">paper</a>.
+We welcome bug reports, patches, feature requests, and other comments via the
 <a class="reference external" href="https://github.com/Ameek94/BOBE/issues">GitHub issue tracker</a>.</p>
+<section id="when-to-use-bobe">
+<h2>When to use BOBE<a class="headerlink" href="#when-to-use-bobe" title="Link to this heading"></a></h2>
+<p>BOBE is designed for scenarios where the likelihood evaluation is costly (e.g., takes more than a second per evaluation).
+In such cases, standard nested sampling or MCMC methods become computationally prohibitive since they typically require thousands to millions of likelihood evaluations.</p>
+<p>Use BOBE if:</p>
+<ul class="simple">
+<li><p><strong>Your likelihood function is expensive to evaluate</strong>: Each evaluation takes more than ~1 second (e.g., due to slow forward models or complex likelihood calculations)</p></li>
+<li><p><strong>You need Bayesian evidence estimates</strong>: For model comparison via Bayes factors</p></li>
+<li><p><strong>You want posterior samples efficiently</strong>: BOBE naturally provides posterior samples alongside evidence estimates</p></li>
+</ul>
+<p>BOBE works best for problems with up to ~20 parameters, although this can vary based on the specific problem and likelihood structure.
+It has been tested to work well upto 30 dimensions for simple multivariate Gaussian likelihoods and upto 16 dimensions for cosmological likelihoods (LCDM+ <span class="math notranslate nohighlight">\(\Omega_k\)</span> with the Planck Camspec likelihood).
+BOBE may not be necessary if your likelihood already evaluates in milliseconds, as the overhead of training the GP surrogate and running Bayesian optimisation
+may not be worth the speedup. For such cases, there is generally no need to go beyond standard MCMC/nested sampling tools.</p>
+</section>
+<section id="getting-started">
+<h2>Getting Started<a class="headerlink" href="#getting-started" title="Link to this heading"></a></h2>
+<p>To begin, follow the <a class="reference internal" href="installation.html"><span class="doc">Installation Guide</span></a> guide to get BOBE installed on your system.
+After that, you can learn most of what you need from the examples section (start with
+<a class="reference internal" href="examples/quickstart.html"><span class="doc">Quick Start</span></a> and continue from there). If you need more details about any specific functionality,
+the User Guide should have you covered.</p>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Install</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a></li>
+</ul>
+</div>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="examples/quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples/detailed_usage.html">In Depth Tutorial: Computing the Bayesian evidence for the Himmelblau Function</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples/cosmology.html">Cosmological Likelihoods (through Cobaya)</a></li>
+</ul>
+</div>
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#requirements">Requirements</a></li>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#installation-methods">Installation Methods</a></li>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#virtual-environment-setup">Virtual Environment Setup</a></li>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#gpu-tpu-support">GPU/TPU Support</a></li>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#verification">Verification</a></li>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#getting-help">Getting Help</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="user%20guide/basic_usage.html">BOBE Basic Tutorial: Computing the Bayesian evidence for the Himmelblau Function</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="user%20guide/basic_usage.html#overview">Overview</a></li>
-<li class="toctree-l2"><a class="reference internal" href="user%20guide/basic_usage.html#setup-and-imports">1. Setup and Imports</a></li>
-<li class="toctree-l2"><a class="reference internal" href="user%20guide/basic_usage.html#define-the-likelihood">2. Define the Likelihood</a></li>
-<li class="toctree-l2"><a class="reference internal" href="user%20guide/basic_usage.html#configure-and-run-bobe">3. Configure and Run BOBE</a></li>
-<li class="toctree-l2"><a class="reference internal" href="user%20guide/basic_usage.html#analyze-the-results">4. Analyze the Results</a></li>
-<li class="toctree-l2"><a class="reference internal" href="user%20guide/basic_usage.html#compare-with-dynesty-reference-method">5. Compare with Dynesty (Reference Method)</a></li>
-<li class="toctree-l2"><a class="reference internal" href="user%20guide/basic_usage.html#timing-analysis">6. Timing Analysis</a></li>
-<li class="toctree-l2"><a class="reference internal" href="user%20guide/basic_usage.html#generate-summary-dashboard">7. Generate Summary Dashboard</a></li>
-<li class="toctree-l2"><a class="reference internal" href="user%20guide/basic_usage.html#summary">Summary</a></li>
-</ul>
-</li>
 <li class="toctree-l1"><a class="reference internal" href="user%20guide/gp.html">Gaussian Process Models</a></li>
 <li class="toctree-l1"><a class="reference internal" href="user%20guide/acquisition.html">Acquisition Functions</a></li>
 <li class="toctree-l1"><a class="reference internal" href="user%20guide/convergence.html">Convergence Criteria</a></li>
@@ -176,48 +151,9 @@ the User Guide should have what you need.</p>
 </ul>
 </div>
 <div class="toctree-wrapper compound">
-<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="quickstart.html#simple-example">Simple Example</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="examples/banana.html">Banana Function Example</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="examples/banana.html#problem-description">Problem Description</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/banana.html#complete-example-code">Complete Example Code</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/banana.html#expected-results">Expected Results</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/banana.html#key-takeaways">Key Takeaways</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/banana.html#parameter-tuning-tips">Parameter Tuning Tips</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/banana.html#next-steps">Next Steps</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="examples/cosmology.html">Cosmological Likelihood Example</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#prerequisites">Prerequisites</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#problem-description">Problem Description</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#cobaya-input-file">Cobaya Input File</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#complete-python-code">Complete Python Code</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#running-with-mpi">Running with MPI</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#expected-runtime">Expected Runtime</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#expected-results">Expected Results</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#important-notes">Important Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#troubleshooting">Troubleshooting</a></li>
-<li class="toctree-l2"><a class="reference internal" href="examples/cosmology.html#next-steps">Next Steps</a></li>
-</ul>
-</li>
-</ul>
-</div>
-<div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="api/index.html">API Reference</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api/core.html">Core API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/acquisition.html">Acquisition Functions</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/gp_models.html">Gaussian Process Models</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/likelihood.html">Likelihood Interfaces</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/samplers.html">Sampling the likelihood surrogate</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/utils.html">Utilities</a></li>
-</ul>
-</li>
+<li class="toctree-l1"><a class="reference internal" href="api/index.html">API Reference</a></li>
 </ul>
 </div>
 <div class="toctree-wrapper compound">

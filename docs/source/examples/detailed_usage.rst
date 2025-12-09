@@ -1,7 +1,7 @@
-BOBE Basic Tutorial: Computing the Bayesian evidence for the Himmelblau Function
+In Depth Tutorial: Computing the Bayesian evidence for the Himmelblau Function
 ==================================================================================
 
-This tutorial demonstrates the basic usage of BOBE through a classic optimization problem: the Himmelblau function. This example is based on the ``examples/Himmelblau.py`` file and shows how to set up and run a Bayesian optimization using the BOBE (Bayesian Optimization for Bayesian Evidence) framework.
+This tutorial demonstrates the basic usage of BOBE through a classic optimization problem: the Himmelblau function. This example is based on the ``examples/Himmelblau.py`` file and shows how to set up and run a Bayesian optimization loop using the BOBE framework.
 
 Overview
 --------

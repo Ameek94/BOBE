@@ -1,7 +1,7 @@
 Contributing to BOBE
 ====================
 
-We welcome contributions to BOBE! This guide explains how to set up a development environment and contribute to the project.
+We welcome contributions to BOBE! This guide explains how to contribute to the project.
 
 Development Setup
 -----------------
@@ -14,53 +14,17 @@ Development Setup
    git clone https://github.com/YOUR_USERNAME/BOBE.git
    cd BOBE
 
-2. Create Development Environment
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2. Install in Development Mode
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-   conda create -n BOBE-dev python=3.12
+   # Create environment (optional)
+   conda create -n BOBE-dev python=3.11+
    conda activate BOBE-dev
    
-   # Install in development mode
-   pip install -e ".[dev]"
-
-3. Install Pre-commit Hooks
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: bash
-
-   pre-commit install
-
-Code Style
-----------
-
-We use the following tools to maintain code quality:
-
-- **Black**: Code formatting
-- **isort**: Import sorting  
-- **flake8**: Linting
-- **mypy**: Type checking
-
-Run all checks:
-
-.. code-block:: bash
-
-   black BOBE/
-   isort BOBE/
-   flake8 BOBE/
-   mypy jaxbo/
-
-Testing
--------
-
-Run the test suite:
-
-.. code-block:: bash
-
-   pytest tests/
-
-Add tests for new features in the ``tests/`` directory.
+   # Install in editable mode
+   pip install -e .
 
 Documentation
 -------------
@@ -83,9 +47,9 @@ Submitting Changes
 
       git checkout -b feature/my-new-feature
 
-2. Make your changes and add tests
+2. Make your changes
 
-3. Ensure all tests pass and code follows style guidelines
+3. Test your changes with examples
 
 4. Commit your changes:
 
@@ -93,34 +57,28 @@ Submitting Changes
 
       git commit -m "Add my new feature"
 
-5. Push to your fork and submit a pull request
+5. Push to your fork and submit a pull request to the main branch
 
-Pull Request Guidelines
------------------------
+Reporting Issues
+----------------
 
-- Include a clear description of the changes
-- Reference any related issues
-- Add tests for new functionality
-- Update documentation as needed
-- Ensure CI passes
+Please report bugs and feature requests via the `GitHub issue tracker <https://github.com/Ameek94/BOBE/issues>`_.
 
-Types of Contributions
-----------------------
+When reporting bugs, please include:
 
-We welcome various types of contributions:
+- Your operating system and Python version
+- BOBE version (or commit hash if using git)
+- Steps to reproduce the issue
+- Expected vs. actual behavior
+- Minimal code example demonstrating the problem (if applicable)
 
-- **Bug fixes**: Fix issues in existing code
-- **New features**: Add new capabilities
-- **Documentation**: Improve or expand documentation
-- **Examples**: Add new examples or tutorials
-- **Performance**: Optimize existing code
-- **Tests**: Improve test coverage
+Questions
+---------
 
-Getting Help
-------------
+For questions about using BOBE, please:
 
-- Open an issue for questions or discussions
-- Check existing issues before opening new ones
-- Contact maintainers for major architectural changes
+- Check the documentation and examples first
+- Search existing GitHub issues
+- Open a new issue if your question hasn't been addressed
 
-Thank you for contributing to JaxBo!
+Thank you for contributing to BOBE!

@@ -1,8 +1,8 @@
-Cosmological Likelihood Example
-================================
+Cosmological Likelihoods (through Cobaya)
+======================================
 
-This example demonstrates using BOBE with realistic cosmological likelihoods 
-through the Cobaya framework. We'll estimate the Bayesian evidence for the 
+This example demonstrates how to use BOBE with realistic cosmological likelihoods interfaced
+through the Cobaya package. We'll estimate the Bayesian evidence for the 
 standard LCDM model using Planck and DESI data.
 
 Prerequisites
@@ -25,7 +25,7 @@ Problem Description
 
 We're testing a cosmological model with the following:
 
-- **Likelihood**: Planck 2018 (lowl TT + highl TTTEEE) + DESI DR2 BAO
+- **Likelihood**: Planck 2018 (lowl TT + highl Camspec TTTEEE + lensing) + DESI DR2 BAO
 - **Model**: Standard LCDM (flat universe)
 - **Parameters**: 6 cosmological parameters
 

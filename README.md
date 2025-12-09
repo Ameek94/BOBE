@@ -87,7 +87,7 @@ sampler = BOBE(
 )
 
 # Run optimization with convergence and run settings
-results = bobe.run(
+results = sampler.run(
     min_evals=10, # do at least 20 evaluations
     max_evals=100, # max evaluation budget
     batch_size=2, # acquisition function batch size
