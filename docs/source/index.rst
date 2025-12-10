@@ -37,7 +37,7 @@ Getting Started
 To begin, follow the :doc:`installation` guide to get BOBE installed on your system. 
 After that, you can learn most of what you need from the examples section (start with 
 :doc:`examples/quickstart` and continue from there). If you need more details about any specific functionality, 
-the User Guide should have you covered.
+the User Guide (currently in development) should have you covered.
 
 .. toctree::
    :maxdepth: 1

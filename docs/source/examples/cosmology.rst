@@ -174,9 +174,9 @@ Running with MPI
            max_gp_size=1500,   # Maximum GP training set size
            
            # Step settings
-           fit_step=5,             # Fit GP every 5 evaluations
-           wipv_batch_size=5,      # Evaluate 5 points per acquisition
-           ns_step=5,              # Run nested sampling every 5 iterations
+           fit_n_points=5,         # Fit GP every 5 evaluations
+           batch_size=5,           # Evaluate 5 points per acquisition
+           ns_n_points=5,          # Run nested sampling every 5 iterations
            optimizer='scipy',      # 'scipy' or 'optax'
            
            # HMC/MC settings for acquisition
@@ -205,7 +205,7 @@ Running with MPI
        )
        
        # Run optimization
-       results = bobe.run(acqs='wipv')
+       results = bobe.run(acq='wipv')
        
        end = time.time()
        
@@ -353,7 +353,7 @@ To resume an interrupted run:
        resume_file='./results/Planck_DESI_LCDM',
        # ... other settings ...
    )
-   results = bobe.run(acqs='wipv')
+   results = bobe.run(acq='wipv')
 
 Troubleshooting
 ---------------
@@ -366,7 +366,7 @@ If convergence is slow:
 1. Increase ``n_cobaya_init`` to 64-128 for better initialization
 2. Try ``optimizer='optax'`` (requires ``[nn]`` install)
 3. Increase ``mc_points_size`` to 1024 for better acquisition
-4. Lower ``fit_step`` to 2-3 for more frequent GP updates
+4. Lower ``fit_n_points`` to 2-3 for more frequent GP updates
 
 Likelihood Failures
 ~~~~~~~~~~~~~~~~~~~

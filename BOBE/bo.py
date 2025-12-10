@@ -85,7 +85,7 @@ class BOBE:
                  save_step=5,
                  optimizer='scipy',
                  acq = 'WIPV',
-                 use_clf=True,
+                 use_clf=False,
                  clf_type = "svm",
                  clf_nsigma_threshold=20,
                  clf_use_size = 10,

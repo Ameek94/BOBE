@@ -55,15 +55,15 @@ def main():
     
     # Run optimization with convergence and run settings
     results = bobe.run(
-        acqs='wipv',
+        acq='wipv',
         min_evals=20,
         max_evals=100,
         max_gp_size=200,
         logz_threshold=1e-3,
         do_final_ns=True,
-        fit_step=1,
-        wipv_batch_size=2,
-        ns_step=5,
+        fit_n_points=1,
+        batch_size=2,
+        ns_n_points=5,
         num_hmc_warmup=256,
         num_hmc_samples=4000,
         mc_points_size=128,

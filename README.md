@@ -83,7 +83,6 @@ sampler = BOBE(
     param_bounds=np.array([[-1, 1], [-1, 2]]).T, # lower and upper bounds for parameters (2, ndim) shaped
     n_sobol_init=2, # number of initial Sobol samples to start the run from
     save_dir='./results',
-
 )
 
 # Run optimization with convergence and run settings
@@ -109,14 +108,26 @@ For cosmological likelihoods you will need to have [Cobaya](https://cobaya.readt
 from BOBE import BOBE
 
 # Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
-sampler = BOBE(
-    loglikelihood='path/to/cobaya_input.yaml',
-    likelihood_name='CobayaLikelihood',
-    n_sobol_init=4,
-    n_cobaya_init=4, # We can also specify reference dists in the Cobaya yaml file to generate additional initial points
-    save_dir='./results',
-
-)
+   # Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
+   sampler = BOBE(
+       loglikelihood='path/to/cobaya_input.yaml',
+       likelihood_name='CobayaLikelihood',
+       n_sobol_init=4,
+       n_cobaya_init=4,  # We can also specify reference dists in the Cobaya yaml file to generate additional initial points
+       likelihood_name='quickstart_cobaya_example', # name for output files
+       save_dir='./results',
+       use_clf=True # recommended to enable classifiers for cosmological examples where likelihood can sometimes return -inf values
+   )
+   
+   # Run with optimization settings
+   results = sampler.run(
+       min_evals=10,
+       max_evals=1000, # adjust according to your evaluation budget
+       batch_size=5,
+       fit_n_points=10,
+       ns_n_points=10,
+       logz_threshold=0.5,
+   )
 
 # rest of the run remains the same as above
 ```

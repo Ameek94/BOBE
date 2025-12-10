@@ -4,7 +4,7 @@ Installation Guide
 Requirements
 ------------
 
-BOBE requires Python 3.11 or 3.12 and has the following core dependencies:
+BOBE requires Python 3.11 or higher and has the following core dependencies:
 
 Core Dependencies
 ~~~~~~~~~~~~~~~~~
@@ -17,10 +17,6 @@ Core Dependencies
 - **Dynesty**: Nested sampling
 - **scikit-learn**: SVM classifiers
 - **TensorFlow Probability**: Statistical distributions
-
-Additional Dependencies
-~~~~~~~~~~~~~~~~~~~~~~~
-
 - **GetDist**: Analysis and plotting of Monte Carlo samples
 - **Matplotlib**: Visualization
 - **tqdm**: Progress bars
@@ -80,15 +76,15 @@ From Source (Recommended)
 3. (Optional) Install with additional features:
 
 .. code-block:: bash
-
-   # For neural network classifiers
-   pip install -e '.[nn]'
    
    # For cosmological likelihoods through Cobaya
    pip install -e '.[cobaya]'
    
    # For MPI support
    pip install -e '.[mpi]'
+
+   # For neural network classifiers
+   pip install -e '.[nn]'
    
    # For all optional dependencies
    pip install -e '.[all]'
@@ -108,7 +104,7 @@ Using conda
 
    conda create -n BOBE python=3.12
    conda activate BOBE
-   python -m pip install -e .
+   pip install -e .
 
 Using venv
 ~~~~~~~~~~
@@ -117,7 +113,7 @@ Using venv
 
    python -m venv BOBE_env
    source BOBE_env/bin/activate
-   python -m pip install -e .
+   pip install -e .
 
 GPU/TPU Support
 ---------------
@@ -133,7 +129,7 @@ In progress...
 ..    # Install CUDA-compatible JAX (check JAX documentation for latest versions)
 ..    pip install --upgrade "jax[cuda12]"
 
-.. .. note::
+.. note::
 ..    JAX GPU support requires NVIDIA GPU with CUDA installed. See the 
 ..    `JAX documentation <https://jax.readthedocs.io/en/latest/installation.html>`_ 
 ..    for detailed GPU installation instructions.

@@ -60,14 +60,14 @@ def main():
     )
     
     results = bobe.run(
-        acqs='wipv',
+        acq='wipv',
         min_evals=750,
         max_evals=2500,
         max_gp_size=1500,
         convergence_n_iters=2,
-        fit_step=20,
-        wipv_batch_size=2,
-        ns_step=10,
+        fit_n_points=20,
+        batch_size=2,
+        ns_n_points=10,
         zeta_ei=0.1,
         num_hmc_warmup=512,
         num_hmc_samples=2048,

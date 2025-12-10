@@ -48,13 +48,13 @@ def main():
     )
     
     results = bobe.run(
-        acqs='wipv',
+        acq='wipv',
         min_evals=30,
         max_evals=200,
         max_gp_size=200,
-        fit_step=2,
-        ns_step=4,
-        wipv_batch_size=2,
+        fit_n_points=2,
+        ns_n_points=4,
+        batch_size=2,
         num_hmc_warmup=512,
         num_hmc_samples=512,
         mc_points_size=128,

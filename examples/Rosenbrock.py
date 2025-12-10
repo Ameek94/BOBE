@@ -51,7 +51,6 @@ sampler = BOBE(
         param_labels=param_labels,
         likelihood_name=likelihood_name,
         gp_kwargs=gp_kwargs,
-        noise_std=0.0,
         minus_inf=-1e10,
         n_cobaya_init=4,
         n_sobol_init=16,
@@ -60,12 +59,12 @@ sampler = BOBE(
 )
 
 results = sampler.run(
-        acqs='wipv',
+        acq='wipv',
         min_evals=50,
         max_evals=200,
         max_gp_size=200,
-        fit_step=2,
-        ns_step=10,
+        fit_n_points=2,
+        ns_n_points=10,
         num_hmc_warmup=512,
         num_hmc_samples=512,
         mc_points_size=32,

@@ -26,7 +26,6 @@ def main():
         loglikelihood=cobaya_input_file,  # BOBE handles CobayaLikelihood internally
         likelihood_name=likelihood_name,
         confidence_for_unbounded=0.9999995,
-        noise_std=0.0,
         resume=False,
         resume_file=f'{likelihood_name}',
         save_dir='./results/',
@@ -42,13 +41,13 @@ def main():
     )
     
     results = bobe.run(
-        acqs='wipv',
+        acq='wipv',
         min_evals=100, 
         max_evals=1000,
         max_gp_size=900,
-        fit_step=5, 
-        ns_step=5,
-        wipv_batch_size=4,
+        fit_n_points=5, 
+        ns_n_points=5,
+        batch_size=4,
         num_hmc_warmup=512,
         num_hmc_samples=5000, 
         mc_points_size=360,

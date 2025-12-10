@@ -125,7 +125,7 @@ Multiple restarts distributed across MPI processes if available. Uses log-space 
 WIPV batch mode: Optimizes multiple points simultaneously via:
 1. Sobol initialization (scaled to unit cube)
 2. L-BFGS-B optimization with classifier filtering
-3. Returns best `wipv_batch_size` points ranked by acquisition value
+3. Returns best `batch_size` points ranked by acquisition value
 
 ### Convergence Criteria
 BOBE terminates when BOTH conditions met for `convergence_n_iters` consecutive iterations:

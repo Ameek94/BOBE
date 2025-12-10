@@ -134,7 +134,7 @@ def test_bobe_wipstd_2d():
         convergence_n_iters=2,
         fit_n_points=8,
         ns_n_points=15,
-        wipv_batch_size=1,  # Use batch size 1 to avoid shape issues
+        batch_size=1,  # Use batch size 1 to avoid shape issues
         mc_points_method='uniform'
     )
     
@@ -209,7 +209,7 @@ def test_bobe_with_classifier():
         logz_threshold=0.5,
         fit_n_points=6,
         ns_n_points=12,
-        wipv_batch_size=1  # Use batch size 1
+        batch_size=1  # Use batch size 1
     )
     
     # Check results
