@@ -4,7 +4,7 @@ Installation Guide
 Requirements
 ------------
 
-BOBE requires Python 3.11 or higher and has the following core dependencies:
+BOBE requires Python 3.10 or higher (but less than 3.14) and has the following core dependencies:
 
 Core Dependencies
 ~~~~~~~~~~~~~~~~~

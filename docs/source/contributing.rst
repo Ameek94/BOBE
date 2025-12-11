@@ -20,7 +20,7 @@ Development Setup
 .. code-block:: bash
 
    # Create environment (optional)
-   conda create -n BOBE-dev python=3.11+
+   conda create -n BOBE-dev python=3.12
    conda activate BOBE-dev
    
    # Install in editable mode

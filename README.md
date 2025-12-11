@@ -1,7 +1,7 @@
 # BOBE
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Documentation Status](https://readthedocs.org/projects/BOBE/badge/?version=latest)](https://BOBE.readthedocs.io/en/latest/?badge=latest)
 
 BOBE is a high-performance package for doing Bayesian model comparison with expensive likelihood functions, developed for applications to cosmology. It computes the Bayesian Evidence using Bayesian Optimization by training a Gaussian process surrogate for the expensive likelihood function and runs Nested sampling/MCMC on the surrogate instead of the underlying likelihood. Training the surrogate requires around ~100x fewer true likelihood evaluations compared to running Nested sampling/MCMC on the true likelihood, leading to significant speed-ups for slow likelihoods (t>1s). BOBE uses acquisition functions that minimise the integrated uncertainty of the surrogate, prioritising regions that matter the most for the evidence. The algorithm is explained in more detail in arxiv:2512.xxxxx. Code [documentation](https://BOBE.readthedocs.io/en/) is also available.
@@ -15,7 +15,7 @@ BOBE is a high-performance package for doing Bayesian model comparison with expe
 
 ## Requirements
 
-- Python 3.11 or higher
+- Python >=3.10 and <3.14
 - JAX
 - NumPyro
 - scipy 

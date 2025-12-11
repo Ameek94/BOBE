@@ -10,7 +10,7 @@ name = "BOBE"
 version = "0.1.0"
 description = "A Bayesian Optimization package for cosmology using JAX"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10,<3.14"
 license = "MIT"
 authors = [
     {name = "Ameek Malhotra", email = "ameekmalhotra@gmail.com"},
@@ -37,6 +37,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Scientific/Engineering :: Astronomy",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
