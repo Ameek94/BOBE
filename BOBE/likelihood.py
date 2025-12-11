@@ -61,7 +61,7 @@ class Likelihood:
 
         log.info(f"Initialized {self.name} with {self.ndim} params")
         log.info(f"Param list: {self.param_list}")
-        bounds_str = ", ".join([f"'{name}': ({self.param_bounds[0, i]:.6g}, {self.param_bounds[1, i]:.6g})" 
+        bounds_str = ", ".join([f"'{name}': [{self.param_bounds[0, i]:.6g}, {self.param_bounds[1, i]:.6g}]" 
                                 for i, name in enumerate(self.param_list)])
         log.info(f"Param bounds: {{{bounds_str}}}")
         log.info(f"Logprior volume = {self.logprior_vol:.4f}")

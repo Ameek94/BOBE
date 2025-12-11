@@ -1,178 +1,167 @@
-from BOBE.utils.plot import plot_final_samples, BOBESummaryPlotter
-from BOBE.utils.log import get_logger
-from BOBE.utils.core import renormalise_log_weights
+import os
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+    os.cpu_count()
+)
 from BOBE import BOBE
-from getdist import MCSamples
-from dynesty import DynamicNestedSampler
-import numpy as np
+from BOBE.utils.core import renormalise_log_weights, scale_from_unit
 import time
 import matplotlib.pyplot as plt
-
-ndim = 2
-param_list = ['x1','x2']
-param_labels = ['x_1','x_2']
-param_bounds = np.array([[0,1],[0,1]]).T
-likelihood_name = 'GaussianRing'
+import seaborn as sns # optional for improved plot aesthetics
+from getdist import MCSamples, plots
+import numpy as np
+from dynesty import DynamicNestedSampler
 
 mean_r = 0.2
 scale = 0.02
 
-def loglike(X):
+def loglike(X, slow=False):
     r2 = (X[0]-0.5)**2 + (X[1]-0.5)**2
     r = np.sqrt(r2)
+    if slow: # artificial delay to simulate slow likelihood
+        time.sleep(2)
     return -0.5*((r-mean_r)/scale)**2
 
 def prior_transform(x):
     return x
 
 def main():
+    # Problem setup
+    ndim = 2
+    param_list = ['x1', 'x2']
+    param_labels = ['x_1', 'x_2']
+    param_bounds = np.array([[0, 1], [0, 1]]).T
+    likelihood_name = f'GaussianRing'
+    
     start = time.time()
     print("Starting BOBE run...")
 
-    # Run BOBE with simplified interface
-    gp_kwargs = {'lengthscale_prior': 'DSLP'}
-    
+    # Initialize BOBE instance
     bobe = BOBE(
         loglikelihood=loglike,
         param_list=param_list,
         param_bounds=param_bounds,
         param_labels=param_labels,
         likelihood_name=likelihood_name,
-        gp_kwargs=gp_kwargs,
         verbosity='INFO',
-        n_cobaya_init=4,
         n_sobol_init=8,
+        optimizer='scipy',
         use_clf=False,
-        minus_inf=-1e5,
         seed=42,
+        save_dir='./results/',
+        save=True,
     )
     
+    # Run optimization with convergence and run settings
     results = bobe.run(
-        acq='wipv',
-        min_evals=30,
-        max_evals=200,
-        max_gp_size=200,
+        acq='wipstd',
+        min_evals=25,
+        max_evals=250,
+        max_gp_size=250,
+        logz_threshold=0.01,
+        do_final_ns=True,
         fit_n_points=2,
+        batch_size=1,
         ns_n_points=4,
-        batch_size=2,
-        num_hmc_warmup=512,
-        num_hmc_samples=512,
+        num_hmc_warmup=256,
+        num_hmc_samples=2048,
         mc_points_size=128,
-        mc_points_method='NS',
-        logz_threshold=0.001,
-        do_final_ns=False,
+        num_chains=4,
+        convergence_n_iters=1,
     )
 
     end = time.time()
 
-    if results is not None:
-        log = get_logger("[main]")
-        manual_timing = end - start
+    if results is not None:  # when running in MPI mode, only rank 0 returns results, rest return None
 
-        log.info("\n" + "="*60)
-        log.info("RUN COMPLETED")
-        log.info("="*60)
-        log.info(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
-
-        # Extract components for backward compatibility
         gp = results['gp']
-        samples = results['samples']
         logz_dict = results.get('logz', {})
         likelihood = results['likelihood']
-        comprehensive_results = results['comprehensive']
-        timing_data = comprehensive_results['timing']
+        results_manager = results['results_manager']
+        samples = results['samples']
 
-        # Print convergence info
-        log.info("\n" + "="*60)
-        log.info("CONVERGENCE ANALYSIS")
-        log.info("="*60)
-        log.info(f"Converged: {comprehensive_results['converged']}")
-        log.info(f"Termination reason: {comprehensive_results['termination_reason']}")
-        log.info(f"Final GP size: {gp.train_x.shape[0]}")
+        manual_timing = end - start
 
-        if logz_dict:
-            log.info(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
-            if 'upper' in logz_dict and 'lower' in logz_dict:
-                log.info(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
+        print("\n" + "="*60)
+        print("RUN COMPLETED")
+        print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
+        if 'upper' in logz_dict and 'lower' in logz_dict:
+            print(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
 
-        # Run Dynesty for comparison
-        log.info("Running Dynesty for comparison...")
-        dns_sampler = DynamicNestedSampler(loglike, prior_transform, ndim=ndim,
-                                          sample='rwalk')
+        print("="*60)
+        print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
 
-        dns_sampler.run_nested(print_progress=True, dlogz_init=0.01)
-        res = dns_sampler.results
+
+        # Create Dynesty samples to compare against
+        dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,
+                                               sample='rwalk',logl_kwargs={'slow': False})
+
+        dns_sampler.run_nested(print_progress=True,dlogz_init=0.01) 
+        res = dns_sampler.results  
         mean = res['logz'][-1]
         logz_err = res['logzerr'][-1]
-        log.info(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
+        print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
 
         dns_samples = res['samples']
         weights = renormalise_log_weights(res['logwt'])
 
         reference_samples = MCSamples(samples=dns_samples, names=param_list, labels=param_labels,
-                                    weights=weights,
-                                    ranges=dict(zip(param_list, param_bounds.T)))
+                                    weights=weights, 
+                                    ranges= dict(zip(param_list,param_bounds.T)))  
 
-        # Create comprehensive plots
-        log.info("\n" + "="*60)
-        log.info("GENERATING PLOTS")
-        log.info("="*60)
 
-        # Initialize plotter
-        plotter = BOBESummaryPlotter(results['results_manager'])
-
-        # Get GP and best loglike evolution data
-        gp_data = results['results_manager'].get_gp_data()
-        best_loglike_data = results['results_manager'].get_best_loglike_data()
-        acquisition_data = results['results_manager'].get_acquisition_data()
-
-        # Create summary dashboard with timing data
-        log.info("Creating summary dashboard...")
-        fig_dashboard = plotter.create_summary_dashboard(
-            gp_data=gp_data,
-            acquisition_data=acquisition_data,
-            best_loglike_data=best_loglike_data,
-            timing_data=timing_data,
-            save_path=f"{likelihood.name}_dashboard.pdf"
-        )
-
+        # Create MCSamples from BOBE results
+        sample_array = samples['x']
+        weights_array = samples['weights']
+        BOBE_Samples = MCSamples(samples=sample_array, names=param_list, labels=param_labels,
+                                    weights=weights_array, 
+                                    ranges= dict(zip(param_list,param_bounds.T)))
+        
         # Create parameter samples plot
-        log.info("Creating parameter samples plot...")
-        if hasattr(samples, 'samples'):
-            sample_array = samples.samples
-            weights_array = samples.weights
-        else:
-            sample_array = samples['x']
-            weights_array = samples['weights']
+        print("Creating parameter samples plot...")
+        sns.set_theme('notebook', 'ticks', palette='husl')
+        plt.rcParams['text.usetex'] = True # optional for LaTeX-style text rendering
+        plt.rcParams['font.family'] = 'serif'
 
-        plot_final_samples(
-            gp,
-            {'x': sample_array, 'weights': weights_array, 'logl': samples.get('logl', [])},
-            param_list=likelihood.param_list,
-            param_bounds=likelihood.param_bounds,
-            param_labels=likelihood.param_labels,
-            output_file=likelihood.name,
-            reference_samples=reference_samples,
-            reference_file=None,
-            reference_label='Dynesty',
-            scatter_points=True
-        )
+        g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
+        g.settings.legend_fontsize = 16
+        g.settings.axes_fontsize = 16
+        g.settings.axes_labelsize = 16
+        g.triangle_plot([BOBE_Samples,reference_samples], filled=[True, False],
+                    contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
+                    legend_labels=['BOBE', 'Nested Sampler']) 
+        # add scatter points for gp training data
+        points = scale_from_unit(gp.train_x, param_bounds)
+        for i in range(ndim):
+            # ax = g.subplots[i,i]
+            for j in range(i+1, ndim):
+                ax = g.subplots[j, i]
+                ax.scatter(points[:, i], points[:, j], alpha=0.75, color='red', s=4)
+        g.export(f'./results/{likelihood.name}_samples.pdf')
 
-        # Save comprehensive results
-        log.info("\n" + "="*60)
-        log.info("SAVING RESULTS")
-        log.info("="*60)
+        # Print timing analysis
+        print("DETAILED TIMING ANALYSIS")
 
-        # Results are automatically saved by BOBE, but let's summarize what was saved
-        log.info(f"✓ Main results: {likelihood_name}_results.pkl")
-        log.info(f"✓ Timing data: {likelihood_name}_timing.json")
-        log.info(f"✓ Summary dashboard: {likelihood_name}_dashboard.pdf")
-        log.info(f"✓ Parameter samples: {likelihood_name}_param_posteriors.pdf")
+        timing_data = results_manager.get_timing_summary()
 
-        log.info("\n" + "="*60)
-        log.info("ANALYSIS COMPLETE")
-        log.info("="*60)
-        log.info("Check the generated plots and saved files for detailed analysis.")
+        print(f"Automatic timing: {timing_data['total_runtime']:.2f} seconds ({timing_data['total_runtime']/60:.2f} minutes)")
+        print("Phase Breakdown:")
+        print("-" * 40)  
+        for phase, time_spent in timing_data['phase_times'].items():
+            if time_spent > 0:
+                percentage = timing_data['percentages'].get(phase, 0)
+                print(f"{phase:25s}: {time_spent:8.2f}s ({percentage:5.1f}%)")
+
+
+        # Plot acquisition data
+        acquisition_data = results_manager.get_acquisition_data()
+        iterations = np.array(acquisition_data['iterations'])
+        values = np.array(acquisition_data['values'])
+        fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+        ax.plot(iterations, values,  linestyle='-')
+        ax.set_yscale('log')
+        ax.set_xlabel(r'Iteration')
+        ax.set_ylabel(r'Acquisition Value')
+        plt.savefig(f"./results/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
 
 if __name__ == "__main__":
     main()
