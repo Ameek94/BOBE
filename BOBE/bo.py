@@ -1267,7 +1267,7 @@ class BOBE:
             self.results_manager.update_best_loglike(ii, self.best_f)
 
             # Check convergence and update MCMC samples
-            if ns_flag:
+            if ns_flag and acq_vals[-1] <= self.logz_threshold:
                 log.info("Running Nested Sampling")
                 self.results_manager.start_timing('Nested Sampling')
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
