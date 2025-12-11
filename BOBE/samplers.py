@@ -122,7 +122,7 @@ def nested_sampling_Dy(gp: GP,
         maxcall = int(2e6)
         equal_weights = True
     else:
-        nlive = max(250, 25 * ndim)
+        nlive = max(500, 40 * ndim)
 
     rng = rng if rng is not None else get_numpy_rng()
 
@@ -316,7 +316,7 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         
     elif num_devices >= num_chains and num_chains > 1:
         # Direct pmap method when devices >= chains
-        log.info("Using direct pmap method (devices >= chains)")
+        log.debug("Using direct pmap method (devices >= chains)")
         pmapped = jax.pmap(run_single_chain, in_axes=(0, 0), out_axes=(0, 0))
         samples_x, logps = pmapped(rng_keys, inits)
         samples_x = jnp.concatenate(samples_x, axis=0)
@@ -348,6 +348,8 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         samples_x = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_samples], axis=0)
         logps = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_logps], axis=0)
 
+    log.debug(f"Samples_x shape: {samples_x.shape}, Logps shape: {logps.shape}")
+
     samples_dict = {
         'x': samples_x,
         'logp': logps,
@@ -355,6 +357,6 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         'method': "MCMC"
     }
 
-    log.debug(f"Max logl found = {np.max(logps):.4f}")
+    log.info(f"Max logl found in HMC = {np.max(logps):.4f}")
 
     return samples_dict

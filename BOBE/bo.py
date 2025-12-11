@@ -1267,8 +1267,7 @@ class BOBE:
             self.results_manager.update_best_loglike(ii, self.best_f)
 
             # Check convergence and update MCMC samples
-            if ns_flag and acq_vals[-1] <= self.logz_threshold:
-                log.info("Running Nested Sampling")
+            if ns_flag and (acq_vals[-1] <= self.logz_threshold):
                 self.results_manager.start_timing('Nested Sampling')
                 ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
                     gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01, equal_weights=False,
@@ -1312,7 +1311,7 @@ class BOBE:
                 self.results_manager.end_timing('MCMC Sampling')
             
             if verbose:
-                log.info(f" Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
+                log.info(f"Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
 
             # Update results manager with iteration info, also save results and gp if save_step
             if ii % self.save_step == 0:

@@ -483,7 +483,9 @@ class GP:
         mean = jnp.einsum('ij,ji', k12.T, self.alphas)
         vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
         var = k22 - jnp.sum(vv*vv,axis=0) 
-        var = jnp.clip(var, safe_noise_floor, None)
+        # handle nans and negative variances due to numerical issues
+        var = jnp.where(jnp.isnan(var),safe_noise_floor,var)
+        var = jnp.where(var<safe_noise_floor,safe_noise_floor,var)
         return mean, var
     
     def predict_batched(self,x):
@@ -568,6 +570,9 @@ class GP:
         k22 = kernel_diag(mc_points,self.kernel_variance,self.noise,include_noise=True) # (N_mc,)
         vv = solve_triangular(k11_cho, k12, lower=True) # shape (N_train,N_mc)
         var = k22 - jnp.sum(vv*vv,axis=0) 
+        # handle nans and negative variances due to numerical issues
+        var = jnp.where(jnp.isnan(var),safe_noise_floor,var)
+        var = jnp.where(var<safe_noise_floor,safe_noise_floor,var)
         return var * self.y_std**2 # return to physical scale for better interpretability
 
     def get_random_point(self,rng=None,nstd=None):
