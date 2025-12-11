@@ -4,7 +4,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Documentation Status](https://readthedocs.org/projects/BOBE/badge/?version=latest)](https://BOBE.readthedocs.io/en/latest/?badge=latest)
 
-BOBE is a high-performance package for doing Bayesian model comparison with expensive likelihood functions, developed for applications to cosmology. It computes the Bayesian Evidence using Bayesian Optimization by training a Gaussian process surrogate for the expensive likelihood function and runs Nested sampling/MCMC on the surrogate instead of the underlying likelihood. Training the surrogate requires around ~100x fewer true likelihood evaluations compared to running Nested sampling/MCMC on the true likelihood, leading to significant speed-ups for slow likelihoods (t>1s). BOBE uses acquisition functions that minimise the integrated uncertainty of the surrogate, prioritising regions that matter the most for the evidence. The algorithm is explained in more detail in arxiv:2512.xxxxx. Code [documentation](https://BOBE.readthedocs.io/en/) is also available.
+BOBE (Bayesian Optimisation for Bayesian Evidence) is a high-performance package for performing Bayesian model comparison with expensive likelihood functions, developed for applications to cosmology. It uses Bayesian Optimization to train a Gaussian process surrogate for the expensive likelihood function and runs Nested sampling/MCMC on the surrogate instead of the underlying likelihood. Training the surrogate typically requires around ~100x fewer true likelihood evaluations compared to running Nested sampling/MCMC on the true likelihood, leading to significant speed-ups for slow likelihoods (t>1s). BOBE uses acquisition functions that minimise the integrated uncertainty of the surrogate, prioritising regions that matter the most for the evidence. The algorithm is explained in more detail in arxiv:2512.xxxxx. Code [documentation](https://BOBE.readthedocs.io/en/) is also available.
 
 ## Key Features
 
@@ -27,10 +27,9 @@ BOBE is a high-performance package for doing Bayesian model comparison with expe
 
 See `pyproject.toml` and the [documentation](https://BOBE.readthedocs.io/en/) for full list of dependencies.
 
-
 ## Installation
 
-### From source using pip
+### From source
 
 ```bash
 git clone https://github.com/Ameek94/BOBE.git
@@ -49,14 +48,14 @@ from the package directory.
 ### Optional Dependencies
 
 BOBE has several optional dependencies for extended functionality. When installing from source, you can install them as follows:
+
+- **Cosmology Suite**: Install with `pip install -e '.[cosmo]'`
+  - This will install Cobaya, needed for several cosmological likelihoods. You will still need to download and install the data for some likelihoods - see the [Cobaya documentation](https://cobaya.readthedocs.io/en/latest/) for more details.
+  - It will also install mpi4py (you will need to have an MPI implementation such as openmpi or mpich). Enables parallel likelihood evaluation and GP fitting across multiple processes using mpi4py.
   
-- **Cobaya Likelihoods**: Install with `pip install -e '.[cobaya]'`
-  - Enables `CobayaLikelihood` class for cosmological likelihoods interfaced through Cobaya
-  - Required for interfacing with Cobaya cosmological models
+- **Cobaya Only**: Install with `pip install -e '.[cobaya]'`
   
-- **MPI Parallelization**: Install with `pip install -e '.[mpi]'`
-  - Enables parallel likelihood evaluation across multiple processes using mpi4py
-  - Recommended for expensive likelihoods (evaluation time > 1 second)
+- **MPI Only**: Install with `pip install -e '.[mpi]'`
 
 - **All Optional Dependencies**: Install with `pip install -e '.[all]'`
 
@@ -87,7 +86,7 @@ sampler = BOBE(
 
 # Run optimization with convergence and run settings
 results = sampler.run(
-    min_evals=10, # do at least 20 evaluations
+    min_evals=10, # do a minimum of 10 evaluations
     max_evals=100, # max evaluation budget
     batch_size=2, # acquisition function batch size
     fit_n_points=4, # fit gp after every 4 likelihood evaluations
@@ -132,7 +131,7 @@ from BOBE import BOBE
 # rest of the run remains the same as above
 ```
 
-Full documentation is available at [https://BOBE.readthedocs.io](https://BOBE.readthedocs.io). The `examples/` folder also contains several examples on how to run the code with different likelihoods, including cosmological likelihoods interfaced through the Cobaya package or your own custom likelihoods.
+Full documentation is available at [https://BOBE.readthedocs.io](https://BOBE.readthedocs.io). The `examples/` folder also contains several scripts on how to run the code with different likelihoods, including cosmological likelihoods interfaced through the Cobaya package or your own custom likelihoods. These scripts have been used to produce the results in our paper arxiv:2512.xxxxx. Run them using
 
 ```bash
 python your_chosen_example.py
@@ -140,10 +139,10 @@ python your_chosen_example.py
 
 ### MPI Parallelization
 
-For expensive likelihoods (evaluation time > 1 second), you can use MPI to parallelize likelihood evaluations at points proposed by the batch acquisition function. Make sure you have mpi4py installed.
+For expensive likelihoods (evaluation time > 1 second), you can also use MPI to parallelize likelihood evaluations at points proposed by the batched acquisition function. Make sure you have mpi4py installed.
 
 ```bash
-mpirun -n 4 python your_bo_script.py
+mpirun -n 4 python your_chosen_example.py
 ```
 
 where `-n 4` specifies the number of MPI processes. In MPI mode, the code distributes the computation of the likelihood function at several candidate points across different MPI processes, significantly reducing wall-clock time for expensive likelihoods. It also distributes GP fitting by running multiple restarts across the different MPI processes. Note than on SLURM clusters you might need to substitute mpirun with srun.

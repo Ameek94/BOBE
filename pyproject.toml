@@ -77,6 +77,10 @@ nn = [
 cobaya = [
     "cobaya>=3.0.0"
 ]
+cosmo = [    
+    "mpi4py>=3.1.0",
+    "cobaya>=3.0.0"
+]
 all = [
     "mpi4py>=3.1.0",
     "flax>=0.6.0",
