@@ -1214,7 +1214,7 @@ class BOBE:
                 self.termination_reason = f"{self.acquisition.name.upper()} goal reached"
                 self.results_dict['termination_reason'] = self.termination_reason
                 break
-            jax.clear_caches()
+            self.pool.clear_jax_caches()
 
             max_evals_or_gpsize_reached = self.check_max_evals_and_gpsize(current_evals)
             if max_evals_or_gpsize_reached:
@@ -1333,7 +1333,7 @@ class BOBE:
             if self.converged:
                 break
             
-            jax.clear_caches()
+            self.pool.clear_jax_caches()
 
             max_evals_or_gpsize_reached = self.check_max_evals_and_gpsize(current_evals)
             if max_evals_or_gpsize_reached:

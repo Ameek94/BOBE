@@ -348,8 +348,6 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         samples_x = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_samples], axis=0)
         logps = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_logps], axis=0)
 
-    log.debug(f"Samples_x shape: {samples_x.shape}, Logps shape: {logps.shape}")
-
     samples_dict = {
         'x': samples_x,
         'logp': logps,
@@ -357,6 +355,6 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         'method': "MCMC"
     }
 
-    log.info(f"Max logl found in HMC = {np.max(logps):.4f}")
+    log.debug(f"Max logl found in HMC = {np.max(logps):.4f}")
 
     return samples_dict

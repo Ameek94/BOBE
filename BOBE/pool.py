@@ -1,4 +1,5 @@
 import numpy as np
+import jax
 import jax.numpy as jnp
 from typing import Callable, Dict, List, Any, Union, Optional, Tuple
 from BOBE.utils.seed import set_global_seed, get_numpy_rng, get_new_jax_key
@@ -28,6 +29,7 @@ class MPI_Pool:
     TASK_GP_FIT = 1
     TASK_ACQUISITION_OPT = 3
     TASK_COBAYA_INIT = 4
+    TASK_CLEAR_JAX_CACHES = 5
     TASK_INIT = 99
     TASK_EXIT = 100
     
@@ -119,6 +121,10 @@ class MPI_Pool:
                     _, task_index = data
                     pt, logpost = self._likelihood._get_single_valid_point(rng)
                     self.comm.send(((pt, logpost), task_index), dest=0)
+                
+                elif task_type == self.TASK_CLEAR_JAX_CACHES:
+                    # Clear JAX caches on worker
+                    jax.clear_caches()
 
                 elif task_type == self.TASK_EXIT:
                     log.info(f"Worker {self.rank} exiting")
@@ -355,6 +361,14 @@ class MPI_Pool:
         results_tuples = self._dynamic_distribute(tasks, self.TASK_COBAYA_INIT)
 
         return results_tuples
+
+    def clear_jax_caches(self):
+        """Clear JAX caches on all processes."""
+        jax.clear_caches()
+        
+        if self.is_mpi and self.is_main_process:
+            for rank in range(1, self.size):
+                self.comm.send((self.TASK_CLEAR_JAX_CACHES, None), dest=rank)
 
     def close(self):
         """

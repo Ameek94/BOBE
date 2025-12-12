@@ -21,7 +21,7 @@ class GPwithClassifier(GP):
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
                  optimizer="scipy", optimizer_options={},
-                 kernel_variance_bounds=[1e-4, 1e4], lengthscale_bounds=[0.01, 10],
+                 kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.01, 5.],
                  tausq=None, tausq_bounds=[1e-4, 1e4],
                  kernel_variance_prior=None, lengthscale_prior=None, 
                  lengthscales=None, kernel_variance=1.0,

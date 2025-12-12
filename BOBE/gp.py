@@ -199,7 +199,7 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
 class GP:
     
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
-                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,10],lengthscales=None,kernel_variance=None,
+                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,5],lengthscales=None,kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], param_names: List[str] = None):
         """
         Initialize the Gaussian Process model.
