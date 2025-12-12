@@ -233,11 +233,11 @@ class BOBE:
         
         if self.best_pt is not None:
             self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
-            log.info(f" Initial best point {self.best} with value = {self.best_f:.6f}")
+            log.info(f"Initial best point {self.best} with value = {self.best_f:.6f}")
         
         # Save initial GP
         self.gp.save(filename=f"{self.save_path}_gp")
-        log.info(f" Saving GP to file {self.save_path}_gp")
+        log.info(f"Saving GP to file {self.save_path}_gp")
         
         # Initialize for KL divergence tracking
         self.prev_samples = None
@@ -327,7 +327,7 @@ class BOBE:
     def _handle_resume(self, resume_file, use_clf):
         """Handle resume from existing run (main process only)."""
         try:
-            log.info(f" Attempting to resume from file {resume_file}")
+            log.info(f"Attempting to resume from file {resume_file}")
             gp_file = resume_file + '_gp'
             self.gp = load_gp_file(gp_file, use_clf)
             
@@ -358,11 +358,11 @@ class BOBE:
                         last_conv = self.results_manager.convergence_history[-1]
                         self.prev_convergence_delta = last_conv.delta
                         self.prev_convergence_threshold = last_conv.threshold
-                        log.info(f" Previous run had converged with delta={self.prev_convergence_delta:.6f}, threshold={self.prev_convergence_threshold:.6f}")
+                        log.info(f"Previous run had converged with delta={self.prev_convergence_delta:.6f}, threshold={self.prev_convergence_threshold:.6f}")
                     else:
                         self.prev_convergence_delta = None
                         self.prev_convergence_threshold = None
-                        log.info(" Previous run had converged.")
+                        log.info("Previous run had converged.")
                 else:
                     # Not converged in previous run
                     self.prev_converged = False
@@ -376,8 +376,8 @@ class BOBE:
             self.fresh_start = False
             
         except Exception as e:
-            log.error(f" Failed to load GP from file {gp_file}: {e}")
-            log.info(" Starting a fresh run instead.")
+            log.error(f"Failed to load GP from file {gp_file}: {e}")
+            log.info("Starting a fresh run instead.")
             self.fresh_start = True
     
     def _handle_fresh_start(self, n_cobaya_init, n_sobol_init, init_train_x, init_train_y,
@@ -605,12 +605,12 @@ class BOBE:
             self.gp = GP(**gp_kwargs)
         
         self.results_manager.start_timing('GP Training')
-        log.info(f" Hyperparameters before refit: {self.gp.hyperparams_dict()}")
+        log.info(f"Hyperparameters before refit: {self.gp.hyperparams_dict()}")
         
         # Use pool to fit GP in parallel
         self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
         
-        log.info(f" Hyperparameters after refit: {self.gp.hyperparams_dict()}")
+        log.info(f"Hyperparameters after refit: {self.gp.hyperparams_dict()}")
         self.results_manager.end_timing('GP Training')
     
 
@@ -659,7 +659,7 @@ class BOBE:
         
         # Use pool for parallel GP fitting if refitting
         if refit:
-            log.info(f" Refitting GP hyperparameters with {self.gp.train_x.shape[0]} training points ")
+            log.info(f"Refitting GP hyperparameters with {self.gp.train_x.shape[0]} training points ")
             self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter, rng=self.np_rng, use_pool=True)
             # Reset counter after successful refit
             self.n_points_since_last_fit = 0
@@ -749,9 +749,9 @@ class BOBE:
         log.info(f"Evaluated objective at {len(new_pts)} new points")
         for k, new_pt in enumerate(new_pts):
             new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pt.flatten())}
-            log.debug(f" New point {new_pt_vals}, {k+1}/{len(new_pts)}")
+            log.debug(f"New point {new_pt_vals}, {k+1}/{len(new_pts)}")
             predicted_val = self.gp.predict_mean_single(new_pts_u[k])
-            log.debug(f" Objective function value = {new_vals[k].item():.4f}, GP predicted value = {predicted_val.item():.4f}")
+            log.debug(f"Objective function value = {new_vals[k].item():.4f}, GP predicted value = {predicted_val.item():.4f}")
 
         return new_vals
 
@@ -810,6 +810,10 @@ class BOBE:
         log.debug(f"Samples dict keys: {samples_dict.keys()}")
         logz_dict = self.results_dict.get('logz', {})
 
+        # if logz_dict is empty, warn user
+        if not logz_dict:
+            log.warning("No logz information found, nested sampling has not been run yet.")
+
         # Finalize results with comprehensive data
         self.results_manager.finalize(
             samples_dict=samples_dict,
@@ -862,7 +866,7 @@ class BOBE:
             self.convergence_counter = 0  # Reset counter if not converged
             return False
 
-    def check_convergence_logz(self, step, logz_dict, equal_samples, equal_logl, verbose=True, delta_method='diff'):
+    def check_convergence_logz(self, step, logz_dict, equal_samples, equal_logl, verbose=True, save_checkpoint=True):
         """
         Check if the nested sampling has converged and compute KL divergence metrics.
         
@@ -879,10 +883,11 @@ class BOBE:
             return False
         
         # Standard logz convergence check
-        if delta_method == 'diff':
-            delta = (logz_dict['upper'] - logz_dict['lower'])/2 
-        else:
-            delta = logz_dict['std']
+        delta = (logz_dict['upper'] - logz_dict['lower'])/2 
+        
+        # alternative cross-check using std, not used for convergence
+        delta_crosscheck = logz_dict['std']
+
         converged = delta < self.logz_threshold
         
         # Compute KL divergences if we have nested sampling samples
@@ -900,7 +905,7 @@ class BOBE:
             cov2 = np.cov(equal_samples, rowvar=False)
             successive_kl = kl_divergence_gaussian(mu1, np.atleast_2d(cov1), mu2, np.atleast_2d(cov2))
 
-            log.info(f" Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
+            log.info(f"Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
             # Store KL divergences if computed
             self.results_manager.update_kl_divergences(
                 iteration=step,
@@ -920,36 +925,40 @@ class BOBE:
         
         log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
         
+        if converged:
+            self.convergence_counter += 1
+            if self.convergence_counter >= self.convergence_n_iters:
+                log.info(f"Convergence achieved after {self.convergence_n_iters} successive iterations")
+                converged = True
+            else:
+                log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
+                converged = False
+        else:
+            self.convergence_counter = 0  # Reset counter if not converged
+            converged = False
+
         # Check if this is the smallest delta seen so far and save checkpoint, also ensure delta is reasonably good
-        if (delta < self.min_delta_seen) and (delta < 1.0):
+        if (delta < self.min_delta_seen) and (delta_crosscheck < 1.0) and save_checkpoint:
             self.min_delta_seen = delta
 
             # Create checkpoint filename with suffix
             checkpoint_filename = f"{self.output_file}_checkpoint"
 
-            # Save intermediate results checkpoint
-            self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}")
+            if not converged:
 
-            # Save getdist chains
-            self.results_manager.save_chain_files(samples_dict=self.ns_samples, filename=f"{checkpoint_filename}")
+                # Save intermediate results checkpoint
+                self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}")
 
-            if verbose:
-                log.info(f"New minimum delta achieved: {delta:.4f}")
-                log.info("Saving checkpoint results for new minimum delta")
-                log.info(f"Saved GP checkpoint to {checkpoint_filename}_gp.npz")
-                log.info(f"Saved intermediate results checkpoint to {checkpoint_filename}.json")
+                # Save getdist chains
+                self.results_manager.save_chain_files(samples_dict=self.ns_samples, filename=f"{checkpoint_filename}")
 
-        if converged:
-            self.convergence_counter += 1
-            if self.convergence_counter >= self.convergence_n_iters:
-                log.info(f"Convergence achieved after {self.convergence_n_iters} successive iterations")
-                return True
-            else:
-                log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
-                return False
-        else:
-            self.convergence_counter = 0  # Reset counter if not converged
-            return False
+                if verbose:
+                    log.info(f"New minimum delta achieved: {delta:.4f}")
+                    log.info("Saving checkpoint results for new minimum delta")
+                    log.info(f"Saved GP checkpoint to {checkpoint_filename}_gp.npz")
+                    log.info(f"Saved intermediate results checkpoint to {checkpoint_filename}.json")
+
+        return converged
         
     # ============================================================================
     # MAIN RUN METHODS
@@ -1096,7 +1105,7 @@ class BOBE:
                 self.batch_size = (self.batch_size // n_processes) * n_processes
                 if self.batch_size < n_processes:
                     self.batch_size = n_processes
-                log.info(f" Adjusted batch_size from {original_batch} to {self.batch_size} "
+                log.info(f"Adjusted batch_size from {original_batch} to {self.batch_size} "
                         f"(multiple of {n_processes} processes)")
         
         # Initialize convergence state
@@ -1148,12 +1157,12 @@ class BOBE:
             else:
                 self.run_EI(ii=self.current_iteration)
 
-        log.info(f" Final best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
+        log.info(f"Final best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
 
 
         #-------End of BO loop-------
-        log.info(f" Sampling stopped: {self.termination_reason}")
-        log.info(f" Final GP training set size: {self.gp.train_x.shape[0]}, max size: {self.max_gp_size}")
+        log.info(f"Sampling stopped: {self.termination_reason}")
+        log.info(f"Final GP training set size: {self.gp.train_x.shape[0]}, max size: {self.max_gp_size}")
 
         self.finalise_results()
         
@@ -1178,7 +1187,7 @@ class BOBE:
             verbose = True
 
             if verbose:
-                log.info(f" Iteration {ii} of {self.acquisition.name}, objective evals {current_evals}/{self.max_evals}")
+                log.info(f"Iteration {ii} of {self.acquisition.name}, objective evals {current_evals}/{self.max_evals}")
 
             acq_kwargs = {'zeta': self.zeta_ei, 'best_y': max(self.gp.train_y.flatten()) if self.gp.train_y.size > 0 else 0.}
             n_batch = 1
@@ -1192,7 +1201,7 @@ class BOBE:
 
             self.results_manager.update_best_loglike(ii, self.best_f)
             if verbose:
-                log.info(f" Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
+                log.info(f"Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
 
             # if current_evals >= self.min_evals:
             converged = self.check_convergence_ei(ii,acq_vals)
@@ -1246,6 +1255,10 @@ class BOBE:
         )
         self.results_manager.end_timing('MCMC Sampling')
         self.ns_samples = None
+        
+        #logz keys to print
+        logz_keys = ['mean', 'upper', 'lower', 'dlogz_sampler']
+
 
         while not self.converged:
             ii += 1
@@ -1255,7 +1268,7 @@ class BOBE:
             verbose = True
 
             if verbose:
-                log.info(f"Iteration {ii} of {acq_name}, objective evals {current_evals}/{self.max_evals}, ns={ns_flag}")
+                log.info(f"Iteration {ii} of {acq_name}, objective evals {current_evals}/{self.max_evals}")
 
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
@@ -1275,9 +1288,9 @@ class BOBE:
                 )
                 self.results_manager.end_timing('Nested Sampling')
 
-                log.info(f"NS success = {ns_success}, LogZ info: " + ", ".join([f"{k}={v:.4f}" for k, v in logz_dict.items()]))
+                logz_str = ", ".join([f"{k}={logz_dict[k]:.4f}" for k in logz_keys if k in logz_dict])
+                log.info(f"NS success = {ns_success}, LogZ info: {logz_str}")
 
-                # if logz_dict['std'] < 0.5: # only accept if uncertainty from method 2 is also reasonable
                 self.ns_samples = ns_samples
                 if ns_success:
                     equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
@@ -1288,10 +1301,10 @@ class BOBE:
                         'method': 'NS',
                         'best': ns_samples['best']
                     }
+                    self.results_dict['logz'] = logz_dict
                     self.converged = self.check_convergence_logz(ii, logz_dict, equal_samples, equal_logl)
                     if self.converged:
                         self.termination_reason = "LogZ converged"
-                        self.results_dict['logz'] = logz_dict
                         self.results_dict['termination_reason'] = self.termination_reason
                 
                 # Reset counter after running NS
@@ -1336,20 +1349,21 @@ class BOBE:
             self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
             self.results_manager.end_timing('GP Training')
 
-            log.info(" Final Nested Sampling")
+            log.info("Final Nested Sampling")
             self.results_manager.start_timing('Nested Sampling')
             self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
                 gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01, rng=self.np_rng
             )
             self.results_manager.end_timing('Nested Sampling')
-            log.info(" Final LogZ: " + ", ".join([f"{k}={v:.4f}" for k,v in logz_dict.items()]))
+            logz_str = ", ".join([f"{k}={logz_dict[k]:.4f}" for k in logz_keys if k in logz_dict])
+            log.info(f"Final LogZ: {logz_str}")
             if ns_success:
                 equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
                 log.info(f"Using nested sampling results")
-                self.check_convergence_logz(ii+1, logz_dict, equal_samples, equal_logl)
+                self.check_convergence_logz(ii+1, logz_dict, equal_samples, equal_logl, save_checkpoint=False)
+                self.results_dict['logz'] = logz_dict
                 if self.converged:
                     self.termination_reason = "LogZ converged"
-                    self.results_dict['logz'] = logz_dict
                     self.results_dict['termination_reason'] = self.termination_reason
 
         if (self.ns_samples is not None) and ns_success:

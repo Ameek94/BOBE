@@ -353,7 +353,7 @@ def optimize_scipy(
                 log.warning(f"  Restart {i+1}/{n_restarts}: Failed with an error: {e}")
             continue
     
-    log.info(f"Scipy optimization ({method}) completed with {n_restarts} restarts: "
+    log.debug(f"Scipy optimization ({method}) completed with {n_restarts} restarts: "
             f"Final best_f = {float(global_best_f):.4e}")
     
     return jnp.array(global_best_params), float(global_best_f)

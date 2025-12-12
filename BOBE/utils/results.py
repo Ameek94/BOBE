@@ -700,8 +700,8 @@ class BOBEResults:
         # Use GetDist's saveAsText method to save the chain files
         # This automatically creates .txt, .paramnames, and .ranges files
         getdist_samples.saveAsText(root=output_file, make_dirs=True)
-        log.info(f"Saved GetDist format files using MCSamples.saveAsText to {output_file}")
-        log.info("  - Created: .txt (chain), .paramnames (parameter info), .ranges (parameter bounds)")
+        log.info(f"Saved GetDist format files to {output_file}")
+        log.info("Created: .txt (chain), .paramnames (parameter info), .ranges (parameter bounds)")
         
     
     def save_summary_stats(self):
