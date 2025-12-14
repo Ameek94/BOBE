@@ -6,7 +6,7 @@ Utility modules providing various helper functions and classes.
 Results Handling
 ----------------
 
-.. automodule:: BOBE.utils.results
+.. autoclass:: BOBE.utils.results.BOBEResults
    :members:
    :undoc-members:
    :show-inheritance:

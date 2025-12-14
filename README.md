@@ -63,8 +63,6 @@ BOBE has several optional dependencies for extended functionality. When installi
 
 ## Quick Start
 
-### Simple python function
-
 ```python
 from BOBE import BOBE
 

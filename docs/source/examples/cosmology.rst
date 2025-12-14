@@ -1,284 +1,296 @@
 Cosmological Likelihoods (through Cobaya)
-======================================
+==========================================
 
 This example demonstrates how to use BOBE with realistic cosmological likelihoods interfaced
 through the Cobaya package. We'll estimate the Bayesian evidence for the 
-standard LCDM model using Planck and DESI data.
+standard ΛCDM model using the Planck 2018 lensing + lowl TT+EE + highl_plik.TTTEEE_lite_native nuisance marginalised likelihood (Planck-lite).
 
 Prerequisites
 -------------
 
 .. note::
-   This example requires Cobaya. Install with:
-   
-   .. code-block:: bash
-   
-      pip install -e '.[cobaya]'
-   
-   Run this from the BOBE source directory.
+   This example requires `Cobaya <https://cobaya.readthedocs.io/>`_. You'll also need the Planck likelihoods installed. Follow the the instructions in the Cobaya documentation for data setup.
 
-You'll also need the Planck and DESI data files. Follow the 
-`Cobaya installation guide <https://cobaya.readthedocs.io/>`_ for data setup.
 
 Problem Description
 -------------------
 
-We're testing a cosmological model with the following:
+We're testing a cosmological model with the following setup:
 
-- **Likelihood**: Planck 2018 (lowl TT + highl Camspec TTTEEE + lensing) + DESI DR2 BAO
-- **Model**: Standard LCDM (flat universe)
+- **Likelihood**: Planck 2018 (lowl TT+EE, highl plik TTTEEE lite, lensing)
+- **Model**: Standard ΛCDM (flat universe)
 - **Parameters**: 6 cosmological parameters
 
   - :math:`\Omega_b h^2`: Baryon density
   - :math:`\Omega_c h^2`: Cold dark matter density  
   - :math:`H_0`: Hubble parameter
-  - :math:`\log(10^{10} A_s)`: Primordial amplitude
+  - :math:`\log(10^{10} A_s)`: Primordial scalar amplitude
   - :math:`n_s`: Scalar spectral index
   - :math:`\tau`: Optical depth to reionization
 
-Cobaya Input File
------------------
+Cobaya YAML Configuration
+--------------------------
 
-First, create a YAML file defining your cosmological model:
+Prepare your YAML file as you would usually do for Cobaya, specifying the theory, likelihood and params block. That defines the cosmological model, likelihoods, and parameters. 
+Here's the structure of ``LCDM_lite.yaml``:
 
 .. code-block:: yaml
 
-   # LCDM_Planck_DESI.yaml
-   
+   theory:
+     camb:
+       path: 'global'
+       extra_args:
+         halofit_version: mead
+         bbn_predictor: PArthENoPE_880.2_standard.dat
+         lens_potential_accuracy: 1
+         num_massive_neutrinos: 1
+         nnu: 3.044
    likelihood:
-     # Planck 2018 likelihoods
      planck_2018_lowl.TT: null
-     planck_2018_highl_plik.TTTEEE: null
-     
-     # DESI 2024 BAO
-     bao.desi_2024_bao_all: null
-   
+     planck_2018_lowl.EE: null
+     planck_2018_highl_plik.TTTEEE_lite_native: null
+     planck_2018_lensing.native: null
    params:
-     # Baryon density
-     omegabh2:
+     omch2:
+       latex: \Omega_\mathrm{c} h^2
        prior:
-         min: 0.019
-         max: 0.026
+         min: 0.11
+         max: 0.13
        ref:
          dist: norm
-         loc: 0.02237
-         scale: 0.00015
-       latex: \\Omega_b h^2
-     
-     # Cold dark matter density
-     omegach2:
+         loc: 0.1186
+         scale: 0.0005
+     ombh2:
+       latex: \Omega_\mathrm{b} h^2
        prior:
-         min: 0.08
-         max: 0.2
+         min: 0.021
+         max: 0.023
        ref:
          dist: norm
-         loc: 0.1200
-         scale: 0.0014
-       latex: \\Omega_c h^2
-     
-     # Hubble parameter
+         loc: 0.0222
+         scale: 0.0001
      H0:
-       prior:
-         min: 40
-         max: 100
        latex: H_0
-     
-     # Primordial amplitude
-     logA:
        prior:
-         min: 2.0
-         max: 4.0
+         min: 64
+         max: 72
        ref:
          dist: norm
-         loc: 3.05
-         scale: 0.02
-       latex: \\log(10^{10} A_s)
-     
-     # Spectral index
-     ns:
+         loc: 67.7
+         scale: 0.05
+     logA:
+       latex: \log(10^{10} A_\mathrm{s})
        prior:
-         min: 0.8
-         max: 1.2
+         min: 2.98
+         max: 3.10
+       ref:
+         dist: norm
+         loc: 3.041
+         scale: 0.001
+     As:
+       value: 'lambda logA: 1e-10*np.exp(logA)'
+       latex: A_\mathrm{s}
+     ns:
+       latex: n_\mathrm{s}
+       prior:
+         min: 0.94
+         max: 0.99
        ref:
          dist: norm
          loc: 0.965
-         scale: 0.005
-       latex: n_s
-     
-     # Optical depth
+         scale: 0.002
      tau:
+       latex: \tau_\mathrm{reio}
        prior:
-         min: 0.01
-         max: 0.8
+         min: 0.03
+         max: 0.08
        ref:
          dist: norm
          loc: 0.055
-         scale: 0.01
-       latex: \\tau
-   
-   theory:
-     camb:
-       extra_args:
-         lens_potential_accuracy: 1
-         num_massive_neutrinos: 1
-         nnu: 3.046
+         scale: 0.003
+     A_planck: # Planck calibration parameter fixed to 1 here, can remove this block to use the default Gaussian prior
+        value: 1.0
 
-Complete Python Code
+Key YAML elements:
+
+- **theory**: Specifies CAMB for computing cosmological observables
+- **likelihood**: Lists all likelihoods to use
+- **params**: Defines priors (``min``/``max`` for uniform, or ``dist: norm`` for Gaussian) and reference distributions (``ref``) used by Cobaya to generate initial points for sampling (BOBE can also use this).
+
+See the `Cobaya documentation <https://cobaya.readthedocs.io/>`_ for more details on setting up cosmological models.
+
+Configure and run BOBE
 --------------------
+
+This example is based on ``examples/Planck_lite_LCDM.py``.
 
 .. code-block:: python
 
+   import os
+   os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+       os.cpu_count()
+   )
    from BOBE import BOBE
-   
-   # Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
-   sampler = BOBE(
-       loglikelihood='./cosmo_input/LCDM_Planck_DESI.yaml',
-       likelihood_name='Planck_DESI_LCDM',
-       n_cobaya_init=32,
-       n_sobol_init=64,
-       save_dir='./results/',
-   )
-   
-   # Run optimization with convergence and run settings
-   results = sampler.run(
-       min_evals=800,
-       max_evals=2500,
-       batch_size=5,
-       fit_n_points=5,
-       ns_n_points=5,
-       logz_threshold=0.01,
-   )
-   
-   # Access results
-   print(f\"Log Evidence: {results['logz']['mean']} ± {results['logz']['err']}\")\n   samples = results['samples']
+   from BOBE.utils.core import renormalise_log_weights, scale_from_unit
+   import time
+   import matplotlib.pyplot as plt
+   from getdist import MCSamples, plots, loadMCSamples
+   import numpy as np
 
-Running with MPI
-           loglikelihood=cobaya_input_file,
-           likelihood_name=likelihood_name,
-           confidence_for_unbounded=0.9999995,
-           minus_inf=-1e5,
-           
-           # Output
-           save=True,
-           save_dir='./results/',
-           seed=42,
-           verbosity='INFO',
-           
-           # Initial sampling
-           n_cobaya_init=32,   # Points from Cobaya reference distribution
-           n_sobol_init=64,    # Additional Sobol points
-           
-           # Budget
-           min_evals=800,      # Minimum evaluations before convergence check
-           max_evals=2500,     # Maximum likelihood evaluations
-           max_gp_size=1500,   # Maximum GP training set size
-           
-           # Step settings
-           fit_n_points=5,         # Fit GP every 5 evaluations
-           batch_size=5,           # Evaluate 5 points per acquisition
-           ns_n_points=5,          # Run nested sampling every 5 iterations
-           optimizer='scipy',      # 'scipy' or 'optax'
-           
-           # HMC/MC settings for acquisition
-           num_hmc_warmup=512,
-           num_hmc_samples=12000,
-           mc_points_size=512,
-           num_chains=4,           # Parallel NUTS chains
-           
-           # GP settings
-           gp_kwargs={
-               'lengthscale_prior': None,
-               'kernel_variance_prior': None,
-               'lengthscale_bounds': [1e-2, 5.],
-           },
-           
-           # Classifier settings (HIGHLY RECOMMENDED for cosmology)
-           use_clf=True,
-           clf_type='svm',              # 'svm' (always available) or 'nn' (requires [nn])
-           clf_nsigma_threshold=20,     # Filter points below -20 sigma
-           clf_update_step=1,           # Update classifier every iteration
-           
-           # Convergence
-           logz_threshold=0.01,
-           convergence_n_iters=2,  # Require 2 consecutive convergence checks
-           do_final_ns=True,
-       )
-       
-       # Run optimization
-       results = bobe.run(acq='wipv')
-       
-       end = time.time()
-       
-       if results is not None:
-           log = get_logger("main")
-           
-           # Extract results
-           gp = results['gp']
-           samples = results['samples']
-           logz_dict = results.get('logz', {})
-           likelihood = results['likelihood']
-           results_manager = results['results_manager']
-           
-           log.info("\n" + "="*80)
-           log.info("RUN COMPLETED")
-           log.info("="*80)
-           log.info(f"Total time: {(end - start)/60:.2f} minutes")
-           log.info(f"Log Evidence: {logz_dict.get('logz', 'N/A'):.4f} ± {logz_dict.get('logzerr', 0):.4f}")
-           log.info(f"Number of likelihood evaluations: {gp.train_x.shape[0]}")
-           log.info("="*80)
-           
-           # Create plots
-           plot_results(results, likelihood_name)
+   # Set up the cosmological likelihood
+   cobaya_input_file = './cosmo_input/LCDM_lite.yaml'
+   likelihood_name = 'Planck_lite_LCDM'
    
-   def plot_results(results, name):
-       """Generate diagnostic and posterior plots."""
-       
-       samples = results['samples']
+   start = time.time()
+   print("Starting BOBE run...")
+
+   # Pass Cobaya YAML file path directly to BOBE
+   sampler = BOBE(
+       loglikelihood=cobaya_input_file,
+       likelihood_name=likelihood_name,
+       resume=False,
+       resume_file=f'{likelihood_name}',
+       save_dir='./results/',
+       save=True,
+       verbosity='INFO',
+       n_cobaya_init=4,
+       n_sobol_init=8,
+       use_clf=True,
+       clf_type='svm',
+       seed=10,
+   )
+   
+   results = sampler.run(
+       acq='wipstd',
+       min_evals=25,
+       max_evals=250,
+       fit_n_points=6,
+       batch_size=2,
+       ns_n_points=6,
+       num_hmc_warmup=256,
+       num_hmc_samples=2048,
+       mc_points_size=256,
+       logz_threshold=0.1,
+   )
+
+   end = time.time()
+
+   if results is not None:  # when running in MPI mode, only rank 0 returns results
+
+       gp = results['gp']
+       logz_dict = results.get('logz', {})
        likelihood = results['likelihood']
-       
-       # Get parameter names from likelihood
+       results_manager = results['results_manager']
+       samples = results['samples']
+       param_bounds = likelihood.param_bounds
        param_list = likelihood.param_list
        param_labels = likelihood.param_labels
-       param_bounds = likelihood.param_bounds
-       
-       # Create GetDist samples
-       sample_array = samples['x']
-       sample_weights = samples.get('weights', None)
-       
-       mcs = MCSamples(
-           samples=sample_array,
-           weights=sample_weights,
-           names=param_list,
-           labels=param_labels,
-           ranges=dict(zip(param_list, param_bounds.T))
+       ndim = len(param_list)
+
+       manual_timing = end - start
+
+       print("\n" + "="*60)
+       print("RUN COMPLETED")
+       print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
+       if 'upper' in logz_dict and 'lower' in logz_dict:
+           print(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
+
+       print("="*60)
+       print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
+
+       reference_samples = loadMCSamples(
+           './cosmo_input/chains/Planck_lite_mcmc',
+           settings={'ignore_rows': 0.3, 'label': 'MCMC'}
        )
+
+       # Create MCSamples from BOBE results
+       sample_array = samples['x']
+       weights_array = samples['weights']
+       BOBE_Samples = MCSamples(samples=sample_array, names=param_list, labels=param_labels,
+                                   weights=weights_array, 
+                                   ranges= dict(zip(param_list,param_bounds.T)))
+
+       # Create parameter samples plot
+       print("Creating parameter samples plot...")
        
-       # Triangle plot
-       g = gdplt.get_subplot_plotter(width_inch=8)
-       g.triangle_plot([mcs], filled=True, 
-                      title_limit=1)
-       plt.savefig(f'./results/{name}_triangle.pdf', bbox_inches='tight', dpi=150)
-       print(f"Saved triangle plot to ./results/{name}_triangle.pdf")
-       
-       # Summary plots
-       plotter = BOBESummaryPlotter(results)
-       plotter.plot_gp_training_evolution()
-       plotter.plot_logz_evolution()
-       plotter.plot_acquisition_evolution()
-       
-       # 1D marginalized posteriors for key parameters
-       g = gdplt.get_subplot_plotter()
-       g.plots_1d([mcs], params=['H0', 'omegabh2', 'ns'])
-       plt.savefig(f'./results/{name}_1d_marginals.pdf', bbox_inches='tight')
-       print(f"Saved 1D marginals to ./results/{name}_1d_marginals.pdf")
+       plt.rcParams['text.usetex'] = True
+       plt.rcParams['font.family'] = 'serif'
+
+       g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
+       g.settings.legend_fontsize = 16
+       g.settings.axes_fontsize = 16
+       g.settings.axes_labelsize = 16
+       g.triangle_plot([BOBE_Samples,reference_samples], filled=[True, False],
+                   contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
+                   legend_labels=['BOBE', 'MCMC']) 
+       # add scatter points for gp training data
+       points = scale_from_unit(gp.train_x, param_bounds)
+       for i in range(ndim):
+           for j in range(i+1, ndim):
+               ax = g.subplots[j, i]
+               ax.scatter(points[:, i], points[:, j], alpha=0.75, color='red', s=4)
+       g.export(f'./results/{likelihood.name}_samples.pdf')
+
+.. figure:: Planck_lite_LCDM_samples.svg
+   :align: center
+   :width: 90%
    
-   if __name__ == '__main__':
-       main()
+   Triangle plot comparing BOBE posterior samples (blue filled contours) with MCMC reference samples (black contours). Red scatter points show the GP training data locations. The plot demonstrates excellent agreement between BOBE and the reference MCMC sampler across all six cosmological parameters.
+
+.. code-block:: python
+
+       # Print timing analysis
+       print("DETAILED TIMING ANALYSIS")
+
+       timing_data = results_manager.get_timing_summary()
+
+       print(f"Automatic timing: {timing_data['total_runtime']:.2f} seconds ({timing_data['total_runtime']/60:.2f} minutes)")
+       print("Phase Breakdown:")
+       print("-" * 40)  
+       for phase, time_spent in timing_data['phase_times'].items():
+           if time_spent > 0:
+               percentage = timing_data['percentages'].get(phase, 0)
+               print(f"{phase:25s}: {time_spent:8.2f}s ({percentage:5.1f}%)")
+
+
+       # Plot acquisition data
+       acquisition_data = results_manager.get_acquisition_data()
+       iterations = np.array(acquisition_data['iterations'])
+       values = np.array(acquisition_data['values'])
+       fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+       ax.plot(iterations, values,  linestyle='-')
+       ax.set_yscale('log')
+       ax.set_xlabel(r'Iteration')
+       ax.set_ylabel(r'Acquisition Value')
+       plt.savefig(f"./results/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
+
+.. figure:: Planck_lite_LCDM_acquisition.svg
+   :align: center
+   :width: 80%
+   
+   Evolution of the WIPStd acquisition function values during optimization. The acquisition value decreases as the GP surrogate becomes more confident about the posterior region, indicating successful convergence toward the high-likelihood area of parameter space.
+
+Expected Results
+~~~~~~~~~~~~~~~~~~~
+
+For standard ΛCDM with Planck lite:
+
+- **Convergence**: Typically requires 100-200 evaluations with these settings. The logZ value should be approximately :math:`\log Z \approx -519.5` (exact value may vary slightly due to nested sampler stochasticity).
+
+Expected Runtime
+~~~~~~~~~~~~~~~~~~~
+
+For the Planck lite likelihood (each evaluation ~0.5-1 second):
+
+- ~2-5 minutes for ~120 evaluations
+
+Note: Actual likelihood evaluation and total runtime may vary according to your hardware specifications.
 
 Running with MPI
-----------------
+~~~~~~~~~~~~~~~~~~~
 
-For expensive cosmological likelihoods, use MPI parallelization:
+While this example does not really require MPI, for more expensive cosmological likelihoods it is recommended to use MPI parallelisation. 
+In MPI mode, multiple processes can evaluate the true likelihood at the points proposed by the acquisition function (use as many processes as the acquisition batch size) and do GP fitting restarts in parallel, significantly speeding up the run.
 
 .. code-block:: bash
 
@@ -286,101 +298,66 @@ For expensive cosmological likelihoods, use MPI parallelization:
    pip install -e '.[mpi]'
    
    # Run with 4 processes
-   mpirun -n 4 python cosmology_example.py
+   mpirun -n 4 python examples/Planck_lite_LCDM.py
 
-The code automatically detects MPI and distributes likelihood evaluations 
-across processes.
 
-Expected Runtime
-----------------
-
-- **Without MPI**: ~10-20 hours for 2500 evaluations
-- **With MPI (4 cores)**: ~3-5 hours
-- **With MPI (8+ cores)**: ~1-3 hours
-
-Expected Results
-----------------
-
-For standard LCDM with Planck+DESI:
-
-- **Log Evidence**: Approximately -5800 to -5850
-- **Convergence**: Typically requires 1200-1800 evaluations
-
-Posterior Constraints
-~~~~~~~~~~~~~~~~~~~~~
-
-Typical 68% confidence intervals:
-
-- :math:`H_0 = 67.4 \pm 0.5` km/s/Mpc  
-- :math:`\Omega_b h^2 = 0.02237 \pm 0.00015`
-- :math:`\Omega_c h^2 = 0.1200 \pm 0.0012`
-- :math:`n_s = 0.965 \pm 0.004`
-
-Important Notes
----------------
-
-Classifier is Essential
-~~~~~~~~~~~~~~~~~~~~~~~
-
-For cosmological likelihoods, **always use** ``use_clf=True``. The classifier:
-
-- Filters out parameter regions with extremely low likelihoods
-- Reduces wasted evaluations by ~50-70%
-- Focuses the GP on the posterior region
-
-The default SVM classifier (``clf_type='svm'``) works well and is always available.
-
-Memory Considerations
-~~~~~~~~~~~~~~~~~~~~~
-
-For very long runs:
-
-- Set ``max_gp_size`` to limit memory (1000-2000 is typical)
-- The GP uses the most informative points when this limit is reached
-- Save intermediate results with ``save=True``
-
-Resume from Checkpoint
-~~~~~~~~~~~~~~~~~~~~~~
-
-To resume an interrupted run:
-
-.. code-block:: python
-
-   bobe = BOBE(
-       loglikelihood=cobaya_input_file,
-       likelihood_name=likelihood_name,
-       resume=True,
-       resume_file='./results/Planck_DESI_LCDM',
-       # ... other settings ...
-   )
-   results = bobe.run(acq='wipv')
-
-Troubleshooting
----------------
-
-Slow Convergence
-~~~~~~~~~~~~~~~~
-
-If convergence is slow:
-
-1. Increase ``n_cobaya_init`` to 64-128 for better initialization
-2. Try ``optimizer='optax'`` (requires ``[nn]`` install)
-3. Increase ``mc_points_size`` to 1024 for better acquisition
-4. Lower ``fit_n_points`` to 2-3 for more frequent GP updates
-
-Likelihood Failures
+Key Configuration Parameters
 ~~~~~~~~~~~~~~~~~~~
 
-If you see many ``-1e5`` values:
+The example demonstrates important settings for cosmological applications:
 
-1. Check your Cobaya YAML file is correct
-2. Verify parameter priors are reasonable
-3. Increase ``clf_nsigma_threshold`` from 20 to 30
+- **n_cobaya_init=4, n_sobol_init=8**: Using both Cobaya reference and Sobol points to initialize the GP
+- **min_evals=25, max_evals=250**: Min and max number of likelihood evaluations to perform
+- **fit_n_points=6**: Update GP every 6 likelihood evaluations
+- **batch_size=2**: Evaluate 2 points per acquisition step
+- **ns_n_points=6**: Run nested sampling after every 6 likelihood evaluations to check for convergence once the acquisition function reaches the logz threshold
+- **num_hmc_warmup=256, num_hmc_samples=2048**: NUTS sampling for Monte Carlo acquisition function
+- **logz_threshold=0.1**: Evidence convergence threshold
 
-Next Steps
-----------
 
-- Compare evidence to alternative models (e.g., LCDM+Omk, CPL dark energy)
-- Experiment with different acquisition functions
-- Try neural network classifiers: ``clf_type='nn'`` (requires ``[nn]``)
-- See :doc:`../user guide/advanced` for model comparison workflows
+For cosmological likelihoods, **you should use** ``use_clf=True``. 
+The classifier filters out parameter regions where likelihood evaluations may return -inf or extremely low likelihoods and focuses the GP on the high-likelihood posterior region.
+The SVM classifier (``clf_type='svm'``) is used in this example and is always available without additional dependencies. The classifier threshold setting strategy is explained in our `paper <https://arxiv.org/abs/2512.xxxx>`_ and follows the one used in `Gpry <https://github.com/jonaselgammal/GPry>`_.
+
+
+.. Troubleshooting
+.. ---------------
+
+.. Slow Convergence
+.. ~~~~~~~~~~~~~~~~
+
+.. If convergence is slow:
+
+.. 1. Increase ``n_cobaya_init`` to 16-32 for better initialization near the posterior
+.. 2. Reduce ``logz_threshold`` from 0.1 to 0.05 for stricter convergence
+.. 3. Increase ``mc_points_size`` to 1024 for better acquisition optimization
+.. 4. Try more frequent GP updates: reduce ``fit_n_points`` to 4 or lower
+.. 5. Increase ``num_hmc_samples`` to 4000-8000 for better posterior exploration
+
+.. Likelihood Failures
+.. ~~~~~~~~~~~~~~~~~~~
+
+.. If you see many ``-inf`` values:
+
+.. 1. Check your Cobaya YAML file paths and likelihood names are correct
+.. 2. Verify Cobaya data files are properly installed
+.. 3. Check parameter priors don't exclude the posterior region
+.. 4. The classifier will help filter these out once it trains
+
+.. Memory Issues
+.. ~~~~~~~~~~~~~
+
+.. If you run out of memory:
+
+.. 1. Reduce ``max_gp_size`` to 100-200
+.. 2. Reduce ``num_hmc_samples`` and ``mc_points_size``
+.. 3. Save intermediate results frequently with ``save=True``
+
+.. Next Steps
+.. ----------
+
+.. - Compare evidence to alternative models (e.g., ΛCDM+Ωk, wCDM)
+.. - Experiment with different ``logz_threshold`` values for convergence
+.. - Try the **Planck+DESI** example for a more complex likelihood
+.. - Use MPI parallelization for expensive likelihoods
+.. - Monitor convergence with the acquisition value plot 

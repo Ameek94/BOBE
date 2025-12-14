@@ -3,17 +3,15 @@ In Depth Tutorial: Computing the Bayesian evidence for the Himmelblau Function
 
 This tutorial demonstrates the basic usage of BOBE through a classic optimization problem: the Himmelblau function. This example is based on the ``examples/Himmelblau.py`` file and shows how to set up and run a Bayesian optimization loop using the BOBE framework.
 
-Overview
---------
 
 The Himmelblau function is a well-known multi-modal test function in optimization that has four global minima, making it challenging for optimization algorithms. 
-In this example, we test BOBE's performance on this function with the additional complication of embedding a 2D Himmelblau function in a 4D parameter space where only the first two dimensions are relevant.
+In this example, we test BOBE's performance on this 2D function.
 
 The Himmelblau function (in loglikelihood form) is defined as:
 
 .. math::
 
-   \log \mathcal{L}(x_1, x_2, x_3, x_4) = -0.5 \cdot (a \cdot r_1 + r_2)
+   \log \mathcal{L}(x_1, x_2) = -0.5 \cdot (a \cdot r_1 + r_2)
 
 where 
 
@@ -25,64 +23,54 @@ where
 
 and
 
-:math:`x_1, x_2, x_3, x_4 \in [-4, 4]` and :math:`a = 0.1` is a scaling factor. 
-Note that :math:`x_3` and :math:`x_4` do not appear in the likelihood—this tests whether BOBE's can identify and handle the irrelevant dimensions
+:math:`x_1, x_2 \in [-4, 4]` and :math:`a = 0.1` is a scaling factor.
 
 By the end of this tutorial, you will understand:
 
 - How to define a likelihood function for BOBE
-- How to set up parameter bounds and transformations
-- How to configure and run BOBE
+- How to run the BOBE optimization loop
 - How to analyze and visualize the results
-- How to compare with reference methods such as Dynesty
 
-1. Setup and Imports
---------------------
+Setup and Imports
+------------------
 
 First, let's import all the necessary libraries and set up the environment.
 
 .. code-block:: python
 
-   # Core BOBE imports
+   import os
+   os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+       os.cpu_count()
+   ) # for jax on cpu, set number of devices to number of cores
    from BOBE import BOBE
-   from BOBE.utils.plot import plot_final_samples, BOBESummaryPlotter
-   import matplotlib.pyplot as plt
+   from BOBE.utils.core import renormalise_log_weights, scale_from_unit
    import time
-   import numpy as np
-   import seaborn as sns # optional, for better plot styles
+   import matplotlib.pyplot as plt
    from getdist import MCSamples, plots
-   
-   # External libraries for comparison
+   import numpy as np
    from dynesty import DynamicNestedSampler
 
-   # Enable LaTeX rendering for plots (optional)
-   plt.rcParams['text.usetex'] = False  # Set to True if you have LaTeX installed
-   plt.rcParams['font.family'] = 'serif'
-   plt.style.use('default')
+Define the Likelihood
+------------------
 
-2. Define the Likelihood
--------------------------
 
-Now let's define our target function—a 2D Himmelblau function embedded in 4D space—and wrap it in BOBE's Likelihood class.
+Now let's define our target function—the 2D Himmelblau function.
 
 .. code-block:: python
 
    # Scaling factor for the Himmelblau function
    afac = 0.1
 
-   def loglike(X, slow=False):
+   def loglike(X, slow=True):
        """
-       The Himmelblau log-likelihood function embedded in 4D space.
-       
-       Only uses the first two dimensions (x1, x2), testing BOBE's ability
-       to identify irrelevant dimensions via the SAAS prior.
+       The Himmelblau log-likelihood function.
        
        Original form: f(x,y) = (x² + y - 11)² + (x + y² - 7)²
        
        Parameters:
        -----------
-       X : array-like, shape (4,)
-           Input parameters [x1, x2, x3, x4] - only x1, x2 are used
+       X : array-like, shape (2,)
+           Input parameters [x1, x2]
        slow : bool
            If True, add artificial delay (useful for testing expensive likelihoods)
        
@@ -93,325 +81,299 @@ Now let's define our target function—a 2D Himmelblau function embedded in 4D s
        r1 = (X[0] + X[1]**2 - 7)**2
        r2 = (X[0]**2 + X[1] - 11)**2
        
-       logpdf = -0.5 * (afac * r1 + r2)
-       
        if slow:
-           time.sleep(2)  # Artificial delay for testing
+           time.sleep(4)  # Artificial delay of 4 seconds for simulating an expensive likelihood
        
-       return logpdf
+       return -0.5 * (afac * r1 + r2)
 
 
    # Problem setup
-   ndim = 4
-   param_list = ['x1', 'x2', 'x3', 'x4']
-   param_labels = ['x_1', 'x_2', 'x_3', 'x_4']
-   param_bounds = np.array([[-4, 4], [-4, 4], [-4, 4], [-4, 4]]).T  # Shape: (2, ndim)
+   ndim = 2
+   param_list = ['x1', 'x2']
+   param_labels = ['x_1', 'x_2']
+   param_bounds = np.array([[-4, 4], [-4, 4]]).T  # Shape: (2, ndim)
+   likelihood_name = 'Himmelblau'
 
-   print(f"Problem dimension: {ndim}")
-   print(f"Parameter names: {param_list}")
-   print(f"Parameter bounds:\n{param_bounds}")
-   print(f"Scaling factor (afac): {afac}")
+   print("Starting BOBE run...")
 
-3. Configure and Run BOBE
---------------------------
+Configure and Run BOBE
+------------------
 
-Now let's set up the BOBE configuration and run the optimization. We'll use the SAAS (Sparsity-Aware Adaptive Shrinkage) lengthscale prior, which is particularly effective for high-dimensional problems.
+
+Now let's set up the BOBE configuration and run the optimization. We'll use the default WIPStd (Weighted Integrated Posterior Standard Deviation) acquisition function which is a cheap and approximate measure of :math:`\Delta \log Z` (see our `paper <https://arxiv.org/abs/2512.xxxx>`_ for details).
 
 .. code-block:: python
 
-   # Configuration
-   likelihood_name = "Himmelblau_test"
+   start = time.time()
 
-   print("Starting BOBE optimization...")
-   print(f"Likelihood name: {likelihood_name}")
-
-   start_time = time.time()
-
-   # Initialize BOBE with setup parameters
-   sampler = BOBE(
-       likelihood=likelihood,
+   # Initialize BOBE instance
+   bobe = BOBE(
+       loglikelihood=loglike,
        param_list=param_list,
        param_bounds=param_bounds,
        param_labels=param_labels,
-       verbosity='INFO',          # Set verbosity level
-              
-       # Initialization
-       n_sobol_init=8,           # Initial Sobol sequence points
-       
-       # Random seed
+       likelihood_name=likelihood_name, # name for saving outputs
+       n_sobol_init=8,
        seed=42,
+       save_dir='./results/', # directory to save results
+       save=True,
    )
    
    # Run optimization with convergence and run settings
-   results = sampler.run(
-       
-       # Budget control
-       min_evals=25,             # Minimum evaluations before starting to check convergence
+   results = bobe.run(
+       acq='wipstd',             # Acquisition function (default)
+       min_evals=25,             # Minimum evaluations before checking convergence
        max_evals=250,            # Maximum function evaluations
-       max_gp_size=250,          # Maximum GP training set size
-       
-       # GP and optimization settings
-       fit_n_points=2,           # Refit GP every 2 iterations
-       batch_size=2,             # Batch size for WIPV acquisition
-       ns_n_points=5,            # Run nested sampling every 5 iterations
-
-       # MCMC settings for WIPV (uses NUTS by default)
-       num_hmc_warmup=256,       # NUTS warmup steps
-       num_hmc_samples=1024,     # NUTS samples
-       mc_points_size=256,       # Size of MC sample for WIPV
-       
-       # Convergence
        logz_threshold=0.01,      # Evidence convergence threshold
+       fit_n_points=4,           # Refit GP every 4 likelihood evaluations
+       batch_size=2,             # Sequential acquisition, n>1 for batch acquisition
+       ns_n_points=4,            # Run nested sampling every 4 likelihood evaluations once the acquisition function reaches the logz threshold
+       num_hmc_warmup=256,       # NUTS warmup steps
+       num_hmc_samples=512,      # NUTS samples to draw per chain
+       mc_points_size=128,       # Number of MC samples for acquisition function
+       convergence_n_iters=1,    # Number of successive iterations of \Delta\log Z < logz_threshold required to declare convergence
    )
 
-   end_time = time.time()
-   total_time = end_time - start_time
+   end = time.time()
 
-   print(f"\nBOBE optimization completed in {total_time:.2f} seconds ({total_time/60:.2f} minutes)")
+Analyze the Results
+------------------
 
-4. Analyze the Results
-----------------------
 
 Let's examine what BOBE found and analyze the optimization process.
 
 .. code-block:: python
 
-   print("\n" + "="*60)
-   print("RESULTS ANALYSIS")
-   print("="*60)
+       gp = results['gp']
+       logz_dict = results.get('logz', {})
+       likelihood = results['likelihood']
+       results_manager = results['results_manager']
+       samples = results['samples']
 
-   # Extract components
-   gp = results['gp']
-   logz_dict = results.get('logz', {})
-   results_manager = results['results_manager']
-   timing_data = results.get('timing', {})
+       manual_timing = end - start
+
+       print("\n" + "="*60)
+       print("RUN COMPLETED")
+       print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
+       if 'upper' in logz_dict and 'lower' in logz_dict:
+           print(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
+
+       print("="*60)
+       print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
+
+Running this code should produce LogZ around -3.2 and the run should take around 3 minutes with the artificial delay on and 30-60 seconds when off.
+
+Compare with Dynesty (Reference Method)
+~~~~~~~~~~~~~~~~~~~~~~
+
+To validate our results, let's compare BOBE's evidence estimate with dynesty, a nested sampling package.
+
+.. code-block:: python
+
+       # Define the proper prior transform function for Dynesty
+       def prior_transform(u):
+            """Map [0,1]^2 to [-4,4]^2"""
+            x = np.array(u)  
+            return 8*x - 4
+
+       # Create Dynesty samples to compare against
+       dns_sampler = DynamicNestedSampler(
+           loglike,
+           prior_transform,
+           ndim=ndim,
+           sample='rwalk',
+           logl_kwargs={'slow': False} # turn off artificial delay for dynesty
+       )
+
+       dns_sampler.run_nested(print_progress=True, dlogz_init=0.01)
+       res = dns_sampler.results
+       mean = res['logz'][-1]
+       logz_err = res['logzerr'][-1]
+       print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
+
+       dns_samples = res['samples']
+       weights = renormalise_log_weights(res['logwt'])
+
+The BOBE result should have excellent agreement with dynesty, demonstrating that BOBE provides accurate evidence estimates while using significantly fewer true likelihood evaluations.
+Internally, BOBE also uses dynesty to compute the evidence from the trained GP surrogate. Since the GP surrogate is much cheaper to evaluate compared to the true likelihood, BOBE achieves large computational savings for expensive likelihoods.
+
+Visualize Parameter Samples and Compare
+~~~~~~~~~~~~~~~~~~~~~~
+
+Let's create visualizations to compare the parameter samples from BOBE and Dynesty using GetDist.
+
+.. code-block:: python
+
+       reference_samples = MCSamples(
+           samples=dns_samples,
+           names=param_list,
+           labels=param_labels,
+           weights=weights,
+           ranges=dict(zip(param_list, param_bounds.T))
+       )
+
+       # Create MCSamples from BOBE results
+       sample_array = samples['x']
+       weights_array = samples['weights']
+       BOBE_Samples = MCSamples(
+           samples=sample_array,
+           names=param_list,
+           labels=param_labels,
+           weights=weights_array,
+           ranges=dict(zip(param_list, param_bounds.T))
+       )
        
-   # Basic statistics
-   print(f"Final GP size: {gp.train_x.shape[0]}")
-   print(f"Converged: {results_manager.converged}")
-   print(f"Termination reason: {results_manager.termination_reason}")
+       # Create parameter samples plot
+       print("Creating parameter samples plot...")
+       sns.set_theme('notebook', 'ticks', palette='husl')
+       plt.rcParams['text.usetex'] = True  # optional for LaTeX-style text rendering
+       plt.rcParams['font.family'] = 'serif'
 
-   logz_std = (logz_dict['upper'] - logz_dict['lower']) / 2
-   print(f"Final LogZ estimate: {logz_dict['mean']:.4f} ± {logz_std:.4f}")
-
-   # Find best point
-   best_idx = np.argmax(gp.train_y)
-   best_params = gp.train_x[best_idx]
-   best_loglike = gp.train_y[best_idx]
-
-   # Transform back to parameter space
-   param_ranges = param_bounds[1] - param_bounds[0]
-   best_params_scaled = best_params * param_ranges + param_bounds[0]
+       g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
+       g.settings.legend_fontsize = 16
+       g.settings.axes_fontsize = 16
+       g.settings.axes_labelsize = 16
+       g.triangle_plot(
+           [BOBE_Samples, reference_samples],
+           filled=[True, False],
+           contour_colors=['#006FED', 'black'],
+           contour_lws=[1, 1.5],
+           legend_labels=['BOBE', 'Nested Sampler']
+       )
        
-   print(f"\nBest point found:")
-   for i, (name, val) in enumerate(zip(param_list, best_params_scaled)):
-       print(f"  {name}: {val:.4f}")
-   print(f"  Log-likelihood: {best_loglike.item():.4f}")
+       # Add scatter points for GP training data
+       points = scale_from_unit(gp.train_x, param_bounds)
+       for i in range(ndim):
+           for j in range(i+1, ndim):
+               ax = g.subplots[j, i]
+               ax.scatter(points[:, i], points[:, j], alpha=0.75, color='red', s=4)
+       
+       g.export(f'./results/{likelihood.name}_samples.pdf')
+       print(f"✓ Corner plot saved: ./results/{likelihood.name}_samples.pdf")
 
-5. Compare with Dynesty (Reference Method)
--------------------------------------------
-
-To validate our results, let's compare BOBE's evidence estimate with Dynesty, a popular nested sampling package.
-
-.. code-block:: python
-
-   print("\n" + "="*60)
-   print("RUNNING DYNESTY FOR COMPARISON")
-   print("="*60)
-
-   # Define the proper prior transform function for Dynesty
-   def dynesty_prior_transform(u):
-       """Map [0,1]^4 to [-4,4]^4"""
-       x = np.array(u)  
-       return 8*x - 4
-
-   # Run Dynesty (disable slow mode for fair timing)
-   dns_sampler = DynamicNestedSampler(
-       loglike, 
-       dynesty_prior_transform, 
-       ndim=ndim,
-       logl_kwargs={'slow': False}
-   )
-
-   dynesty_start = time.time()
-   dns_sampler.run_nested(print_progress=True, dlogz_init=0.01)
-   dynesty_time = time.time() - dynesty_start
+.. figure:: Himmelblau_samples.svg
+   :align: center
+   :width: 75%
    
-   dns_results = dns_sampler.results
+   Triangle plot comparing BOBE posterior samples (blue filled contours) with Dynesty reference samples (black contours). Red scatter points show the GP training data locations. The plot demonstrates excellent agreement between BOBE and the reference nested sampler across both parameters.
 
-   # Extract Dynesty results
-   dynesty_logz = dns_results['logz'][-1]
-   dynesty_logz_err = dns_results['logzerr'][-1]
-   dynesty_samples = dns_results.samples_equal()
-
-   print(f"\nDynesty results:")
-   print(f"LogZ = {dynesty_logz:.4f} ± {dynesty_logz_err:.4f}")
-   print(f"Runtime: {dynesty_time:.2f} seconds")
-
-   bobe_logz = logz_dict['mean']
-   print(f"\nComparison:")
-   print(f"BOBE LogZ:    {bobe_logz:.4f} ± {logz_std:.4f}")
-   print(f"Dynesty LogZ: {dynesty_logz:.4f} ± {dynesty_logz_err:.4f}")
-   print(f"Difference:   {abs(bobe_logz - dynesty_logz):.4f}")
-   print(f"Agreement:    {abs(bobe_logz - dynesty_logz) / dynesty_logz_err:.2f}σ")
-
-Efficiency Comparison
-~~~~~~~~~~~~~~~~~~~~~
-
-Now let's compare the number of likelihood evaluations required. BOBE is much more efficient because it uses a GP surrogate instead of evaluating the true likelihood repeatedly.
-
-.. code-block:: python
-
-   # Compare number of likelihood evaluations
-   bobe_evals = gp.train_x.shape[0]
-   dynesty_evals = np.sum(dns_results['ncall'])
-   
-   print(f"\n" + "="*60)
-   print("EFFICIENCY COMPARISON")
-   print("="*60)
-   print(f"BOBE evaluations:    {bobe_evals}")
-   print(f"Dynesty evaluations: {dynesty_evals}")
-   print(f"Speedup factor:      {dynesty_evals/bobe_evals:.1f}x")
-   print(f"\nIf each likelihood took 2 seconds:")
-   print(f"BOBE would take:    {bobe_evals * 2 / 60:.1f} minutes")
-   print(f"Dynesty would take: {dynesty_evals * 2 / 60:.1f} minutes")
-   print(f"Time saved:         {(dynesty_evals - bobe_evals) * 2 / 60:.1f} minutes")
-
-6. Visualize Parameter Samples and Compare
--------------------------------------------
-
-Let's create visualizations to compare the parameter samples from BOBE and Dynesty.
-
-.. code-block:: python
-
-   print("\n" + "="*60)
-   print("CREATING VISUALIZATIONS")
-   print("="*60)
-
-   # Create GetDist samples for comparison
-   dynesty_mcsamples = MCSamples(
-       samples=dynesty_samples, 
-       names=param_list, 
-       labels=param_labels, 
-       label='Dynesty'
-   )
-
-   # Use BOBE's built-in plotting function
-   sample_array = results_manager.samples
-   weights_array = results_manager.weights
-   
-   plot_final_samples(
-       gp,
-       {
-           'x': sample_array, 
-           'weights': weights_array, 
-           'logl': results_manager.logl
-       },
-       param_list=likelihood.param_list,
-       param_bounds=likelihood.param_bounds,
-       param_labels=likelihood.param_labels,
-       output_file=f"./results/{likelihood_name}",
-       reference_samples=dynesty_mcsamples,
-       reference_label='Dynesty',
-       scatter_points=True
-   )
-
-   print(f"✓ Corner plot saved: ./results/{likelihood_name}.pdf")
-
-7. Timing Analysis
-------------------
+Timing Analysis
+~~~~~~~~~~~~~~~~~~~~~~
 
 Let's analyze how the computational time was spent across different phases.
 
 .. code-block:: python
 
-   print("\n" + "="*60)
-   print("TIMING ANALYSIS")
-   print("="*60)
-       
-   print(f"Total runtime: {timing_data['total_runtime']:.2f} seconds")
-       
-   print("\nPhase breakdown:")
-   print("-" * 40)
-   for phase in ['initialization', 'gp_fitting', 'acquisition', 'nested_sampling']:
-       time_spent = timing_data['phase_times'].get(phase, 0)
-       percentage = timing_data['percentages'].get(phase, 0)
-       if time_spent > 0:
-           print(f"{phase:25s}: {time_spent:8.2f}s ({percentage:5.1f}%)")
-       
-   # Calculate overhead
-   total_measured = sum(timing_data['phase_times'].values())
-   overhead = timing_data['total_runtime'] - total_measured
-   overhead_pct = (overhead / timing_data['total_runtime']) * 100
-   
-   print(f"{'overhead/unmeasured':25s}: {overhead:8.2f}s ({overhead_pct:5.1f}%)")
-       
-   # Find the dominant phase
-   max_phase = max(timing_data['phase_times'].items(), key=lambda x: x[1])
-   print(f"\nDominant phase: {max_phase[0]} ({timing_data['percentages'][max_phase[0]]:.1f}%)")
+       # Print timing analysis
+       print("DETAILED TIMING ANALYSIS")
 
-8. Generate Summary Dashboard
------------------------------
+       timing_data = results_manager.get_timing_summary()
 
-BOBE provides comprehensive plotting utilities. Let's create a summary dashboard.
+       print(f"Automatic timing: {timing_data['total_runtime']:.2f} seconds ({timing_data['total_runtime']/60:.2f} minutes)")
+       print("Phase Breakdown:")
+       print("-" * 40)
+       for phase, time_spent in timing_data['phase_times'].items():
+           if time_spent > 0:
+               percentage = timing_data['percentages'].get(phase, 0)
+               print(f"{phase:25s}: {time_spent:8.2f}s ({percentage:5.1f}%)")
+
+The timing breakdown reveals (an example from a typical run):
+
+.. code-block:: text
+
+    DETAILED TIMING ANALYSIS
+    Automatic timing: 183.86 seconds (3.06 minutes)
+    Phase Breakdown:
+    ----------------------------------------
+    GP Training              :     4.24s (  2.3%)
+    Acquisition Optimization :    14.28s (  7.8%)
+    True Objective Evaluations:   144.54s ( 78.6%)
+    Nested Sampling          :     7.99s (  4.3%)
+    MCMC Sampling            :    10.14s (  5.5%)
+
+Key observations:
+
+- **Acquisition Optimization** (7.8%) typically takes a significant portion of the runtime (apart from the true likelihood evaluations) since it is run at every step
+- **MCMC Sampling** (5.5%) for generating posterior samples from the GP surrogate
+- **Nested Sampling** (4.3%) on the GP surrogate to compute evidence
+- **GP Training** (2.3%) is minimal due to the low dimensionality
+- **True Objective Evaluations** (78.6%) dominate due for expensive likelihoods
+
+For expensive likelihoods (e.g., cosmological models typically taking more than 1 second per evaluation), the True Objective Evaluations would dominate, highlighting BOBE's efficiency in minimizing these costly calls.
+
+Plot Acquisition Values
+~~~~~~~~~~~~~~~~~~~~~~
+
+
+Let's visualize how the acquisition function values evolved during optimization.
 
 .. code-block:: python
 
-   print("\n" + "="*60)
-   print("GENERATING SUMMARY DASHBOARD")
-   print("="*60)
+       # Plot acquisition data
+       acquisition_data = results_manager.get_acquisition_data()
+       iterations = np.array(acquisition_data['iterations'])
+       values = np.array(acquisition_data['values'])
+       
+       fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+       ax.plot(iterations, values, linestyle='-')
+       ax.set_yscale('log')
+       ax.set_xlabel(r'Iteration')
+       ax.set_ylabel(r'Acquisition Value')
+       plt.savefig(f"./results/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
+       print(f"✓ Acquisition plot saved: ./results/{likelihood.name}_acquisition.pdf")
 
-   # Initialize plotter
-   plotter = BOBESummaryPlotter(results_manager)
+.. figure:: Himmelblau_acquisition.svg
+   :align: center
+   :width: 75%
    
-   # Get data for plotting
-   gp_data = results_manager.get_gp_data()
-   best_loglike_data = results_manager.get_best_loglike_data()
-   acquisition_data = results_manager.get_acquisition_data()
-   
-   # Create summary dashboard with timing data
-   fig_dashboard = plotter.create_summary_dashboard(
-       gp_data=gp_data,
-       acquisition_data=acquisition_data,
-       best_loglike_data=best_loglike_data,
-       timing_data=timing_data,
-       save_path=f"./results/{likelihood_name}_dashboard.pdf"
-   )
-   
-   plt.show()
-   
-   print(f"\n✓ Summary dashboard: ./results/{likelihood_name}_dashboard.pdf")
-   print(f"✓ Results saved to: ./results/{likelihood_name}_results.pkl")
+   Evolution of the WIPStd acquisition function values during optimization. The acquisition value generally decreases as the GP surrogate becomes more certain about the posterior, indicating successful exploration and exploitation of the parameter space.
 
 Summary
--------
+~~~~~~~~~~~~~~~~~~~~~~
 
-This tutorial demonstrated the complete workflow for using BOBE on a problem with irrelevant dimensions:
 
-1. **Problem Setup**: Defined a 2D Himmelblau function embedded in 4D space
-2. **BOBE Configuration**: Set up the optimization with SAAS lengthscale prior for automatic relevance determination
-3. **Execution**: Ran the optimization with WIPV acquisition function
-4. **Analysis**: Examined results, convergence, and best points found
-5. **Validation**: Compared against Dynesty to verify accuracy
-6. **Efficiency Analysis**: Demonstrated BOBE's efficiency in likelihood evaluations (typically 10-50x fewer evaluations)
-7. **Visualization**: Created comprehensive plots for analysis
+This tutorial demonstrated the complete workflow for using BOBE on the Himmelblau function:
+
+1. **Problem Setup**: Defined a complicated 2D test function
+2. **BOBE Configuration**: Set up the BOBE sampler, runtime settings and run the sampler
+3. **Validation**: Compared against Dynesty to verify accuracy
+4. **Visualization**: Created triangle plots with GetDist showing GP training points and posterior samples
+5. **Analysis**: Examined timing breakdown and acquisition function evolution
 
 Key takeaways:
 
-- **BOBE is efficient**: Uses significantly fewer likelihood evaluations than traditional nested sampling methods
+- **BOBE is efficient**: Uses significantly fewer true likelihood evaluations than traditional methods
 - **Evidence estimation**: Provides reliable Bayesian evidence estimates with uncertainty quantification
-- **Multi-modal capability**: Successfully handles functions with multiple minima through the GP surrogate
-- **Automatic relevance determination**: The SAAS prior automatically identifies and down-weights irrelevant dimensions (x3, x4 in this example)
-- **Scalability**: BOBE scales to moderate dimensional problems (tested up to ~15D) especially when using SAAS prior
 - **Comprehensive output**: Generates detailed timing, convergence, and visualization data
 
-This example demonstrates BOBE's robustness to irrelevant dimensions—a common challenge in real-world problems where not all parameters significantly affect the likelihood. The SAAS prior learns appropriate lengthscales for each dimension, effectively "turning off" dimensions that don't contribute to the likelihood. For real-world applications with expensive likelihoods (>1 second per evaluation), the efficiency gains become even more dramatic. Simply replace the toy likelihood with your actual physics/cosmology model.
+Resuming a Run
+------------------
+
+To resume an interrupted run:
+
+.. code-block:: python
+
+   bobe = BOBE(
+       loglikelihood=loglike,
+       param_list=param_list,
+       param_bounds=param_bounds,
+       param_labels=param_labels,
+       likelihood_name=likelihood_name,
+       resume=True,
+       resume_file=f'./results/{likelihood_name}', # assuming the previous run was saved here
+       # ... other settings ...
+   )
+   results = bobe.run(
+       # ... run settings ...
+   )
+
+BOBE will automatically load the saved GP state and samples from the specified directory and continue from where it left off.
 
 Next Steps
-~~~~~~~~~~
+------------------
 
-- Try the **Banana function** example for a simpler 2D case
+
 - Explore the **Cosmology** example for a real-world application (ΛCDM with Planck+DESI data)
-- Read the **User Guide** to understand convergence criteria and hyperparameter tuning
-- Check the **API Reference** for advanced configuration options
+- Read the **User Guide** (in development) for in-depth explanations of features
+- Check the **API Reference** for detailed configuration options
 

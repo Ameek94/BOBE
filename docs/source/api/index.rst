@@ -1,14 +1,16 @@
 API Reference
 =============
 
-Complete API documentation for all BOBE modules.
+Complete API documentation for all BOBE modules (work in progress).
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    core
    acquisition
    gp_models
    likelihood
    samplers
+   optim
    utils
+

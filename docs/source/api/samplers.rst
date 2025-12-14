@@ -1,7 +1,7 @@
 Sampling the likelihood surrogate
 ==================================
 
-JaxBo provides interfaces for nested sampling via Dynesty and HMC using NUTS from NumPyro. 
+BOBE provides interfaces for nested sampling via Dynesty and HMC using NUTS from NumPyro. 
 These are used for sampling the Gaussian Process surrogate of the likelihood function to calculate the evidence or generate posterior samples.
 
 Nested Sampling
