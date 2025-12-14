@@ -16,7 +16,7 @@ import numpy as np
 def main():
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
-    likelihood_name = 'Planck_DESI_LCDM'
+    likelihood_name = 'Planck_DESI_LCDM_z025'
     
     start = time.time()
     print("Starting BOBE run...")
@@ -27,14 +27,14 @@ def main():
         likelihood_name=likelihood_name,
         confidence_for_unbounded=0.9999995,
         resume=False,
-        resume_file=f'./results/{likelihood_name}',
-        save_dir='./results/',
+        resume_file=f'./results/LCDM/{likelihood_name}',
+        save_dir='./results/LCDM/',
         save=True,
         verbosity='INFO',
         n_cobaya_init=8,
         n_sobol_init=32,
         optimizer='scipy',
-        gp_kwargs={'lengthscale_prior': None, 'lengthscale_bounds': [1e-2,4.]},
+        gp_kwargs={'lengthscale_prior': None, 'lengthscale_bounds': [1e-2,5.]},
         use_clf=True,
         clf_type='svm',
         seed=42,
@@ -45,15 +45,15 @@ def main():
         min_evals=750,
         max_evals=2500,
         max_gp_size=1500,
-        convergence_n_iters=1,
-        fit_n_points=20,
+        convergence_n_iters=2,
+        fit_n_points=10,
         batch_size=5,
         ns_n_points=10,
         num_hmc_warmup=512,
-        num_hmc_samples=4000,
+        num_hmc_samples=4096,
         mc_points_size=512,
         num_chains=6,
-        logz_threshold=0.5,
+        logz_threshold=0.25,
         do_final_ns=True,
     )
 
@@ -109,7 +109,7 @@ def main():
                     contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
                     params=param_list_LCDM,
                     legend_labels=['BOBE', 'MCMC']) 
-        g.export(f'./results/{likelihood.name}_cosmo.pdf')
+        g.export(f'./results/LCDM/{likelihood.name}_cosmo_posteriors.pdf')
 
         # Create parameter samples plot - all parameters
         print("Creating full parameter samples plot...")
@@ -120,7 +120,7 @@ def main():
         g.triangle_plot([BOBE_Samples,reference_samples], filled=[True, False],
                     contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
                     legend_labels=['BOBE', 'MCMC']) 
-        g.export(f'./results/{likelihood.name}_full.pdf')
+        g.export(f'./results/LCDM/{likelihood.name}_full_posteriors.pdf')
 
         # Print timing analysis
         print("DETAILED TIMING ANALYSIS")
@@ -145,7 +145,7 @@ def main():
         ax.set_yscale('log')
         ax.set_xlabel(r'Iteration')
         ax.set_ylabel(r'Acquisition Value')
-        plt.savefig(f"./results/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
+        plt.savefig(f"./results/LCDM/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
 
 if __name__ == "__main__":
     main()

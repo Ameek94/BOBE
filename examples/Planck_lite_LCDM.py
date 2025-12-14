@@ -13,8 +13,8 @@ import numpy as np
 def main():
 
     # Set up the cosmological likelihood
-    cobaya_input_file = './cosmo_input/LCDM_lite.yaml'
-    likelihood_name = f'Planck_lite_LCDM'
+    cobaya_input_file = 'cosmo_input/LCDM_lite.yaml'
+    likelihood_name = f'Planck_lite_LCDM_z0025'
 
     start = time.time()
     print("Starting BOBE run...")
@@ -26,28 +26,30 @@ def main():
         confidence_for_unbounded=0.9999995,
         resume=False,
         resume_file=f'{likelihood_name}',
-        save_dir='./results/',
+        save_dir='./results/LCDM_Lite/',
         save=True,
         verbosity='INFO',
         n_cobaya_init=4, 
         n_sobol_init=8,
         use_clf=True,
         clf_type='svm',
+        #clf_nsigma_threshold=15,
+        minus_inf=-1e5,
         seed=10,
     )
     
     results = bobe.run(
         acq='wipstd',
-        min_evals=25, 
+        min_evals=50, 
         max_evals=250,
         max_gp_size=200,
-        fit_n_points=6, 
-        ns_n_points=6,
-        batch_size=2,
+        fit_n_points=4, 
+        ns_n_points=4,
+        batch_size=4,
         num_hmc_warmup=256,
         num_hmc_samples=2048, 
-        mc_points_size=256,
-        logz_threshold=0.1,
+        mc_points_size=512,
+        logz_threshold=0.025,
         do_final_ns=False,
     )
 
@@ -107,7 +109,7 @@ def main():
             for j in range(i+1, ndim):
                 ax = g.subplots[j, i]
                 ax.scatter(points[:, i], points[:, j], alpha=0.75, color='red', s=4)
-        g.export(f'./results/{likelihood.name}_samples.pdf')
+        g.export(f'./results/LCDM_Lite/{likelihood.name}_samples.pdf')
 
         # Print timing analysis
         print("DETAILED TIMING ANALYSIS")
@@ -132,7 +134,7 @@ def main():
         ax.set_yscale('log')
         ax.set_xlabel(r'Iteration')
         ax.set_ylabel(r'Acquisition Value')
-        plt.savefig(f"./results/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
+        plt.savefig(f"./results/LCDM_Lite/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
 
 if __name__ == "__main__":
     main()

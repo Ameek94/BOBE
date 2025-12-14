@@ -88,10 +88,10 @@ params:
       loc: 0.055
       scale: 0.006
     proposal: 0.003
-  # A_planck:
-  #   latex: y_\mathrm{cal}
-  #   renames: calPlanck
-  #   value: 1.0
+  A_planck:
+    latex: y_\mathrm{cal}
+    renames: calPlanck
+    value: 1.0
 sampler:
   # polychord:
   #   nlive: 10d

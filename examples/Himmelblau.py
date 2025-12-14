@@ -16,11 +16,9 @@ afac= 0.1
 def prior_transform(x):
     return 8*x - 4
 
-def loglike(X, slow=False):
+def loglike(X):
     r1 = (X[0] + X[1]**2 -7)**2
     r2 = (X[0]**2 + X[1]-11)**2
-    if slow:
-        time.sleep(2)
     return -0.5*(afac*r1 + r2)
 
 def main():
@@ -56,16 +54,16 @@ def main():
         min_evals=25,
         max_evals=250,
         max_gp_size=250,
-        logz_threshold=0.01,
+        logz_threshold=5e-2,
         do_final_ns=True,
         fit_n_points=2,
-        batch_size=1,
-        ns_n_points=4,
-        num_hmc_warmup=256,
+        batch_size=2,
+        ns_n_points=2,
+        num_hmc_warmup=512,
         num_hmc_samples=2048,
-        mc_points_size=128,
+        mc_points_size=512,
         num_chains=4,
-        convergence_n_iters=1,
+        convergence_n_iters=2,
     )
 
     end = time.time()
@@ -92,7 +90,7 @@ def main():
 
         # Create Dynesty samples to compare against
         dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,
-                                               sample='rwalk',logl_kwargs={'slow': False})
+                                               sample='rwalk')
 
         dns_sampler.run_nested(print_progress=True,dlogz_init=0.01) 
         res = dns_sampler.results  

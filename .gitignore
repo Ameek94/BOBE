@@ -52,3 +52,4 @@ build/
 /docs/build
 examples/.DS_Store
 *.html
+CosmoPosteriors.ipynb
