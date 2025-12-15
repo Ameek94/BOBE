@@ -215,7 +215,7 @@ def test_clf_gp_update():
     new_X = jnp.array([[0.55, 0.45], [0.48, 0.52]])
     new_y = -jnp.sum((new_X - 0.5)**2, axis=1, keepdims=True)
     
-    gp_clf.update(new_X, new_y, refit=False)
+    gp_clf.update(new_X, new_y)
     
     print(f"After update - Classifier: {gp_clf.clf_data_size}, GP: {gp_clf.npoints}")
     
@@ -249,7 +249,7 @@ def test_clf_gp_classifier_training():
     
     # Add more data to reach threshold
     X_add, y_add = generate_test_data_with_outliers(n_good=25, n_bad=15, d=2)
-    gp_clf.update(X_add, y_add, refit=False)
+    gp_clf.update(X_add, y_add)
     
     # Manually trigger classifier training
     gp_clf.train_classifier()
@@ -366,7 +366,7 @@ def test_clf_gp_copy():
     # Modify copy
     new_X = jnp.array([[0.6, 0.4]])
     new_y = jnp.array([[-0.02]])
-    gp_clf2.update(new_X, new_y, refit=False)
+    gp_clf2.update(new_X, new_y)
     
     print(f"Original size: {gp_clf1.clf_data_size}")
     print(f"Copy size: {gp_clf2.clf_data_size}")

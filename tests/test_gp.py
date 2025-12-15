@@ -158,14 +158,14 @@ def test_gp_update():
     new_X = jnp.array([[0.8, 0.2], [0.3, 0.9]])
     new_y = -jnp.sum((new_X - 0.5)**2, axis=1, keepdims=True)
     
-    gp.update(new_X, new_y, refit=False)
+    gp.update(new_X, new_y)
     
     print(f"After update: {gp.npoints} points")
     
     assert gp.npoints == initial_size + 2, f"Expected {initial_size + 2} points, got {gp.npoints}"
     
     # Try adding duplicate point
-    gp.update(new_X[0:1], new_y[0:1], refit=False)
+    gp.update(new_X[0:1], new_y[0:1])
     assert gp.npoints == initial_size + 2, "Duplicate point should not be added"
     
     print(f"✓ GP update successful, duplicates correctly handled")
@@ -261,7 +261,7 @@ def test_gp_copy():
     new_X = jnp.array([[0.9, 0.1]])
     new_y = jnp.array([[-0.5]])
     
-    gp2.update(new_X, new_y, refit=False)
+    gp2.update(new_X, new_y)
     
     print(f"Original GP size: {gp1.npoints}")
     print(f"Copied GP size: {gp2.npoints}")

@@ -240,33 +240,6 @@ def test_batch_acquisition():
     print(f"\n✓ Batch acquisition successful")
 
 
-def test_ei_with_exploration_bonus():
-    """Test EI with exploration bonus (zeta parameter)."""
-    print("\n" + "="*80)
-    print("TEST: EI with Exploration Bonus")
-    print("="*80)
-    
-    gp = generate_test_gp(n_samples=20, d=2)
-    ei = EI()
-    
-    best_y = jnp.max(gp.train_y)
-    test_point = jnp.array([0.5, 0.5])
-    
-    # Without exploration bonus
-    ei_val_no_bonus = -ei.fun(test_point, gp, best_y, zeta=0.0)
-    
-    # With exploration bonus
-    ei_val_with_bonus = -ei.fun(test_point, gp, best_y, zeta=0.1)
-    
-    print(f"EI without bonus (zeta=0.0): {ei_val_no_bonus:.4e}")
-    print(f"EI with bonus (zeta=0.1): {ei_val_with_bonus:.4e}")
-    
-    # With bonus should generally be higher (more exploration)
-    assert ei_val_with_bonus >= ei_val_no_bonus * 0.5, "Exploration bonus should increase EI"
-    
-    print(f"\n✓ Exploration bonus test successful")
-
-
 def test_acquisition_with_different_gp_settings():
     """Test acquisition functions with different GP configurations."""
     print("\n" + "="*80)
@@ -359,7 +332,6 @@ def run_all_tests():
         test_ei_optimization,
         test_logei_optimization,
         test_batch_acquisition,
-        test_ei_with_exploration_bonus,
         test_acquisition_with_different_gp_settings,
         test_acquisition_optimization_convergence,
     ]

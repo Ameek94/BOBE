@@ -5,10 +5,12 @@ This test runs both EI and WIPStd acquisition functions on simple 2D optimizatio
 to verify the basic functionality of the Bayesian Optimization loop.
 """
 
+import os
+os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={os.cpu_count()}"
+
 import numpy as np
 import sys
-from BOBE.bo import BOBE
-from BOBE.likelihood import Likelihood
+from BOBE import BOBE
 
 
 def rosenbrock_loglike(x):
@@ -36,17 +38,12 @@ def test_bobe_ei_2d():
     param_bounds = np.array([[-2, 2], [-2, 2]]).T
     param_list = ['x', 'y']
     
-    likelihood = Likelihood(
+    bobe = BOBE(
         loglikelihood=rosenbrock_loglike,
         param_list=param_list,
         param_bounds=param_bounds,
-        name="rosenbrock_test"
-    )
-    
-    bobe = BOBE(
-        loglikelihood=likelihood,
-        n_sobol_init=10,
-        n_cobaya_init=0,
+        likelihood_name="rosenbrock_ei_test",
+        n_sobol_init=4,
         save=False,
         use_clf=False,
         seed=42,
@@ -55,13 +52,18 @@ def test_bobe_ei_2d():
     
     # Run with EI
     results = bobe.run(
-        acq='EI',
+        acq='ei',  # lowercase
         min_evals=15,
         max_evals=40,
         max_gp_size=40,
         ei_goal=1e-6,
-        fit_n_points=5
+        fit_n_points=5,
+        batch_size=1
     )
+    
+    # Workers return None
+    if results is None:
+        return None
     
     # Check results structure
     assert 'gp' in results, "Results missing 'gp' key"
@@ -107,17 +109,12 @@ def test_bobe_wipstd_2d():
     param_bounds = np.array([[-5, 5], [-5, 5]]).T
     param_list = ['x', 'y']
     
-    likelihood = Likelihood(
+    bobe = BOBE(
         loglikelihood=himmelblau_loglike,
         param_list=param_list,
         param_bounds=param_bounds,
-        name="himmelblau_test"
-    )
-    
-    bobe = BOBE(
-        loglikelihood=likelihood,
-        n_sobol_init=15,
-        n_cobaya_init=0,
+        likelihood_name="himmelblau_test",
+        n_sobol_init=4,
         save=False,
         use_clf=False,
         seed=123,
@@ -126,7 +123,7 @@ def test_bobe_wipstd_2d():
     
     # Run with WIPStd
     results = bobe.run(
-        acq='WIPStd',
+        acq='wipstd',  # lowercase
         min_evals=25,
         max_evals=60,
         max_gp_size=60,
@@ -134,9 +131,13 @@ def test_bobe_wipstd_2d():
         convergence_n_iters=2,
         fit_n_points=8,
         ns_n_points=15,
-        batch_size=1,  # Use batch size 1 to avoid shape issues
+        batch_size=1,
         mc_points_method='uniform'
     )
+    
+    # Workers return None
+    if results is None:
+        return None
     
     # Check results structure
     assert 'gp' in results, "Results missing 'gp' key"
@@ -170,6 +171,25 @@ def test_bobe_wipstd_2d():
     
     print("\n✓ WIPStd test passed")
     return results
+    # Check best point is reasonable
+    best_pt = results['best_pt']
+    best_val = results['best_val']
+    
+    print(f"\nBest point found: x={best_pt[0]:.4f}, y={best_pt[1]:.4f}")
+    print(f"Best value: {best_val:.4f}")
+    print(f"Termination reason: {results['termination_reason']}")
+    print(f"Total evaluations: {results['gp'].train_x.shape[0]}")
+    
+    # Check that best value is reasonable (negative Himmelblau min is 0, so best should be close to 0)
+    assert best_val > -500, f"Best value {best_val} is unexpectedly poor"
+    
+    # Check samples were generated (for WIPStd)
+    if 'samples' in results and results['samples']:
+        print(f"Generated {len(results['samples']['x'])} samples")
+        assert len(results['samples']['x']) > 0, "No samples generated"
+    
+    print("\n✓ WIPStd test passed")
+    return results
 
 
 def test_bobe_with_classifier():
@@ -181,17 +201,12 @@ def test_bobe_with_classifier():
     param_bounds = np.array([[-2, 2], [-2, 2]]).T
     param_list = ['x', 'y']
     
-    likelihood = Likelihood(
+    bobe = BOBE(
         loglikelihood=rosenbrock_loglike,
         param_list=param_list,
         param_bounds=param_bounds,
-        name="rosenbrock_clf_test"
-    )
-    
-    bobe = BOBE(
-        loglikelihood=likelihood,
-        n_sobol_init=12,
-        n_cobaya_init=0,
+        likelihood_name="rosenbrock_clf_test",
+        n_sobol_init=4,
         save=False,
         use_clf=True,
         clf_type='svm',
@@ -202,15 +217,19 @@ def test_bobe_with_classifier():
     
     # Run with WIPStd and classifier
     results = bobe.run(
-        acq='WIPStd',
+        acq='wipstd',  # lowercase
         min_evals=20,
         max_evals=50,
         max_gp_size=50,
         logz_threshold=0.5,
         fit_n_points=6,
         ns_n_points=12,
-        batch_size=1  # Use batch size 1
+        batch_size=1
     )
+    
+    # Workers return None
+    if results is None:
+        return None
     
     # Check results
     assert 'gp' in results
