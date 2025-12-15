@@ -275,7 +275,7 @@ Expected Results
 
 For standard ΛCDM with Planck lite:
 
-- **Convergence**: Typically requires 100-200 evaluations with these settings. The logZ value should be approximately :math:`\log Z \approx -519.5` (exact value may vary slightly due to nested sampler stochasticity).
+- **Convergence**: Typically requires 100-200 evaluations with these settings. The logZ value should be approximately :math:`\log Z \approx -520` (exact value may vary slightly due to nested sampler stochasticity).
 
 Expected Runtime
 ~~~~~~~~~~~~~~~~~~~

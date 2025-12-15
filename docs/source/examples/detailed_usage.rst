@@ -101,6 +101,7 @@ Configure and Run BOBE
 
 
 Now let's set up the BOBE configuration and run the optimization. We'll use the default WIPStd (Weighted Integrated Posterior Standard Deviation) acquisition function which is a cheap and approximate measure of :math:`\Delta \log Z` (see our `paper <https://arxiv.org/abs/2512.xxxx>`_ for details).
+When the value of this acquisition function drops below the provided logz_threshold, BOBE will start running nested sampling on the GP surrogate to get a precise estimate of the evidence and its uncertainty. If this uncertainty is below the threshold for a specified number of successive iterations, BOBE will declare convergence and stop.
 
 .. code-block:: python
 
@@ -131,10 +132,42 @@ Now let's set up the BOBE configuration and run the optimization. We'll use the 
        num_hmc_warmup=256,       # NUTS warmup steps
        num_hmc_samples=512,      # NUTS samples to draw per chain
        mc_points_size=128,       # Number of MC samples for acquisition function
+       num_chains=4,             # Number of HMC chains
        convergence_n_iters=1,    # Number of successive iterations of \Delta\log Z < logz_threshold required to declare convergence
    )
 
    end = time.time()
+
+Key Configuration Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**BOBE Initialization Parameters**
+
+- **loglikelihood**: The likelihood function
+- **param_list**: List of parameter names (e.g., ``['x1', 'x2']``)
+- **param_bounds**: Array of shape ``(2, ndim)`` with lower and upper bounds for each parameter
+- **param_labels**: Optional LaTeX labels for parameters (used in plots)
+- **likelihood_name**: Name used for output files
+- **n_sobol_init**: Number of initial Sobol quasi-random points to sample (8 in this example)
+- **seed**: Random seed for reproducibility
+- **save_dir**: Directory for saving results 
+- **save**: Whether to save results periodically
+
+**Run Parameters**
+
+- **acq**: Acquisition function to use (``'wipstd'`` in this example and is the default). WIPStd is a fast approximation of evidence uncertainty and is suited for Bayesian evidence estimation.
+- **min_evals**: Minimum number of likelihood evaluations before checking convergence (25 in this example, default is 200)
+- **max_evals**: Maximum number of likelihood evaluations (250 in this example, default is 1500)
+- **logz_threshold**: Convergence threshold for uncertainty in log evidence (0.01 in this example). Smaller values require tighter convergence. Can be relaxed to 0.5 to 1.0. for high dimensional problems.
+- **fit_n_points**: Refit GP hyperparameters after adding this many new points (4 in this example, default is 10)
+- **batch_size**: Number of points to acquire per iteration, 2 in this example, 1 is for standard sequential acquisition. Larger values enable batch acquisition and the likelihood evaluations can be parallelized. However, larger batch sizes (>10-20) can reduce acquisition efficiency since the GP state is not updated with the true likelihoods of all points in the batch. The update happens only after the entire batch is evaluated.
+- **ns_n_points**: Run nested sampling after adding this many new points (4 in this example, default is 10)
+- **num_hmc_warmup**: Number of NUTS warmup steps for sampling the GP surrogate (256 in this example, default is 512)
+- **num_hmc_samples**: Number of NUTS samples to draw per chain (512 in this example), can be increased for higher dimensions but not more than a few thousand to avoid long runtimes
+- **mc_points_size**: Number of Monte Carlo points for WIPStd acquisition function (128 in this example). Since this is the number of points used to estimate the acquisition function, larger values give more accurate estimates but increase computation time. For higher dimensions can be set to ~500 but not more since this slows down acquisition optimization.
+- **num_chains**: Number of MCMC chains to run in parallel (default is 4)
+- **convergence_n_iters**: Number of successive iterations meeting the threshold to declare convergence (1 in this example). Increase to avoid premature convergence in challenging problems.
+
 
 Analyze the Results
 ------------------
