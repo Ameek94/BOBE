@@ -280,11 +280,7 @@ For standard ΛCDM with Planck lite:
 Expected Runtime
 ~~~~~~~~~~~~~~~~~~~
 
-For the Planck lite likelihood (each evaluation ~0.5-1 second):
-
-- ~2-5 minutes for ~120 evaluations
-
-Note: Actual likelihood evaluation and total runtime may vary according to your hardware specifications.
+For the Planck lite likelihood (each evaluation ~0.5-1 second), this run should take around 2-5 minutes. Note: total runtime may vary according to your hardware specifications.
 
 Running with MPI
 ~~~~~~~~~~~~~~~~~~~

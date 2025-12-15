@@ -104,12 +104,10 @@ For cosmological likelihoods you will need to have [Cobaya](https://cobaya.readt
 ```python
 from BOBE import BOBE
 
-# Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
-   # Initialize BOBE with Cobaya YAML file - CobayaLikelihood created internally
+# Initialize BOBE with Cobaya YAML file, prepare it the same way you would for running MCMC/Nested Sampling through Cobaya
    sampler = BOBE(
        loglikelihood='path/to/cobaya_input.yaml',
-       likelihood_name='CobayaLikelihood',
-       n_sobol_init=4,
+           n_sobol_init=4,
        n_cobaya_init=4,  # We can also specify reference dists in the Cobaya yaml file to generate additional initial points
        likelihood_name='quickstart_cobaya_example', # name for output files
        save_dir='./results',
@@ -123,7 +121,7 @@ from BOBE import BOBE
        batch_size=5,
        fit_n_points=10,
        ns_n_points=10,
-       logz_threshold=0.5,
+       logz_threshold=0.5, # for higher dimensional examples, can relax the convergence threshold slightly
    )
 
 # rest of the run remains the same as above
@@ -159,8 +157,6 @@ If you use BOBE in your research, please cite:
 ```
 
 ## Troubleshooting
-
-### Installation issues
 
 In case you run into installation issues related to incompatible versions of packages, you can also set up an environment with the exact package versions BOBE was developed and tested with
 
