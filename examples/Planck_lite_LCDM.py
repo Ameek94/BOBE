@@ -33,7 +33,6 @@ def main():
         n_sobol_init=8,
         use_clf=True,
         clf_type='svm',
-        #clf_nsigma_threshold=15,
         minus_inf=-1e5,
         seed=10,
     )
