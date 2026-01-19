@@ -4,7 +4,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Documentation Status](https://readthedocs.org/projects/BOBE/badge/?version=latest)](https://BOBE.readthedocs.io/en/latest/?badge=latest)
 
-BOBE (Bayesian Optimisation for Bayesian Evidence) is a high-performance package for performing Bayesian model comparison with expensive likelihood functions, developed for applications to cosmology. It uses Bayesian Optimization to train a Gaussian process surrogate for the expensive likelihood function and runs Nested sampling/MCMC on the surrogate instead of the underlying likelihood. Training the surrogate typically requires around ~100x fewer true likelihood evaluations compared to running Nested sampling/MCMC on the true likelihood, leading to significant speed-ups for slow likelihoods (t>1s). BOBE uses acquisition functions that minimise the integrated uncertainty of the surrogate, prioritising regions that matter the most for the evidence. The algorithm is explained in more detail in arxiv:2512.xxxxx and code documentation is available at [https://BOBE.readthedocs.io](https://BOBE.readthedocs.io).
+BOBE (Bayesian Optimisation for Bayesian Evidence) is a high-performance package for performing Bayesian model comparison with expensive likelihood functions, developed for applications to cosmology. It uses Bayesian Optimization to train a Gaussian process surrogate for the expensive likelihood function and runs Nested sampling/MCMC on the surrogate instead of the underlying likelihood. Training the surrogate typically requires around ~100x fewer true likelihood evaluations compared to running Nested sampling/MCMC on the true likelihood, leading to significant speed-ups for slow likelihoods (t>1s). BOBE uses acquisition functions that minimise the integrated uncertainty of the surrogate, prioritising regions that matter the most for the evidence. The algorithm is explained in more detail in our [paper](https://arxiv.org/abs/2601.11150) and code documentation is available at [https://BOBE.readthedocs.io](https://BOBE.readthedocs.io).
 
 ## Key Features
 
@@ -127,7 +127,7 @@ from BOBE import BOBE
 # rest of the run remains the same as above
 ```
 
-Full documentation is available at [https://BOBE.readthedocs.io](https://BOBE.readthedocs.io). The `examples/` folder also contains several scripts on how to run the code with different likelihoods, including cosmological likelihoods interfaced through the Cobaya package or your own custom likelihoods. These scripts have been used to produce the results in our paper arxiv:2512.xxxxx. Run them using
+Full documentation is available at [https://BOBE.readthedocs.io](https://BOBE.readthedocs.io). The `examples/` folder also contains several scripts on how to run the code with different likelihoods, including cosmological likelihoods interfaced through the Cobaya package or your own custom likelihoods. These scripts have been used to produce the results in our [paper](https://arxiv.org/abs/2601.11150). Run them using
 
 ```bash
 python your_chosen_example.py
@@ -148,11 +148,14 @@ where `-n 4` specifies the number of MPI processes. In MPI mode, the code distri
 If you use BOBE in your research, please cite:
 
 ```bibtex
-@article{BOBE2025,
-  author = {Cohen, Nathan and Malhotra, Ameek and Hamann, Jan},
-  title = {Bayesian Optimisation for Bayesian Evidence},
-  year = {2025},
-  url = {https://github.com/Ameek94/BOBE}
+@article{Cohen:2026iij,
+    author = "Cohen, Nathan and Hamann, Jan and Malhotra, Ameek",
+    title = "{Bayesian optimisation for Bayesian evidence (BOBE) -- a fast and efficient likelihood emulator for model selection}",
+    eprint = "2601.11150",
+    archivePrefix = "arXiv",
+    primaryClass = "astro-ph.CO",
+    month = "1",
+    year = "2026"
 }
 ```
 
