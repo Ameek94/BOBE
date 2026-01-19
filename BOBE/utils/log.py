@@ -5,7 +5,6 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 
-# ⭐ 1. Add MPI awareness at the top of the module.
 # This block will determine the process rank, defaulting to 0 for serial runs.
 try:
     from mpi4py import MPI
@@ -13,7 +12,7 @@ try:
     rank = comm.Get_rank()
     size = comm.Get_size()
     is_mpi = size > 1
-except ImportError:
+except:
     rank = 0
     size = 1
     is_mpi = False

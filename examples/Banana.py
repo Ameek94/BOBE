@@ -59,8 +59,8 @@ def main():
         do_final_ns=True,
         fit_n_points=1,
         batch_size=1,
-        ns_n_points=1,
-        num_hmc_warmup=512,
+        ns_n_points=2,
+        num_hmc_warmup=256,
         num_hmc_samples=2048,
         mc_points_size=512,
         num_chains=4,
@@ -125,7 +125,7 @@ def main():
         g.settings.axes_fontsize = 16
         g.settings.axes_labelsize = 16
         g.triangle_plot([BOBE_Samples,reference_samples], filled=[True, False],
-                    contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
+                    contour_colors=['#006FED', 'black'], contour_lws=[1, 1.],
                     legend_labels=['BOBE', 'Nested Sampler']) 
         # add scatter points for gp training data
         points = scale_from_unit(gp.train_x, param_bounds)

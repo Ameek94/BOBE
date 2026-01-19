@@ -16,8 +16,8 @@ def loglike(X):
     return -res
 
 def prior_transform(x):
-    x[0] = x[0]*5 - 1
-    x[1] = x[1]*8 - 1
+    x[0] = x[0]*4 - 2
+    x[1] = x[1]*4 - 2
     return x
 
 def main():
@@ -25,7 +25,7 @@ def main():
     ndim = 2
     param_list = ['x1', 'x2']
     param_labels = ['x_1', 'x_2']
-    param_bounds = np.array([[-1, 4], [-1, 7]]).T
+    param_bounds = np.array([[-2, 2], [-2, 2]]).T
     likelihood_name = f'Rosenbrock'
     
     start = time.time()
@@ -53,7 +53,7 @@ def main():
         min_evals=25,
         max_evals=250,
         max_gp_size=250,
-        logz_threshold=5e-2,
+        logz_threshold=0.1,
         do_final_ns=True,
         fit_n_points=1,
         batch_size=1,

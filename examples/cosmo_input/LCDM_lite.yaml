@@ -71,8 +71,8 @@ params:
   tau:
     latex: \tau_\mathrm{reio}
     prior:
-      min: 0.03
-      max: 0.08
+     min: 0.03
+     max: 0.08
     ref:
       dist: norm
       loc: 5.546101493e-02

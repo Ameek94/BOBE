@@ -12,7 +12,7 @@ log = get_logger('pool')
 try:
     from mpi4py import MPI
     IS_MPI_AVAILABLE = True
-except ImportError:
+except:
     MPI = None
     IS_MPI_AVAILABLE = False
 

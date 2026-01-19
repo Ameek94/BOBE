@@ -17,7 +17,7 @@ class Likelihood:
     param_list : list of str
         List of parameter names.
     param_labels : list of str, optional
-        LaTeX labels for parameters. Default is None.
+        LaTeX labels for parameters. Default is None (uses param_list).
     param_bounds : array-like, optional
         Parameter bounds, shape (2, ndim). Default is None (unit cube).
     name : str, optional
@@ -44,7 +44,7 @@ class Likelihood:
 
         self.param_list = param_list
         self.ndim = len(self.param_list)
-        self.param_labels = param_labels if param_labels is not None else [f"x_{{{i+1}}}" for i in range(self.ndim)]
+        self.param_labels = param_labels if param_labels is not None else param_list
         if param_bounds is None:
             self.param_bounds = np.array(self.ndim * [[0, 1]]).T
             log.warning("No param_bounds provided. Assuming unit cube [0,1] for all parameters.")

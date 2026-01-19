@@ -78,8 +78,8 @@ def main():
         print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
 
         reference_samples = loadMCSamples(
-            './cosmo_input/chains/Planck_lite_mcmc',
-            settings={'ignore_rows': 0.3, 'label': 'MCMC'}
+            './cosmo_input/chains/Planck_lite_pchord',
+            # settings={'ignore_rows': 0.3, 'label': 'MCMC'}
         )
 
         # Create MCSamples from BOBE results
@@ -99,9 +99,10 @@ def main():
         g.settings.legend_fontsize = 16
         g.settings.axes_fontsize = 16
         g.settings.axes_labelsize = 16
-        g.triangle_plot([BOBE_Samples,reference_samples], filled=[True, False],
+        g.triangle_plot([BOBE_Samples,reference_samples], params=['ombh2','omch2','H0','ns','logA','tau'],
+                        filled=[True, False],
                     contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
-                    legend_labels=['BOBE', 'MCMC']) 
+                    legend_labels=['BOBE', 'Nested Sampling'],) 
         # add scatter points for gp training data
         points = scale_from_unit(gp.train_x, param_bounds)
         for i in range(ndim):

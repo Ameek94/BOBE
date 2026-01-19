@@ -26,7 +26,7 @@ def main():
         loglikelihood=cobaya_input_file,
         likelihood_name=likelihood_name,
         confidence_for_unbounded=0.9999995,
-        resume=False,
+        resume=True,
         resume_file=f'./results/LCDM/{likelihood_name}',
         save_dir='./results/LCDM/',
         save=True,
@@ -34,7 +34,7 @@ def main():
         n_cobaya_init=8,
         n_sobol_init=32,
         optimizer='scipy',
-        gp_kwargs={'lengthscale_prior': None, 'lengthscale_bounds': [1e-2,5.]},
+        gp_kwargs={'lengthscale_prior': None, 'lengthscale_bounds': [1e-2,4.]},
         use_clf=True,
         clf_type='svm',
         seed=42,
@@ -53,7 +53,7 @@ def main():
         num_hmc_samples=4096,
         mc_points_size=512,
         num_chains=6,
-        logz_threshold=0.25,
+        logz_threshold=0.5,
         do_final_ns=True,
     )
 
