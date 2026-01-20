@@ -11,8 +11,8 @@ Use BOBE if:
 - **Your likelihood function is expensive to evaluate (t~1s or more)**
 - **You need Bayesian evidence estimates and/or posterior samples efficiently**
 
-BOBE works best for problems with up to ~15-20 parameters, although this can vary based on the specific problem and likelihood structure. 
-It has been tested to work well upto 30 dimensions for simple multivariate Gaussian likelihoods and upto 16 dimensions for cosmological likelihoods (LCDM+ :math:`\Omega_k` with the Planck Camspec likelihood).
+BOBE works best for problems with up to 15-20 parameters, although this can vary based on the specific problem and likelihood structure. 
+It has been tested to work well upto 30 dimensions for simple multivariate Gaussian likelihoods and upto 16 dimensions for cosmological likelihoods (LCDM + curvature) with the Planck Camspec likelihood).
 BOBE may not be necessary if your likelihood already evaluates in milliseconds, as the overhead of training the GP surrogate and running Bayesian optimisation
 may not be worth the speedup. For such cases, there is generally no need to go beyond standard MCMC/nested sampling tools.
 
