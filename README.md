@@ -6,6 +6,17 @@
 
 BOBE (Bayesian Optimisation for Bayesian Evidence) is a high-performance package for performing Bayesian model comparison with expensive likelihood functions, developed for applications to cosmology. It uses Bayesian Optimization to train a Gaussian process surrogate for the expensive likelihood function and runs Nested sampling/MCMC on the surrogate instead of the underlying likelihood. Training the surrogate typically requires around ~100x fewer true likelihood evaluations compared to running Nested sampling/MCMC on the true likelihood, leading to significant speed-ups for slow likelihoods (t>1s). BOBE uses acquisition functions that minimise the integrated uncertainty of the surrogate, prioritising regions that matter the most for the evidence. The algorithm is explained in more detail in our [paper](https://arxiv.org/abs/2601.11150) and code documentation is available at [https://BOBE.readthedocs.io](https://BOBE.readthedocs.io).
 
+Use BOBE if:
+
+- **Your likelihood function is expensive to evaluate (t~1s or more)**
+- **You need Bayesian evidence estimates and/or posterior samples efficiently**
+
+BOBE works best for problems with up to 15-20 parameters, although this can vary based on the specific problem and likelihood structure. 
+It has been tested to work well upto 30 dimensions for simple multivariate Gaussian likelihoods and upto 16 dimensions for cosmological likelihoods (LCDM + curvature) with the Planck Camspec likelihood).
+BOBE may not be necessary if your likelihood already evaluates in milliseconds, as the overhead of training the GP surrogate and running Bayesian optimisation
+may not be worth the speedup. For such cases, there is generally no need to go beyond standard MCMC/nested sampling tools.
+
+
 ## Key Features
 
 - **Efficient Bayesian Evidence Estimation**: Train GP surrogates for expensive likelihoods and compute evidence and parameter posteriors
