@@ -193,26 +193,6 @@ def nested_sampling_Dy(gp: GP,
     samples_dict['weights'] = weights    
     return (samples_dict, logz_dict, success)
 
-def get_hmc_settings(ndim, warmup_steps=None, num_samples=None, thinning=None):
-    """
-    Get default HMC settings based on dimensionality if not provided.
-    
-    Parameters
-    ----------
-    ndim : int
-        Number of dimensions.
-    warmup_steps : int, optional
-        Number of warmup steps. Defaults to 256 for ndim <= 6, else 512.
-    num_samples : int, optional
-        Number of samples to draw. Defaults to 1024 for ndim <= 6, else 512 * ndim.
-    thinning : int, optional
-        Thinning factor. Defaults to 4.
-    """
-    warmup_steps = warmup_steps if warmup_steps is not None else (256 if ndim <= 9 else 512)
-    num_samples = num_samples if num_samples is not None else (1024 if ndim <= 9 else  2048)
-    thinning = thinning if thinning is not None else 4
-    return warmup_steps, num_samples, thinning
-
 def sample_GP_NUTS(gp: Union[GP, GPwithClassifier], 
                    np_rng=None, 
                    rng_key=None, 
@@ -257,8 +237,11 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
         - 'best': best sample found
         - 'method': 'MCMC'
     """
-        
-    warmup_steps, num_samples, thinning = get_hmc_settings(ndim=gp.ndim, **kwargs)
+    # Extract HMC settings from kwargs with simple fallback defaults
+    # Note: Dimension-based defaults are now handled centrally in bo.py
+    warmup_steps = kwargs.get('warmup_steps', 512)
+    num_samples = kwargs.get('num_samples', 1024)
+    thinning = kwargs.get('thinning', 4)
     dense_mass = kwargs.get('dense_mass', True)
     max_tree_depth = kwargs.get('max_tree_depth', 6)
     

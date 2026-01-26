@@ -75,7 +75,7 @@ class BOBE:
                  confidence_for_unbounded=0.9999995,
                  gp_kwargs: Dict[str, Any] = {},
                  n_cobaya_init=4,
-                 n_sobol_init=16,
+                 n_sobol_init=4,
                  init_train_x=None,
                  init_train_y=None,
                  resume=False,
@@ -84,7 +84,6 @@ class BOBE:
                  save=True,
                  save_step=5,
                  optimizer='scipy',
-                 acq = 'WIPV',
                  use_clf=False,
                  clf_type = "svm",
                  clf_nsigma_threshold=20,
@@ -126,7 +125,7 @@ class BOBE:
             Number of initial points from Cobaya reference distribution. 
             Only used for CobayaLikelihood instances. Default is 4.
         n_sobol_init : int, optional
-            Number of initial Sobol quasi-random points. Default is 32.
+            Number of initial Sobol quasi-random points. Default is 4.
         init_train_x : array-like, optional
             User-provided initial training points in parameter space, shape (n_points, ndim).
             If provided, these will be added to the initial GP training set. Default is None.
@@ -145,8 +144,6 @@ class BOBE:
             Save results every save_step iterations. Default is 5.
         optimizer : str, optional
             Optimizer for GP and acquisition function. Options: 'scipy', 'optax'. Default is 'scipy'.
-        acq : str, optional
-            Acquisition function: 'WIPV', 'EI', 'LogEI', 'WIPStd'. Default is 'WIPV'.
         use_clf : bool, optional
             Whether to use classifier for GP filtering. Default is True.
         clf_type : str, optional
@@ -198,7 +195,7 @@ class BOBE:
         # MAIN PROCESS FULL SETUP
         self._setup_main_process(
             seed, optimizer, save, save_dir, save_step,
-            n_cobaya_init, n_sobol_init, acq, use_clf, clf_type,
+            n_cobaya_init, n_sobol_init, use_clf, clf_type,
             clf_nsigma_threshold, minus_inf, resume
         )
         
@@ -280,7 +277,7 @@ class BOBE:
     
     
     def _setup_main_process(self, seed, optimizer, save, save_dir, save_step,
-                           n_cobaya_init, n_sobol_init, acq, use_clf, clf_type,
+                           n_cobaya_init, n_sobol_init, use_clf, clf_type,
                            clf_nsigma_threshold, minus_inf, resume):
         """Setup full attributes for main process."""
         set_global_seed(seed)
@@ -311,7 +308,6 @@ class BOBE:
             settings={
                 'n_cobaya_init': n_cobaya_init,
                 'n_sobol_init': n_sobol_init,
-                'acq': acq,
                 'use_clf': use_clf,
                 'clf_type': clf_type,
                 'clf_nsigma_threshold': clf_nsigma_threshold,
@@ -638,17 +634,17 @@ class BOBE:
         # Determine refit parameters based on training set size and points added
         if self.gp.train_x.shape[0] < 200:
             # For small training sets, refit more frequently
-            refit_threshold = min(2, self.fit_n_points)
+            refit_threshold = min(4, self.fit_n_points)
             maxiter = 1000
             n_restarts = 8
-        elif 200 < self.gp.train_x.shape[0] < 750:
+        elif 200 < self.gp.train_x.shape[0] < 800:
             # For moderate size training sets
             refit_threshold = self.fit_n_points
             n_restarts = 4
             maxiter = 500
         else:
             # For large training sets, refit less frequently
-            refit_threshold = max(40, self.fit_n_points)
+            refit_threshold = max(50, self.fit_n_points)
             n_restarts = 4
             maxiter = 200
         
@@ -964,24 +960,55 @@ class BOBE:
     # MAIN RUN METHODS
     # ============================================================================
 
+    def _get_dimension_based_defaults(self):
+        """
+        Compute reasonable default values for run() parameters based on problem dimension.
+        
+        This method provides dimension-scaled defaults for parameters that should adapt
+        to the complexity of the problem. Users can override these by providing explicit
+        values to the run() method.
+        
+        Returns
+        -------
+        dict
+            Dictionary of default parameter values keyed by parameter name.
+        """
+        ndim = self.ndim
+        
+        defaults = {
+            'min_evals': 8 * ndim,  # scales linearly with dimension
+            'max_evals': 200 * ndim,  # more evals for higher dimensions
+            'max_gp_size': min(2100, 160 * ndim),  # larger GP for higher dimensions
+            'batch_size': 2 if ndim <=6 else min(8,int(2*(ndim/6))),  # 2-8 depending on dimension
+            'ns_n_points': min(40, 2*ndim),  # nested sampling frequency, less for higher dimensions
+            'num_hmc_warmup': 256 if ndim <= 6 else 512,  # more warmup for higher dimensions
+            'num_hmc_samples': min(5000, max(512,int(4096*(ndim/20)))),  # more samples for higher dimensions, capped at 5000
+            'mc_points_size': min(512, 32*ndim),  # more MC points for higher dimensions
+            'num_chains': min(6, max(3,jax.device_count())),  # 3-6 chains depending on available devices
+            'fit_n_points': min(40, 2*ndim),  # refit less often for higher dimensions
+            'logz_threshold': 0.2 if ndim<=6 else min(1.,0.2*(ndim/6))  # looser threshold for higher dimensions
+        }
+        
+        return defaults
+
     def run(self, acq: Union[str, Tuple[str]] = 'wipstd',
-            min_evals: int = 200,
-            max_evals: int = 1500,
-            max_gp_size: int = 1200,
-            logz_threshold: float = 0.01,
+            min_evals: Optional[int] = None,
+            max_evals: Optional[int] = None,
+            max_gp_size: Optional[int] = None,
+            logz_threshold: Optional[float] = None,
             convergence_n_iters: int = 1,
             ei_goal: float = 1e-10,
             do_final_ns: bool = False,
-            fit_n_points: int = 10,
-            batch_size: int = 4,
-            ns_n_points: int = 10,
-            num_hmc_warmup: int = 512,
-            num_hmc_samples: int = 512,
-            mc_points_size: int = 64,
+            fit_n_points: Optional[int] = None,
+            batch_size: Optional[int] = None,
+            ns_n_points: Optional[int] = None,
+            num_hmc_warmup: Optional[int] = None,
+            num_hmc_samples: Optional[int] = None,
+            mc_points_size: Optional[int] = None,
             thinning: int = 4,
-            num_chains: int = 4,
+            num_chains: Optional[int] = None,
             mc_points_method: str = 'NUTS',
-            zeta_ei: float = 0.01):
+            zeta_ei: float = 0.0):
         """
         Run the Bayesian Optimization loop.
         
@@ -990,13 +1017,17 @@ class BOBE:
         acq : str or tuple of str
             Acquisition function(s) to use: 'WIPV', 'EI', 'LogEI', 'WIPStd'.
         min_evals : int, optional
-            Minimum number of likelihood evaluations before checking convergence. Default is 200.
+            Minimum number of likelihood evaluations before checking convergence.
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         max_evals : int, optional
-            Maximum number of likelihood evaluations. Default is 1500.
+            Maximum number of likelihood evaluations.
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         max_gp_size : int, optional
-            Maximum number of points used to train the GP. Default is 1200.
+            Maximum number of points used to train the GP.
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         logz_threshold : float, optional
-            Convergence threshold for log evidence change (WIPV/WIPStd). Default is 0.01.
+            Convergence threshold for log evidence change (WIPV/WIPStd). 
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         convergence_n_iters : int, optional
             Number of successive iterations meeting threshold for convergence. Default is 1.
         ei_goal : float, optional
@@ -1004,25 +1035,32 @@ class BOBE:
         do_final_ns : bool, optional
             Whether to run final nested sampling at convergence (WIPV/WIPStd). Default is False.
         fit_n_points : int, optional
-            Refit GP hyperparameters after adding this many new points to the GP. Default is 10.
+            Refit GP hyperparameters after adding this many new points to the GP.
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         batch_size : int, optional
-            Batch size for WIPV/WIPStd acquisition. Default is 4.
+            Batch size for WIPV/WIPStd acquisition.
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         ns_n_points : int, optional
-            Run nested sampling after adding this many new points to the GP (for WIPV/WIPStd). Default is 10.
+            Run nested sampling after adding this many new points to the GP (for WIPV/WIPStd).
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         num_hmc_warmup : int, optional
-            Number of HMC warmup steps. Default is 512.
+            Number of HMC warmup steps.
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         num_hmc_samples : int, optional
-            Number of HMC samples to draw. Default is 512.
+            Number of HMC samples to draw.
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         mc_points_size : int, optional
-            Number of MC points for WIPV acquisition. Default is 64.
+            Number of MC points for WIPV acquisition.
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         thinning : int, optional
             Thinning factor for MC samples. Default is 4.
         num_chains : int, optional
-            Number of parallel HMC chains. Default is 4.
+            Number of parallel HMC chains.
+            If None, uses dimension-based default from _get_dimension_based_defaults().
         mc_points_method : str, optional
             Method for generating MC points: 'NUTS', 'NS', or 'uniform'. Default is 'NUTS'.
         zeta_ei : float, optional
-            Exploration parameter for EI acquisition. Default is 0.01.
+            Exploration parameter for EI acquisition. Default is 0.0.
             
         Returns
         -------
@@ -1033,11 +1071,37 @@ class BOBE:
         if not self.is_main:
             return None
         
+        # Get dimension-based defaults
+        dim_defaults = self._get_dimension_based_defaults()
+        
+        # Apply defaults for None values
+        min_evals = min_evals if min_evals is not None else dim_defaults['min_evals']
+        max_evals = max_evals if max_evals is not None else dim_defaults['max_evals']
+        max_gp_size = max_gp_size if max_gp_size is not None else dim_defaults['max_gp_size']
+        fit_n_points = fit_n_points if fit_n_points is not None else dim_defaults['fit_n_points']
+        batch_size = batch_size if batch_size is not None else dim_defaults['batch_size']
+        ns_n_points = ns_n_points if ns_n_points is not None else dim_defaults['ns_n_points']
+        num_hmc_warmup = num_hmc_warmup if num_hmc_warmup is not None else dim_defaults['num_hmc_warmup']
+        num_hmc_samples = num_hmc_samples if num_hmc_samples is not None else dim_defaults['num_hmc_samples']
+        mc_points_size = mc_points_size if mc_points_size is not None else dim_defaults['mc_points_size']
+        num_chains = num_chains if num_chains is not None else dim_defaults['num_chains']
+        logz_threshold = logz_threshold if logz_threshold is not None else dim_defaults['logz_threshold']
+        
         # Store convergence parameters
         self.min_evals = min_evals
         self.max_evals = max_evals
         self.max_gp_size = max_gp_size
         self.logz_threshold = logz_threshold
+
+        # Log run settings
+        log.info("Using run settings:")
+        log.info(f"min_evals = {min_evals}, max_evals = {max_evals}, max_gp_size = {max_gp_size}")
+        if acq.lower() in ['wipv', 'wipstd']:
+            acq_info = "logz_threshold = {:.4f}".format(logz_threshold)+f", mc_points_size = {mc_points_size}"
+        else:
+            acq_info = "ei_goal = {:.4e}".format(ei_goal)
+        log.info(f"convergence_n_iters = {convergence_n_iters}, acq = {acq}, {acq_info}")
+        log.info(f"fit_n_points = {fit_n_points}, batch_size = {batch_size}, ns_n_points = {ns_n_points}")
         
         # Initialize result containers
         self.samples_dict = {}
@@ -1117,6 +1181,7 @@ class BOBE:
         
         # Update results manager settings with all run parameters
         self.results_manager.settings.update({
+            'acq': acq,
             'min_evals': min_evals,
             'max_evals': max_evals,
             'max_gp_size': max_gp_size,
@@ -1374,8 +1439,8 @@ class BOBE:
             log.info("No nested sampling results found or nested sampling unsuccessful, MC samples from HMC/MCMC will be used instead.")
             self.results_manager.start_timing('MCMC Sampling')
             mc_samples = get_mc_samples(
-                    self.gp, warmup_steps=512, num_samples=2000*self.ndim,
-                    thinning=4, method="NUTS")
+                    self.gp, warmup_steps=self.num_hmc_warmup, num_samples=8*self.num_hmc_samples,
+                    thinning=self.hmc_thinning, method="NUTS")
             self.results_manager.end_timing('MCMC Sampling')
             samples = mc_samples['x']
             weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
