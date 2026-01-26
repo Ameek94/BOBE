@@ -100,7 +100,7 @@ Configure and Run BOBE
 ------------------
 
 
-Now let's set up the BOBE configuration and run the optimization. We'll use the default WIPStd (Weighted Integrated Posterior Standard Deviation) acquisition function which is a cheap and approximate measure of :math:`\Delta \log Z` (see our `paper <https://arxiv.org/abs/2512.xxxx>`_ for details).
+Now let's set up the BOBE configuration and run the optimization. We'll use the default WIPStd (Weighted Integrated Posterior Standard Deviation) acquisition function which is a cheap and approximate measure of :math:`\Delta \log Z` (see our `paper <https://arxiv.org/abs/2601.11150>`_ for details).
 When the value of this acquisition function drops below the provided logz_threshold, BOBE will start running nested sampling on the GP surrogate to get a precise estimate of the evidence and its uncertainty. If this uncertainty is below the threshold for a specified number of successive iterations, BOBE will declare convergence and stop.
 
 .. code-block:: python

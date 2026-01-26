@@ -36,8 +36,8 @@ params:
     latex: \log(10^{10} A_\mathrm{s})
     # drop: true
   As:
-      value: 'lambda logA: 1e-10*np.exp(logA)'
-      latex: A_\mathrm{s}
+    value: 'lambda logA: 1e-10*np.exp(logA)'
+    latex: A_\mathrm{s}
   ns:
     prior:
       min: 0.94 
@@ -54,18 +54,18 @@ params:
       min: 64
       max: 72
     ref:
-      dist: norm
-      loc: 6.771234910e+01
-      scale: 0.05
+     dist: norm
+     loc: 6.771234910e+01
+     scale: 0.05
     proposal: 0.05 
   ombh2:
     prior:
-      min: 0.021
-      max: 0.023
+     min: 0.021
+     max: 0.023
     ref:
-      dist: norm
-      loc: 2.224954976e-02
-      scale: 0.0001
+     dist: norm
+     loc: 2.224954976e-02
+     scale: 0.0001
     proposal: 0.0001
     latex: \Omega_\mathrm{b} h^2
   tau:
@@ -74,16 +74,16 @@ params:
      min: 0.03
      max: 0.08
     ref:
-      dist: norm
-      loc: 5.546101493e-02
-      scale: 0.003
+     dist: norm
+     loc: 5.546101493e-02
+     scale: 0.003
     proposal: 0.003
   A_planck:
     value: 1.0
 
 sampler:
   polychord:
-    nlive: 30d
+    nlive: 15d
     precision_criterion: 0.01
   # mcmc:
   #   drag: False

@@ -313,7 +313,7 @@ The example demonstrates important settings for cosmological applications:
 
 For cosmological likelihoods, **you should use** ``use_clf=True``. 
 The classifier filters out parameter regions where likelihood evaluations may return -inf or extremely low likelihoods and focuses the GP on the high-likelihood posterior region.
-The SVM classifier (``clf_type='svm'``) is used in this example and is always available without additional dependencies. The classifier threshold setting strategy is explained in our `paper <https://arxiv.org/abs/2512.xxxx>`_ and follows the one used in `Gpry <https://github.com/jonaselgammal/GPry>`_.
+The SVM classifier (``clf_type='svm'``) is used in this example and is always available without additional dependencies. The classifier threshold setting strategy is explained in our `paper <https://arxiv.org/abs/2601.11150>`_ and follows the one used in `Gpry <https://github.com/jonaselgammal/GPry>`_.
 
 
 .. Troubleshooting
