@@ -16,6 +16,8 @@ It has been tested to work well upto 30 dimensions for simple multivariate Gauss
 BOBE may not be necessary if your likelihood already evaluates in milliseconds, as the overhead of training the GP surrogate and running Bayesian optimisation
 may not be worth the speedup. For such cases, there is generally no need to go beyond standard MCMC/nested sampling tools.
 
+BOBE is under active development and welcome bug reports, patches, feature requests, and other comments via the GitHub issue tracker.
+
 
 ## Key Features
 
