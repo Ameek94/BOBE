@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        extra: ['nn', 'mpi', 'cobaya', 'all']
+        extra: ['all']
     
     steps:
     - uses: actions/checkout@v4
