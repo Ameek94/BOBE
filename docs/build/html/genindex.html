@@ -128,6 +128,8 @@
       <li><a href="BOBE.html#BOBE.CobayaLikelihood.__call__">__call__() (BOBE.CobayaLikelihood method)</a>
 
       <ul>
+        <li><a href="BOBE.html#BOBE.kernels.Kernel.__call__">(BOBE.kernels.Kernel method)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel.__call__">[1]</a>
+</li>
         <li><a href="BOBE.html#BOBE.Likelihood.__call__">(BOBE.Likelihood method)</a>
 </li>
         <li><a href="BOBE.html#BOBE.likelihood.CobayaLikelihood.__call__">(BOBE.likelihood.CobayaLikelihood method)</a>, <a href="api/likelihood.html#BOBE.likelihood.CobayaLikelihood.__call__">[1]</a>
@@ -167,6 +169,8 @@
         <li><a href="BOBE.html#BOBE.gp.GP.__init__">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.__init__">[1]</a>
 </li>
         <li><a href="BOBE.html#BOBE.GPwithClassifier.__init__">(BOBE.GPwithClassifier method)</a>
+</li>
+        <li><a href="BOBE.html#BOBE.kernels.Kernel.__init__">(BOBE.kernels.Kernel method)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel.__init__">[1]</a>
 </li>
         <li><a href="BOBE.html#BOBE.Likelihood.__init__">(BOBE.Likelihood method)</a>
 </li>
@@ -263,14 +267,21 @@
 </li>
       </ul></li>
       <li>
+    BOBE.kernels
+
+      <ul>
+        <li><a href="BOBE.html#module-BOBE.kernels">module</a>
+</li>
+      </ul></li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li>
     BOBE.likelihood
 
       <ul>
         <li><a href="BOBE.html#module-BOBE.likelihood">module</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li>
     BOBE.optim
 
@@ -366,8 +377,6 @@
       </ul></li>
       <li><a href="api/utils.html#BOBE.pool.MPI_Pool.close">close() (BOBE.pool.MPI_Pool method)</a>
 </li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="glossary.html#term-Cobaya"><strong>Cobaya</strong></a>
 </li>
       <li><a href="BOBE.html#BOBE.CobayaLikelihood">CobayaLikelihood (class in BOBE)</a>
@@ -376,6 +385,8 @@
         <li><a href="BOBE.html#BOBE.likelihood.CobayaLikelihood">(class in BOBE.likelihood)</a>, <a href="api/likelihood.html#BOBE.likelihood.CobayaLikelihood">[1]</a>
 </li>
       </ul></li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="BOBE.html#BOBE.samplers.compute_integrals">compute_integrals() (in module BOBE.samplers)</a>, <a href="api/samplers.html#BOBE.samplers.compute_integrals">[1]</a>
 </li>
       <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.copy">copy() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.copy">[1]</a>
@@ -386,6 +397,14 @@
         <li><a href="BOBE.html#BOBE.gp.GP.copy">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.copy">[1]</a>
 </li>
         <li><a href="BOBE.html#BOBE.GPwithClassifier.copy">(BOBE.GPwithClassifier method)</a>
+</li>
+      </ul></li>
+      <li><a href="BOBE.html#BOBE.kernels.Kernel.covariance">covariance() (BOBE.kernels.Kernel method)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel.covariance">[1]</a>
+
+      <ul>
+        <li><a href="BOBE.html#BOBE.kernels.MaternKernel.covariance">(BOBE.kernels.MaternKernel method)</a>, <a href="api/gp_models.html#BOBE.kernels.MaternKernel.covariance">[1]</a>
+</li>
+        <li><a href="BOBE.html#BOBE.kernels.RBFKernel.covariance">(BOBE.kernels.RBFKernel method)</a>, <a href="api/gp_models.html#BOBE.kernels.RBFKernel.covariance">[1]</a>
 </li>
       </ul></li>
       <li><a href="BOBE.html#BOBE.BOBESummaryPlotter.create_summary_dashboard">create_summary_dashboard() (BOBE.BOBESummaryPlotter method)</a>
@@ -408,7 +427,7 @@
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="BOBE.html#BOBE.gp.dist_sq">dist_sq() (in module BOBE.gp)</a>
+      <li><a href="BOBE.html#BOBE.kernels.Kernel.diagonal">diagonal() (BOBE.kernels.Kernel method)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel.diagonal">[1]</a>
 </li>
       <li><a href="BOBE.html#BOBE.clf.MLPClassifier.dropout_rate">dropout_rate (BOBE.clf.MLPClassifier attribute)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier.dropout_rate">[1]</a>
 </li>
@@ -542,6 +561,12 @@
 </li>
       <li><a href="api/utils.html#BOBE.utils.plot.get_data_format_examples">get_data_format_examples() (in module BOBE.utils.plot)</a>
 </li>
+      <li><a href="BOBE.html#BOBE.get_dimension_based_defaults">get_dimension_based_defaults() (in module BOBE)</a>
+
+      <ul>
+        <li><a href="BOBE.html#BOBE.bo.get_dimension_based_defaults">(in module BOBE.bo)</a>
+</li>
+      </ul></li>
       <li><a href="BOBE.html#BOBE.clf.get_ellipsoid_predict_proba_fn">get_ellipsoid_predict_proba_fn() (in module BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.get_ellipsoid_predict_proba_fn">[1]</a>
 </li>
       <li><a href="BOBE.html#BOBE.BOBEResults.get_getdist_samples">get_getdist_samples() (BOBE.BOBEResults method)</a>
@@ -558,8 +583,6 @@
         <li><a href="api/utils.html#BOBE.utils.results.BOBEResults.get_gp_data">(BOBE.utils.results.BOBEResults method)</a>
 </li>
       </ul></li>
-      <li><a href="BOBE.html#BOBE.samplers.get_hmc_settings">get_hmc_settings() (in module BOBE.samplers)</a>, <a href="api/samplers.html#BOBE.samplers.get_hmc_settings">[1]</a>
-</li>
       <li><a href="BOBE.html#BOBE.GP.get_hyperparams">get_hyperparams() (BOBE.GP method)</a>
 
       <ul>
@@ -700,6 +723,8 @@
 <h2 id="K">K</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="BOBE.html#BOBE.kernels.Kernel">Kernel (class in BOBE.kernels)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel">[1]</a>
+</li>
       <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.kernel">kernel() (BOBE.clf_gp.GPwithClassifier method)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.kernel">[1]</a>
 
       <ul>
@@ -708,7 +733,7 @@
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="BOBE.html#BOBE.gp.kernel_diag">kernel_diag() (in module BOBE.gp)</a>
+      <li><a href="BOBE.html#BOBE.kernels.Kernel.kernel_variance">kernel_variance (BOBE.kernels.Kernel attribute)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel.kernel_variance">[1]</a>
 </li>
       <li><a href="api/utils.html#BOBE.utils.core.kl_divergence_gaussian">kl_divergence_gaussian() (in module BOBE.utils.core)</a>
 </li>
@@ -720,6 +745,8 @@
 <h2 id="L">L</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="BOBE.html#BOBE.kernels.Kernel.lengthscales">lengthscales (BOBE.kernels.Kernel attribute)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel.lengthscales">[1]</a>
+</li>
       <li><a href="api/utils.html#BOBE.utils.log.LevelFilter">LevelFilter (class in BOBE.utils.log)</a>
 </li>
       <li><a href="BOBE.html#BOBE.Likelihood">Likelihood (class in BOBE)</a>
@@ -776,7 +803,7 @@
 </li>
       <li><a href="glossary.html#term-Marginal-Likelihood"><strong>Marginal Likelihood</strong></a>
 </li>
-      <li><a href="BOBE.html#BOBE.gp.matern_kernel">matern_kernel() (in module BOBE.gp)</a>
+      <li><a href="BOBE.html#BOBE.kernels.MaternKernel">MaternKernel (class in BOBE.kernels)</a>, <a href="api/gp_models.html#BOBE.kernels.MaternKernel">[1]</a>
 </li>
       <li><a href="BOBE.html#BOBE.clf.MLPClassifier">MLPClassifier (class in BOBE.clf)</a>, <a href="api/gp_models.html#BOBE.clf.MLPClassifier">[1]</a>
 </li>
@@ -795,6 +822,8 @@
         <li><a href="BOBE.html#module-BOBE.clf_gp">BOBE.clf_gp</a>
 </li>
         <li><a href="BOBE.html#module-BOBE.gp">BOBE.gp</a>
+</li>
+        <li><a href="BOBE.html#module-BOBE.kernels">BOBE.kernels</a>
 </li>
         <li><a href="BOBE.html#module-BOBE.likelihood">BOBE.likelihood</a>
 </li>
@@ -872,6 +901,8 @@
       <li><a href="glossary.html#term-Nested-Sampling"><strong>Nested Sampling</strong></a>
 </li>
       <li><a href="BOBE.html#BOBE.samplers.nested_sampling_Dy">nested_sampling_Dy() (in module BOBE.samplers)</a>, <a href="api/samplers.html#BOBE.samplers.nested_sampling_Dy">[1]</a>
+</li>
+      <li><a href="BOBE.html#BOBE.kernels.Kernel.noise">noise (BOBE.kernels.Kernel attribute)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel.noise">[1]</a>
 </li>
       <li><a href="BOBE.html#BOBE.clf_gp.GPwithClassifier.npoints">npoints (BOBE.clf_gp.GPwithClassifier property)</a>, <a href="api/gp_models.html#BOBE.clf_gp.GPwithClassifier.npoints">[1]</a>
 
@@ -1055,7 +1086,7 @@
 <h2 id="R">R</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="BOBE.html#BOBE.gp.rbf_kernel">rbf_kernel() (in module BOBE.gp)</a>
+      <li><a href="BOBE.html#BOBE.kernels.RBFKernel">RBFKernel (class in BOBE.kernels)</a>, <a href="api/gp_models.html#BOBE.kernels.RBFKernel">[1]</a>
 </li>
       <li><a href="BOBE.html#BOBE.GP.recompute_cholesky">recompute_cholesky() (BOBE.GP method)</a>
 
@@ -1211,6 +1242,8 @@
       </ul></li>
       <li><a href="api/utils.html#BOBE.utils.core.split_vmap">split_vmap() (in module BOBE.utils.core)</a>
 </li>
+      <li><a href="BOBE.html#BOBE.kernels.Kernel.sq_dist">sq_dist() (BOBE.kernels.Kernel method)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel.sq_dist">[1]</a>
+</li>
       <li><a href="BOBE.html#BOBE.BOBEResults.start_timing">start_timing() (BOBE.BOBEResults method)</a>
 
       <ul>
@@ -1331,6 +1364,8 @@
 
       <ul>
         <li><a href="BOBE.html#BOBE.gp.GP.update_hyperparams">(BOBE.gp.GP method)</a>, <a href="api/gp_models.html#BOBE.gp.GP.update_hyperparams">[1]</a>
+</li>
+        <li><a href="BOBE.html#BOBE.kernels.Kernel.update_hyperparams">(BOBE.kernels.Kernel method)</a>, <a href="api/gp_models.html#BOBE.kernels.Kernel.update_hyperparams">[1]</a>
 </li>
       </ul></li>
       <li><a href="BOBE.html#BOBE.BOBEResults.update_kl_divergences">update_kl_divergences() (BOBE.BOBEResults method)</a>

@@ -21,6 +21,26 @@ For handling constraints and invalid regions.
    :undoc-members:
    :show-inheritance:
 
+Kernel Functions
+----------------
+
+JaxBo uses object-oriented kernel implementations for GP covariance computation.
+
+.. autoclass:: BOBE.kernels.Kernel
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: BOBE.kernels.RBFKernel
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: BOBE.kernels.MaternKernel
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Classifier Module
 -----------------
 

@@ -44,6 +44,14 @@ gp
    :show-inheritance:
    :undoc-members:
 
+kernels
+--------------------
+
+.. automodule:: BOBE.kernels
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 likelihood
 -----------------------
 

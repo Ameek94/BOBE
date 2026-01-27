@@ -148,6 +148,7 @@
 <li class="toctree-l2"><a class="reference internal" href="BOBE.html#module-BOBE.bo">bo</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.bo.load_gp_file"><code class="docutils literal notranslate"><span class="pre">load_gp_file()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.bo.load_gp_statedict"><code class="docutils literal notranslate"><span class="pre">load_gp_statedict()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.bo.get_dimension_based_defaults"><code class="docutils literal notranslate"><span class="pre">get_dimension_based_defaults()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.bo.BOBE"><code class="docutils literal notranslate"><span class="pre">BOBE</span></code></a><ul>
 <li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.bo.BOBE.__init__"><code class="docutils literal notranslate"><span class="pre">BOBE.__init__()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.bo.BOBE.update_gp"><code class="docutils literal notranslate"><span class="pre">BOBE.update_gp()</span></code></a></li>
@@ -251,10 +252,6 @@
 </li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.gp.make_distribution"><code class="docutils literal notranslate"><span class="pre">make_distribution()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.gp.saas_prior_logprob"><code class="docutils literal notranslate"><span class="pre">saas_prior_logprob()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.gp.dist_sq"><code class="docutils literal notranslate"><span class="pre">dist_sq()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.gp.kernel_diag"><code class="docutils literal notranslate"><span class="pre">kernel_diag()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.gp.rbf_kernel"><code class="docutils literal notranslate"><span class="pre">rbf_kernel()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.gp.matern_kernel"><code class="docutils literal notranslate"><span class="pre">matern_kernel()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.gp.gp_mll"><code class="docutils literal notranslate"><span class="pre">gp_mll()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.gp.fast_update_cholesky"><code class="docutils literal notranslate"><span class="pre">fast_update_cholesky()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.gp.GP"><code class="docutils literal notranslate"><span class="pre">GP</span></code></a><ul>
@@ -284,6 +281,29 @@
 </li>
 </ul>
 </li>
+<li class="toctree-l2"><a class="reference internal" href="BOBE.html#module-BOBE.kernels">kernels</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel"><code class="docutils literal notranslate"><span class="pre">Kernel</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel.lengthscales"><code class="docutils literal notranslate"><span class="pre">Kernel.lengthscales</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel.kernel_variance"><code class="docutils literal notranslate"><span class="pre">Kernel.kernel_variance</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel.noise"><code class="docutils literal notranslate"><span class="pre">Kernel.noise</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel.__init__"><code class="docutils literal notranslate"><span class="pre">Kernel.__init__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel.sq_dist"><code class="docutils literal notranslate"><span class="pre">Kernel.sq_dist()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel.covariance"><code class="docutils literal notranslate"><span class="pre">Kernel.covariance()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel.diagonal"><code class="docutils literal notranslate"><span class="pre">Kernel.diagonal()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel.update_hyperparams"><code class="docutils literal notranslate"><span class="pre">Kernel.update_hyperparams()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.Kernel.__call__"><code class="docutils literal notranslate"><span class="pre">Kernel.__call__()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.kernels.RBFKernel"><code class="docutils literal notranslate"><span class="pre">RBFKernel</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.RBFKernel.covariance"><code class="docutils literal notranslate"><span class="pre">RBFKernel.covariance()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.kernels.MaternKernel"><code class="docutils literal notranslate"><span class="pre">MaternKernel</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.kernels.MaternKernel.covariance"><code class="docutils literal notranslate"><span class="pre">MaternKernel.covariance()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
 <li class="toctree-l2"><a class="reference internal" href="BOBE.html#module-BOBE.likelihood">likelihood</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.likelihood.Likelihood"><code class="docutils literal notranslate"><span class="pre">Likelihood</span></code></a><ul>
 <li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.likelihood.Likelihood.__init__"><code class="docutils literal notranslate"><span class="pre">Likelihood.__init__()</span></code></a></li>
@@ -301,7 +321,6 @@
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.samplers.compute_integrals"><code class="docutils literal notranslate"><span class="pre">compute_integrals()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.samplers.prior_transform"><code class="docutils literal notranslate"><span class="pre">prior_transform()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.samplers.nested_sampling_Dy"><code class="docutils literal notranslate"><span class="pre">nested_sampling_Dy()</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.samplers.get_hmc_settings"><code class="docutils literal notranslate"><span class="pre">get_hmc_settings()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.samplers.sample_GP_NUTS"><code class="docutils literal notranslate"><span class="pre">sample_GP_NUTS()</span></code></a></li>
 </ul>
 </li>
@@ -374,6 +393,7 @@
 <li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.GPwithClassifier.npoints"><code class="docutils literal notranslate"><span class="pre">GPwithClassifier.npoints</span></code></a></li>
 </ul>
 </li>
+<li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.get_dimension_based_defaults"><code class="docutils literal notranslate"><span class="pre">get_dimension_based_defaults()</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="BOBE.html#BOBE.Likelihood"><code class="docutils literal notranslate"><span class="pre">Likelihood</span></code></a><ul>
 <li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.Likelihood.__init__"><code class="docutils literal notranslate"><span class="pre">Likelihood.__init__()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="BOBE.html#BOBE.Likelihood.__call__"><code class="docutils literal notranslate"><span class="pre">Likelihood.__call__()</span></code></a></li>

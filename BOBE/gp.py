@@ -11,13 +11,14 @@ log = get_logger("gp")
 from .optim import optimize_optax, optimize_scipy
 from .utils.seed import get_new_jax_key, get_numpy_rng
 import numpyro.distributions as dist
+from .kernels import Kernel, RBFKernel, MaternKernel
 
 
 safe_noise_floor = 1e-12
 
+# Constants for DSLP prior
 sqrt2 = sqrt(2.)
 sqrt3 = sqrt(3.)
-sqrt5 = sqrt(5.)
 
 class DummyDistribution:
     """A dummy distribution that always returns log_prob = 0.0"""
@@ -76,96 +77,6 @@ def saas_prior_logprob(lengthscales, kernel_variance, tausq):
     inv_lengthscales_sq = 1 / (tausq * lengthscales**2)
     logprior += jnp.sum(dist.HalfCauchy(1.).log_prob(inv_lengthscales_sq))
     return logprior
-
-def dist_sq(x, y):
-    """
-    Compute squared Euclidean distance between two points.
-    
-    Parameters
-    ----------
-    x : jnp.ndarray
-        Array of shape (n1, d).
-    y : jnp.ndarray
-        Array of shape (n2, d).
-        
-    Returns
-    -------
-    jnp.ndarray
-        Array of shape (n1, n2) containing squared distances.
-    """
-    return jnp.sum(jnp.square(x[:,None,:] - y[None,:,:]),axis=-1) 
-
-@partial(jax.jit, static_argnames='include_noise')
-def kernel_diag(x, kernel_variance, noise, include_noise=True):
-    """
-    Compute only the diagonal of the kernel matrix K(x,x).
-    
-    Parameters
-    ----------
-    x : jnp.ndarray
-        Input points of shape (n, d).
-    kernel_variance : float
-        Kernel variance parameter.
-    noise : float
-        Noise level to add to diagonal.
-    include_noise : bool, optional
-        Whether to include noise in diagonal. Default is True.
-        
-    Returns
-    -------
-    jnp.ndarray
-        Diagonal of kernel matrix, shape (n,).
-    """
-    diag = kernel_variance * jnp.ones(x.shape[0]) # The diagonal is just the kernel_variance
-    if include_noise:
-        diag += noise
-    return diag
-
-@partial(jax.jit,static_argnames='include_noise')
-def rbf_kernel(xa,xb,lengthscales,kernel_variance,noise,include_noise=True):
-    """
-    Radial Basis Function (RBF) kernel.
-    
-    Parameters
-    ----------
-    xa : jnp.ndarray
-        First set of input points, shape (n1, d).
-    xb : jnp.ndarray
-        Second set of input points, shape (n2, d).
-    lengthscales : jnp.ndarray
-        Lengthscale parameters, shape (d,).
-    kernel_variance : float
-        Kernel variance parameter.
-    noise : float
-        Noise level to add to diagonal.
-    include_noise : bool, optional
-        Whether to include noise on diagonal. Default is True.
-        
-    Returns
-    -------
-    jnp.ndarray
-        Kernel matrix of shape (n1, n2).
-    """
-    sq_dist = dist_sq(xa/lengthscales,xb/lengthscales) 
-    sq_dist = jnp.exp(-0.5*sq_dist)
-    k = kernel_variance*sq_dist
-    if include_noise:
-        k+= noise*jnp.eye(k.shape[0])
-    return k
-
-@partial(jax.jit,static_argnames='include_noise')
-def matern_kernel(xa,xb,lengthscales,kernel_variance,noise,include_noise=True):
-    """
-    The Matern-5/2 kernel
-    """
-    dsq = dist_sq(xa/lengthscales,xb/lengthscales)
-    d = jnp.sqrt(jnp.where(dsq<1e-30,1e-30,dsq))
-    exp = jnp.exp(-sqrt5*d)
-    poly = 1. + d*(sqrt5 + d*5./3.)
-    k = kernel_variance*poly*exp
-    if include_noise:
-        k+= noise*jnp.eye(k.shape[0])
-    return k
 
 @jax.jit
 def gp_mll(k,train_y,num_points):
@@ -249,13 +160,16 @@ class GP:
 
         # Setup kernel and initial hyperparameters
         self.kernel_name = kernel if kernel == "rbf" else "matern"
-        self.kernel = rbf_kernel if kernel == "rbf" else matern_kernel
         self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
         self.kernel_variance = kernel_variance if kernel_variance is not None else 1.0
         self.noise = noise
         
+        # Instantiate kernel object
+        kernel_classes = {"rbf": RBFKernel, "matern": MaternKernel}
+        self.kernel = kernel_classes[self.kernel_name](self.lengthscales, self.kernel_variance, self.noise)
+        
         # Compute initial kernel matrices
-        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+        K = self.kernel.covariance(self.train_x, self.train_x, include_noise=True)
         self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
@@ -388,8 +302,9 @@ class GP:
         """
         lengthscales, kernel_variance, tausq = self._parse_hyperparams(log_params)
         
-        # Compute kernel matrix and MLL
-        K = self.kernel(self.train_x, self.train_x, lengthscales, kernel_variance, noise=self.noise, include_noise=True)
+        # Update kernel hyperparameters and compute kernel matrix
+        self.kernel.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance)
+        K = self.kernel.covariance(self.train_x, self.train_x, include_noise=True)
         mll = gp_mll(K, self.train_y, self.train_y.shape[0])
         
         # Add prior
@@ -445,6 +360,8 @@ class GP:
         if not self.fixed_kernel_variance:
             self.kernel_variance = kernel_variance
         self.tausq = tausq
+        # Update kernel object
+        self.kernel.update_hyperparams(lengthscales=self.lengthscales, kernel_variance=self.kernel_variance)
         self.recompute_cholesky()
     
     def predict_mean_single(self,x):
@@ -452,15 +369,15 @@ class GP:
         Single point prediction of mean
         """
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False) # shape (N,1)
+        k12 = self.kernel.covariance(self.train_x, x, include_noise=False) # shape (N,1)
         mean = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean
         return mean 
     
     def predict_var_single(self,x):
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False) # shape (N,1)
+        k12 = self.kernel.covariance(self.train_x, x, include_noise=False) # shape (N,1)
         vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
-        k22 = kernel_diag(x,self.kernel_variance,self.noise,include_noise=True) # shape (1,) for x (1,ndim)
+        k22 = self.kernel.diagonal(x, include_noise=True) # shape (1,) for x (1,ndim)
         var = k22 - jnp.sum(vv*vv,axis=0) 
         var = jnp.clip(var, safe_noise_floor, None)
         return self.y_std**2 * var.squeeze()
@@ -478,8 +395,8 @@ class GP:
         Predicts the mean and variance of the GP at x but does not unstandardize it. To use with EI and the like.
         """
         x = jnp.atleast_2d(x)
-        k12 = self.kernel(self.train_x,x,self.lengthscales,self.kernel_variance,noise=self.noise,include_noise=False)
-        k22 = kernel_diag(x,self.kernel_variance,self.noise,include_noise=True)
+        k12 = self.kernel.covariance(self.train_x, x, include_noise=False)
+        k22 = self.kernel.diagonal(x, include_noise=True)
         mean = jnp.einsum('ij,ji', k12.T, self.alphas)
         vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
         var = k22 - jnp.sum(vv*vv,axis=0) 
@@ -545,7 +462,7 @@ class GP:
         """
         Recomputes the Cholesky decomposition and alphas. Useful if hyperparameters are changed manually.
         """
-        K = self.kernel(self.train_x, self.train_x, self.lengthscales, self.kernel_variance, noise=self.noise, include_noise=True)
+        K = self.kernel.covariance(self.train_x, self.train_x, include_noise=True)
         self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
@@ -556,18 +473,14 @@ class GP:
 
         new_x = jnp.atleast_2d(new_x)
         # new_train_x = jnp.concatenate([self.train_x,new_x])
-        k = self.kernel(self.train_x, new_x,self.lengthscales,self.kernel_variance,
-                        noise=self.noise,include_noise=False).flatten()           # shape (n,)
-        k_self = kernel_diag(new_x,self.kernel_variance,self.noise,include_noise=True)[0]  # scalar
+        k = self.kernel.covariance(self.train_x, new_x, include_noise=False).flatten()           # shape (n,)
+        k_self = self.kernel.diagonal(new_x, include_noise=True)[0]  # scalar
         k11_cho = fast_update_cholesky(self.cholesky,k,k_self)
 
         # Compute only the extra row for new_x
-        k_new_mc = self.kernel(
-            new_x, mc_points,
-            self.lengthscales, self.kernel_variance,
-        noise=self.noise, include_noise=False)  # shape (1, n_mc)
+        k_new_mc = self.kernel.covariance(new_x, mc_points, include_noise=False)  # shape (1, n_mc)
         k12 = jnp.vstack([k_train_mc,k_new_mc])
-        k22 = kernel_diag(mc_points,self.kernel_variance,self.noise,include_noise=True) # (N_mc,)
+        k22 = self.kernel.diagonal(mc_points, include_noise=True) # (N_mc,)
         vv = solve_triangular(k11_cho, k12, lower=True) # shape (N_train,N_mc)
         var = k22 - jnp.sum(vv*vv,axis=0) 
         # handle nans and negative variances due to numerical issues
