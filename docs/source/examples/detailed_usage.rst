@@ -155,17 +155,32 @@ Key Configuration Parameters
 
 **Run Parameters**
 
-- **acq**: Acquisition function to use (``'wipstd'`` in this example and is the default). WIPStd is a fast approximation of evidence uncertainty and is suited for Bayesian evidence estimation.
-- **min_evals**: Minimum number of likelihood evaluations before checking convergence (25 in this example, default is 200)
-- **max_evals**: Maximum number of likelihood evaluations (250 in this example, default is 1500)
-- **logz_threshold**: Convergence threshold for uncertainty in log evidence (0.01 in this example). Smaller values require tighter convergence. Can be relaxed to 0.5 to 1.0. for high dimensional problems.
-- **fit_n_points**: Refit GP hyperparameters after adding this many new points (4 in this example, default is 10)
-- **batch_size**: Number of points to acquire per iteration, 2 in this example, 1 is for standard sequential acquisition. Larger values enable batch acquisition and the likelihood evaluations can be parallelized. However, larger batch sizes (>10-20) can reduce acquisition efficiency since the GP state is not updated with the true likelihoods of all points in the batch. The update happens only after the entire batch is evaluated.
-- **ns_n_points**: Run nested sampling after adding this many new points (4 in this example, default is 10)
-- **num_hmc_warmup**: Number of NUTS warmup steps for sampling the GP surrogate (256 in this example, default is 512)
-- **num_hmc_samples**: Number of NUTS samples to draw per chain (512 in this example), can be increased for higher dimensions but not more than a few thousand to avoid long runtimes
+.. note::
+   Most ``run()`` parameters use **dimension-based defaults** that automatically scale with problem dimensionality.
+   You can inspect these defaults before running:
+
+   .. code-block:: python
+
+      from BOBE import get_dimension_based_defaults
+      
+      # For a 6-dimensional problem
+      defaults = get_dimension_based_defaults(ndim=6)
+      print(defaults)
+      # Output: {'min_evals': 48, 'max_evals': 1200, 'batch_size': 2, ...}
+
+   You can always override these by providing explicit values to ``run()``.
+
+- **acq**: Acquisition function to use (``'wipstd'`` is the default). WIPStd is a fast approximation of evidence uncertainty and is suited for Bayesian evidence estimation.
+- **min_evals**: Minimum number of likelihood evaluations before checking convergence (25 in this example).
+- **max_evals**: Maximum number of likelihood evaluations (250 in this example).
+- **logz_threshold**: Convergence threshold for uncertainty in log evidence (0.01 in this example). Smaller values require tighter convergence. Can be relaxed to 0.5 to 1.0 for high dimensional problems.
+- **fit_n_points**: Refit GP hyperparameters after adding this many new points (4 in this example).
+- **batch_size**: Number of points to acquire per iteration (2 in this example). Standard sequential acquisition uses 1. Larger values enable batch acquisition and the likelihood evaluations can be parallelized. However, larger batch sizes (>10-20) can reduce acquisition efficiency since the GP state is not updated with the true likelihoods of all points in the batch. The update happens only after the entire batch is evaluated.
+- **ns_n_points**: Run nested sampling after adding this many new points (4 in this example).
+- **num_hmc_warmup**: Number of NUTS warmup steps for sampling the GP surrogate (256 in this example).
+- **num_hmc_samples**: Number of NUTS samples to draw per chain (512 in this example), can be increased for higher dimensions but not more than a few thousand to avoid long runtimes.
 - **mc_points_size**: Number of Monte Carlo points for WIPStd acquisition function (128 in this example). Since this is the number of points used to estimate the acquisition function, larger values give more accurate estimates but increase computation time. For higher dimensions can be set to ~500 but not more since this slows down acquisition optimization.
-- **num_chains**: Number of MCMC chains to run in parallel (default is 4)
+- **num_chains**: Number of NUTS-HMC chains to run in parallel (defaults to 4). For jax on cpu, this can be set to the number of cores.
 - **convergence_n_iters**: Number of successive iterations meeting the threshold to declare convergence (1 in this example). Increase to avoid premature convergence in challenging problems.
 
 

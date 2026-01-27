@@ -115,4 +115,8 @@ Here's what the parameters in the examples above do:
 - ``ns_n_points``: Run nested sampling on GP after adding this many new points
 - ``logz_threshold``: Convergence threshold for the uncertainty on the log of the Bayesian evidence
 
+.. note::
+   These parameters use dimension-based defaults that scale with problem size.
+   You can omit them to use automatic defaults, or provide custom values.
+
 For a complete list of parameters and advanced options, see the :doc:`../api/index`.

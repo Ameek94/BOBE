@@ -95,15 +95,12 @@ sampler = BOBE(
     save_dir='./results',
 )
 
-# Run optimization with convergence and run settings
+# Run optimization with convergence settings.
+# BOBE also has other run settings which you can specify, otherwise dimension-based defaults will be used. See the docs for more details.
 results = sampler.run(
-    min_evals=10, # do a minimum of 10 evaluations
-    max_evals=100, # max evaluation budget
-    batch_size=2, # acquisition function batch size
-    fit_n_points=4, # fit gp after every 4 likelihood evaluations
-    ns_n_points=4, # run nested sampling after every 4 likelihood evaluations
-    logz_threshold=0.1, # target logz uncertainty from GP
+    logz_threshold=0.1, # target log-evidence uncertainty for convergence
 )
+
 
 # Access the evidence and posterior samples
 print(f"Log Evidence: {results['logz']['mean']}")
@@ -120,7 +117,7 @@ from BOBE import BOBE
 # Initialize BOBE with Cobaya YAML file, prepare it the same way you would for running MCMC/Nested Sampling through Cobaya
    sampler = BOBE(
        loglikelihood='path/to/cobaya_input.yaml',
-           n_sobol_init=4,
+       n_sobol_init=4,
        n_cobaya_init=4,  # We can also specify reference dists in the Cobaya yaml file to generate additional initial points
        likelihood_name='quickstart_cobaya_example', # name for output files
        save_dir='./results',
@@ -129,12 +126,7 @@ from BOBE import BOBE
    
    # Run with optimization settings
    results = sampler.run(
-       min_evals=10,
-       max_evals=1000, # adjust according to your evaluation budget
-       batch_size=5,
-       fit_n_points=10,
-       ns_n_points=10,
-       logz_threshold=0.5, # for higher dimensional examples, can relax the convergence threshold slightly
+       logz_threshold=0.1,
    )
 
 # rest of the run remains the same as above

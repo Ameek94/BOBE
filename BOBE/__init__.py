@@ -39,7 +39,7 @@ from .utils.log import setup_logging
 setup_logging(verbosity='INFO')  # Default verbosity, can be overridden in BOBE.__init__
 
 # Core classes
-from .bo import BOBE
+from .bo import BOBE, get_dimension_based_defaults
 from .gp import GP
 from .clf_gp import GPwithClassifier
 
@@ -74,6 +74,8 @@ __all__ = [
     "BOBE",
     "GP",
     "GPwithClassifier",
+    # Utilities
+    "get_dimension_based_defaults",
     # Likelihood classes
     "Likelihood",
     # Acquisition

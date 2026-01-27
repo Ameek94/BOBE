@@ -51,20 +51,20 @@ def main():
     
     # Run optimization with convergence and run settings
     results = bobe.run(
-        acq='wipstd',
-        min_evals=25,
-        max_evals=250,
-        max_gp_size=250,
-        logz_threshold=5e-2,
-        do_final_ns=True,
-        fit_n_points=1,
-        batch_size=1,
-        ns_n_points=2,
-        num_hmc_warmup=256,
-        num_hmc_samples=2048,
-        mc_points_size=512,
-        num_chains=4,
-        convergence_n_iters=2,
+        # acq='wipstd',
+        # min_evals=25,
+        # max_evals=250,
+        # max_gp_size=250,
+        # logz_threshold=5e-2,
+        # do_final_ns=True,
+        # fit_n_points=1,
+        # batch_size=1,
+        # ns_n_points=2,
+        # num_hmc_warmup=256,
+        # num_hmc_samples=2048,
+        # mc_points_size=512,
+        # num_chains=4,
+        # convergence_n_iters=2,
     )
 
     end = time.time()

@@ -64,6 +64,36 @@ def load_gp_statedict(state_dict: Dict[str, Any], clf: bool) -> Union[GP, GPwith
         gp = GP.from_state_dict(state_dict)
     return gp
 
+def get_dimension_based_defaults(ndim: int):
+    """
+    Compute reasonable default values for run() parameters based on problem dimension.
+    
+    This method provides dimension-scaled defaults for parameters that should adapt
+    to the complexity of the problem. Users can override these by providing explicit
+    values to the run() method.
+    
+    Returns
+    -------
+    dict
+        Dictionary of default parameter values keyed by parameter name.
+    """
+    
+    defaults = {
+        'min_evals': 8 * ndim,  # scales linearly with dimension
+        'max_evals': 200 * ndim,  # more evals for higher dimensions
+        'max_gp_size': min(2100, 160 * ndim),  # larger GP for higher dimensions
+        'batch_size': 2 if ndim <=6 else min(8,int(2*(ndim/6))),  # 2-8 depending on dimension
+        'ns_n_points': min(50, 2*ndim),  # nested sampling frequency, less for higher dimensions
+        'num_hmc_warmup': 256 if ndim <= 6 else 512,  # more warmup for higher dimensions
+        'num_hmc_samples': min(5000, max(512,int(4096*(ndim/20)))),  # more samples for higher dimensions, capped at 5000
+        'mc_points_size': min(512, 32*ndim),  # more MC points for higher dimensions
+        'num_chains': min(6, max(3,jax.device_count())),  # 3-6 chains depending on available devices
+        'fit_n_points': min(50, 2*ndim),  # refit less often for higher dimensions
+        'logz_threshold': 0.01 + 0.01*(ndim/6) if ndim<=6 else min(1.,0.1 + 0.1*(ndim/6)**2)  # looser threshold for higher dimensions
+    }
+    
+    return defaults
+
 class BOBE:
 
     def __init__(self,
@@ -619,7 +649,7 @@ class BOBE:
         Update the GP with new points and values, and track hyperparameters.
         
         Uses pool for parallel GP fitting when refitting is needed.
-        Refits based on number of points added since last fit.
+        Refits based on number of points added to GP since last fit.
         """
         # Only main process updates GP
         if not self.is_main:
@@ -627,17 +657,24 @@ class BOBE:
         
         self.results_manager.start_timing('GP Training')
         
-        # Count how many points are being added
-        n_new_points = new_pts_u.shape[0]
-        self.n_points_since_last_fit += n_new_points
+        # Track GP size before update
+        gp_size_before = self.gp.train_x.shape[0]
+        
+        # Update GP with new data
+        self.gp.update(new_pts_u, new_vals)
+        
+        # Track actual points added (accounts for filtering by classifier or other mechanisms)
+        gp_size_after = self.gp.train_x.shape[0]
+        actual_points_added = gp_size_after - gp_size_before
+        self.n_points_since_last_fit += actual_points_added
         
         # Determine refit parameters based on training set size and points added
-        if self.gp.train_x.shape[0] < 200:
+        if gp_size_after < 200:
             # For small training sets, refit more frequently
             refit_threshold = min(4, self.fit_n_points)
             maxiter = 1000
             n_restarts = 8
-        elif 200 < self.gp.train_x.shape[0] < 800:
+        elif 200 < gp_size_after < 800:
             # For moderate size training sets
             refit_threshold = self.fit_n_points
             n_restarts = 4
@@ -649,9 +686,6 @@ class BOBE:
             maxiter = 200
         
         refit = (self.n_points_since_last_fit >= refit_threshold)
-        
-        # Update GP with new data
-        self.gp.update(new_pts_u, new_vals)
         
         # Use pool for parallel GP fitting if refitting
         if refit:
@@ -960,37 +994,6 @@ class BOBE:
     # MAIN RUN METHODS
     # ============================================================================
 
-    def _get_dimension_based_defaults(self):
-        """
-        Compute reasonable default values for run() parameters based on problem dimension.
-        
-        This method provides dimension-scaled defaults for parameters that should adapt
-        to the complexity of the problem. Users can override these by providing explicit
-        values to the run() method.
-        
-        Returns
-        -------
-        dict
-            Dictionary of default parameter values keyed by parameter name.
-        """
-        ndim = self.ndim
-        
-        defaults = {
-            'min_evals': 8 * ndim,  # scales linearly with dimension
-            'max_evals': 200 * ndim,  # more evals for higher dimensions
-            'max_gp_size': min(2100, 160 * ndim),  # larger GP for higher dimensions
-            'batch_size': 2 if ndim <=6 else min(8,int(2*(ndim/6))),  # 2-8 depending on dimension
-            'ns_n_points': min(40, 2*ndim),  # nested sampling frequency, less for higher dimensions
-            'num_hmc_warmup': 256 if ndim <= 6 else 512,  # more warmup for higher dimensions
-            'num_hmc_samples': min(5000, max(512,int(4096*(ndim/20)))),  # more samples for higher dimensions, capped at 5000
-            'mc_points_size': min(512, 32*ndim),  # more MC points for higher dimensions
-            'num_chains': min(6, max(3,jax.device_count())),  # 3-6 chains depending on available devices
-            'fit_n_points': min(40, 2*ndim),  # refit less often for higher dimensions
-            'logz_threshold': 0.2 if ndim<=6 else min(1.,0.2*(ndim/6))  # looser threshold for higher dimensions
-        }
-        
-        return defaults
-
     def run(self, acq: Union[str, Tuple[str]] = 'wipstd',
             min_evals: Optional[int] = None,
             max_evals: Optional[int] = None,
@@ -1072,7 +1075,7 @@ class BOBE:
             return None
         
         # Get dimension-based defaults
-        dim_defaults = self._get_dimension_based_defaults()
+        dim_defaults = get_dimension_based_defaults(self.ndim)
         
         # Apply defaults for None values
         min_evals = min_evals if min_evals is not None else dim_defaults['min_evals']
