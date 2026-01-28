@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "BOBE"
-version = "0.1.0"
+version = "0.1.0" 
 description = "A Bayesian Optimization package for cosmology using JAX"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -88,5 +88,6 @@ all = [
     "cobaya>=3.0.0"
 ]
 
-[tool.setuptools]
-packages = ["BOBE"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["BOBE*"]

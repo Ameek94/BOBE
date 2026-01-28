@@ -12,7 +12,7 @@ Use BOBE if:
 - **You need Bayesian evidence estimates and/or posterior samples efficiently**
 
 BOBE works best for problems with up to 15-20 parameters, although this can vary based on the specific problem and likelihood structure. 
-It has been tested to work well upto 30 dimensions for simple multivariate Gaussian likelihoods and upto 16 dimensions for cosmological likelihoods (LCDM + curvature) with the Planck Camspec likelihood).
+It has been tested to work well upto 30 dimensions for simple multivariate Gaussian likelihoods and upto 16 dimensions for cosmological likelihoods (LCDM + curvature) with the Planck Camspec likelihood.
 BOBE may not be necessary if your likelihood already evaluates in milliseconds, as the overhead of training the GP surrogate and running Bayesian optimisation
 may not be worth the speedup. For such cases, there is generally no need to go beyond standard MCMC/nested sampling tools.
 
@@ -42,37 +42,41 @@ See `pyproject.toml` and the [documentation](https://BOBE.readthedocs.io/en/) fo
 
 ## Installation
 
-### From source
+### From PyPI (Recommended)
+
+BOBE is available on PyPI and can be installed with pip:
+
+```bash
+pip install BOBE
+```
+
+### Optional Dependencies
+
+BOBE has several optional dependencies for extended functionality:
+
+- **Cosmology Suite**: Install with `pip install BOBE[cosmo]`
+  - This will install Cobaya, needed for several cosmological likelihoods. You will still need to download and install the data for some likelihoods - see the [Cobaya documentation](https://cobaya.readthedocs.io/en/latest/) for more details.
+  - It will also install mpi4py (you will need to have an MPI implementation such as openmpi or mpich). Enables parallel likelihood evaluation and GP fitting across multiple processes using mpi4py.
+  
+- **Cobaya Only**: Install with `pip install BOBE[cobaya]`
+  
+- **MPI Only**: Install with `pip install BOBE[mpi]`
+
+- **Neural Networks**: Install with `pip install BOBE[nn]`
+
+- **All Optional Dependencies**: Install with `pip install BOBE[all]`
+
+### From Source (Development)
+
+For development or to use the latest unreleased features:
 
 ```bash
 git clone https://github.com/Ameek94/BOBE.git
 cd BOBE
-python -m pip install .
+pip install -e .
 ```
 
-For an editable (dev) install do 
-
-```bash
-python -m pip install -e .
-```
-
-from the package directory. 
-
-### Optional Dependencies
-
-BOBE has several optional dependencies for extended functionality. When installing from source, you can install them as follows:
-
-- **Cosmology Suite**: Install with `pip install -e '.[cosmo]'`
-  - This will install Cobaya, needed for several cosmological likelihoods. You will still need to download and install the data for some likelihoods - see the [Cobaya documentation](https://cobaya.readthedocs.io/en/latest/) for more details.
-  - It will also install mpi4py (you will need to have an MPI implementation such as openmpi or mpich). Enables parallel likelihood evaluation and GP fitting across multiple processes using mpi4py.
-  
-- **Cobaya Only**: Install with `pip install -e '.[cobaya]'`
-  
-- **MPI Only**: Install with `pip install -e '.[mpi]'`
-
-- **All Optional Dependencies**: Install with `pip install -e '.[all]'`
-
-**Note:** The `-e` flag installs in editable mode. For a regular install, use `pip install '.[extra]'` instead (replace extra with name of dependency).
+Optional dependencies can be installed with `pip install -e '.[extra]'` (replace `extra` with the desired dependency name).
 
 ## Quick Start
 

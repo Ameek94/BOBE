@@ -53,3 +53,4 @@ build/
 examples/.DS_Store
 *.html
 CosmoPosteriors.ipynb
+dist/

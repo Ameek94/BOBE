@@ -53,8 +53,41 @@ Core Dependencies
 Installation Methods
 --------------------
 
-From Source (Recommended)
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+From PyPI (Recommended)
+~~~~~~~~~~~~~~~~~~~~~~~
+
+BOBE is available on PyPI and can be installed with pip:
+
+.. code-block:: bash
+
+   pip install BOBE
+
+Optional Dependencies
+~~~~~~~~~~~~~~~~~~~~~
+
+BOBE has several optional dependencies for extended functionality:
+
+.. code-block:: bash
+   
+   # For cosmological likelihoods through Cobaya + MPI support
+   pip install BOBE[cosmo]
+   
+   # For Cobaya only
+   pip install BOBE[cobaya]
+   
+   # For MPI support only
+   pip install BOBE[mpi]
+
+   # For neural network classifiers
+   pip install BOBE[nn]
+   
+   # For all optional dependencies
+   pip install BOBE[all]
+
+From Source (Development)
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For development or to use the latest unreleased features:
 
 1. Clone the repository:
 
@@ -63,34 +96,21 @@ From Source (Recommended)
    git clone https://github.com/Ameek94/BOBE.git
    cd BOBE
 
-2. Install the package:
+2. Install in editable mode:
 
 .. code-block:: bash
 
-   # For regular install
-   pip install . 
-
-   # For development mode
    pip install -e .
 
 3. (Optional) Install with additional features:
 
 .. code-block:: bash
    
-   # For cosmological likelihoods through Cobaya
-   pip install -e '.[cobaya]'
-   
-   # For MPI support
-   pip install -e '.[mpi]'
-
-   # For neural network classifiers
-   pip install -e '.[nn]'
-   
-   # For all optional dependencies
-   pip install -e '.[all]'
-
-.. note::
-   The ``-e`` flag installs in editable mode. For a regular install, use ``pip install '.[extra]'`` instead (replace extra with desired optional dependency).
+   pip install -e '.[cosmo]'   # Cobaya + MPI
+   pip install -e '.[cobaya]'  # Cobaya only
+   pip install -e '.[mpi]'     # MPI only
+   pip install -e '.[nn]'      # Neural networks
+   pip install -e '.[all]'     # Everything
 
 Virtual Environment Setup
 --------------------------
@@ -104,7 +124,7 @@ Using conda
 
    conda create -n BOBE python=3.12
    conda activate BOBE
-   pip install -e .
+   pip install BOBE
 
 Using venv
 ~~~~~~~~~~
@@ -113,7 +133,7 @@ Using venv
 
    python -m venv BOBE_env
    source BOBE_env/bin/activate
-   pip install -e .
+   pip install BOBE
 
 GPU/TPU Support
 ---------------
@@ -158,6 +178,9 @@ Troubleshooting
 In case of installation issues, you can also create a virtual environment with the exact package versions BOBE was developed and tested with:
 
 .. code-block:: bash
+
+   git clone https://github.com/Ameek94/BOBE.git
+   cd BOBE
 
    # Create environment from the minimal essential packages
    conda env create -f environment.yml
