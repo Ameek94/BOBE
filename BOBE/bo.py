@@ -690,6 +690,7 @@ class BOBE:
         # Use pool for parallel GP fitting if refitting
         if refit:
             log.info(f"Refitting GP hyperparameters with {self.gp.train_x.shape[0]} training points ")
+            log.info(f"Hyperparameters before refit: {self.gp.hyperparams_dict()}")
             self.pool.gp_fit(self.gp, n_restarts=n_restarts, maxiters=maxiter, rng=self.np_rng, use_pool=True)
             # Reset counter after successful refit
             self.n_points_since_last_fit = 0
@@ -700,6 +701,8 @@ class BOBE:
         lengthscales = list(self.gp.lengthscales)
         kernel_variance = float(self.gp.kernel_variance)
         self.results_manager.update_gp_hyperparams(step, lengthscales, kernel_variance)
+
+        log.info(f"Hyperparameters after refit: {self.gp.hyperparams_dict()}")
 
         if isinstance(self.gp, GPwithClassifier):
             self.results_manager.start_timing('Classifier Training')

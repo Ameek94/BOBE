@@ -274,7 +274,7 @@ class MPI_Pool:
         n_params = gp.hyperparam_bounds.shape[1]  # hp bounds are (2, n_params) shaped
  
         # Prepare initial parameters for all restarts
-        init_params = jnp.log(gp.get_hyperparams())
+        init_params = jnp.array(gp.get_hyperparams_theta())
         if n_restarts > 1:
             x0_random = rng.uniform(
                 gp.hyperparam_bounds[0], 
