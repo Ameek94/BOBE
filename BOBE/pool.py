@@ -1,3 +1,4 @@
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -274,7 +275,17 @@ class MPI_Pool:
         n_params = gp.hyperparam_bounds.shape[1]  # hp bounds are (2, n_params) shaped
  
         # Prepare initial parameters for all restarts
-        init_params = jnp.array(gp.get_hyperparams_theta())
+        if gp.kernel_name == 'spherical_linear':
+            hp = gp.get_hyperparams()
+            lengthscales = hp[:2]
+            b_logits = hp[2:]
+            init_params = jnp.concatenate([
+                jnp.log(lengthscales), 
+                b_logits
+                ])
+        else:
+            init_params = jnp.log(gp.get_hyperparams())
+
         if n_restarts > 1:
             x0_random = rng.uniform(
                 gp.hyperparam_bounds[0], 
