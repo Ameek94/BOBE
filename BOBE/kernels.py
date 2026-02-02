@@ -247,7 +247,7 @@ class SphericalLinearKernel(Kernel):
     def __init__(self, lengthscales, kernel_variance, noise=1e-8, a=None, b_logits=None):
         super().__init__(lengthscales, kernel_variance, noise)
         D = self.lengthscales.shape[0]
-        self.a = jnp.sqrt(D) if a is None else a
+        self.a = 2*jnp.sqrt(D) if a is None else a
         self.b_logits = 1.0 if b_logits is None else b_logits
 
     def _scale(self, x):
@@ -283,17 +283,23 @@ class SphericalLinearKernel(Kernel):
 
 
     def covariance(self, xa, xb, include_noise=True):
-        pa = self._proj(xa).astype(jnp.float64)
-        pb = self._proj(xb).astype(jnp.float64)
-        S = jnp.dot(pa, pb.T)
+        pa = self._proj(xa)
+        pb = self._proj(xb)
+
+        pa = pa / jnp.maximum(jnp.linalg.norm(pa, axis=-1, keepdims=True), 1e-30)
+        pb = pb / jnp.maximum(jnp.linalg.norm(pb, axis=-1, keepdims=True), 1e-30)
+    
+
+        S = pa @ pb.T
 
         b1 = jax.nn.sigmoid(jnp.asarray(self.b_logits).reshape(()))
         b0 = 1.0 - b1
-
         K = self.kernel_variance*(b0 + b1 * S)
-         # Add noise to diagonal if needed
         
-        if include_noise:
-            K += self.noise * jnp.eye(K.shape[0])
+        same_inputs = (xa is xb) or jnp.array_equal(xa, xb)
+        if include_noise and same_inputs:
+            #K += self.noise * jnp.eye(K.shape[0], dtype=K.dtype)
+            diag_floor = jnp.maximum(self.noise, 1e-7 * jnp.maximum(1.0, self.kernel_variance))
+            K = K + diag_floor * jnp.eye(K.shape[0], dtype=K.dtype)
         
         return K
