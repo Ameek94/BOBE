@@ -114,7 +114,7 @@ class Kernel(ABC):
             diag += self.noise
         return diag
     
-    def update_hyperparams(self, lengthscales=None, kernel_variance=None, noise=None, b_logits=None):
+    def update_hyperparams(self, lengthscales=None, kernel_variance=None, noise=None, b_logits=None, a=None):
         """
         Update kernel hyperparameters.
         
@@ -133,8 +133,8 @@ class Kernel(ABC):
             self.kernel_variance = kernel_variance
         if noise is not None:
             self.noise = noise
-        # if a is not None:
-        #     self.a = a
+        if a is not None:
+            self.a = a
         if b_logits is not None:
             self.b_logits = b_logits
     

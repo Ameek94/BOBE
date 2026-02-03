@@ -113,7 +113,7 @@ class GP:
     def __init__(self,train_x,train_y,noise=1e-5,kernel="rbf",optimizer="scipy",optimizer_options={},
                  kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [1.0,5],lengthscales=None,kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], 
-                 b_bounds=[ -10.0, 10.0], param_names: List[str] = None):
+                 b_bounds=[ -10.0, 10.0], a_fixed = False, param_names: List[str] = None):
         """
         Initialize the Gaussian Process model.
 
@@ -200,6 +200,11 @@ class GP:
         if self.kernel_name == 'spherical_linear':
             self.b_logits = 1.0
             self.b_bounds = b_bounds
+            self.a_fixed = a_fixed
+            self.a = 2*jnp.sqrt(self.ndim)
+            if not self.a_fixed:
+                self.a_bounds = [0.1*self.a, 10*self.a]
+            
         # Can store tausq for convenience even though it is only used for SAAS
         self.tausq = tausq if tausq is not None else 1.0
         self.tausq_bounds = tausq_bounds
@@ -281,6 +286,10 @@ class GP:
             self.hyperparam_names.append('tausq')
             self.hyperparam_bounds.append(self.tausq_bounds)
 
+        if self.kernel_name == 'spherical_linear' and not self.a_fixed:
+            self.hyperparam_names.append("a")
+            self.hyperparam_bounds.append(self.a_bounds)
+
         self.hyperparam_bounds = jnp.log(jnp.array(self.hyperparam_bounds).T)
 
         if self.kernel_name == 'spherical_linear':
@@ -317,9 +326,13 @@ class GP:
             tausq = hyperparams[self.ndim + 1] if len(hyperparams) > self.ndim + 1 else self.tausq
         
         if self.kernel_name == 'spherical_linear':
+            if 'a' in self.hyperparam_names:
+                a = hyperparams[-2]
+            else:
+               a = self.a
             b_logits = log_params[-1]
             #log.info(f"HPs after setup {lengthscales}, {kernel_variance}, {tausq}, {b_logits}")
-            return lengthscales, kernel_variance, tausq, b_logits
+            return lengthscales, kernel_variance, tausq, b_logits, a
 
         return lengthscales, kernel_variance, tausq
 
@@ -329,8 +342,8 @@ class GP:
         """
         # Update kernel hyperparameters and compute kernel matrix
         if self.kernel_name == 'spherical_linear':
-            lengthscales, kernel_variance, tausq, b_logits = self._parse_hyperparams(log_params)
-            self.kernel.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance, b_logits=b_logits)
+            lengthscales, kernel_variance, tausq, b_logits, a = self._parse_hyperparams(log_params)
+            self.kernel.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance, b_logits=b_logits, a=a)
         else:
             lengthscales, kernel_variance, tausq, = self._parse_hyperparams(log_params)
             self.kernel.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance)
@@ -389,14 +402,17 @@ class GP:
         Update the GP hyperparameters and recompute the Cholesky and alphas.
         """
         if self.kernel_name == 'spherical_linear':
-            lengthscales, kernel_variance, tausq, b_logits = self._parse_hyperparams(hyperparams)
+            lengthscales, kernel_variance, tausq, b_logits, a = self._parse_hyperparams(hyperparams)
+
             self.lengthscales = lengthscales
             if not self.fixed_kernel_variance:
                 self.kernel_variance = kernel_variance
             self.tausq = tausq
+            if not self.a_fixed:
+                self.a = a
             self.b_logits = b_logits
             # Update kernel object
-            self.kernel.update_hyperparams(lengthscales=self.lengthscales, kernel_variance=self.kernel_variance, b_logits=self.b_logits)
+            self.kernel.update_hyperparams(lengthscales=self.lengthscales, kernel_variance=self.kernel_variance, b_logits=self.b_logits, a = self.a)
         else:
             lengthscales, kernel_variance, tausq = self._parse_hyperparams(hyperparams)
             self.lengthscales = lengthscales
@@ -716,6 +732,9 @@ class GP:
         if self.lengthscale_prior_spec == 'SAAS':
             hp = jnp.hstack([hp, self.tausq])
         if self.kernel_name == 'spherical_linear':
+            if not self.a_fixed:
+                hp = jnp.hstack([hp, self.a])
+
             hp = jnp.hstack([hp, self.kernel.b_logits])
         return hp
     
@@ -727,7 +746,10 @@ class GP:
         }
         if 'tausq' in self.hyperparam_names:
             param_dict['tausq'] = f"{float(self.tausq):.4f}"
+        if 'a' in self.hyperparam_names:
+            param_dict['a'] = f"{float(self.a):.4f}"
         if 'b_logits' in self.hyperparam_names:
             param_dict['b_logits'] = f"{float(self.b_logits):.4f}"
+       
         
         return param_dict

@@ -277,10 +277,12 @@ class MPI_Pool:
         # Prepare initial parameters for all restarts
         if gp.kernel_name == 'spherical_linear':
             hp = gp.get_hyperparams()
-            lengthscales = hp[:2]
-            b_logits = hp[2:]
+            log_hps = hp[:n_params-1]
+            b_logits = hp[-1:]
+            log.info(log_hps)
+            log.info(b_logits)
             init_params = jnp.concatenate([
-                jnp.log(lengthscales), 
+                jnp.log(log_hps), 
                 b_logits
                 ])
         else:
