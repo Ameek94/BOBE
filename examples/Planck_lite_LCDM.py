@@ -35,6 +35,7 @@ def main():
         clf_type='svm',
         minus_inf=-1e5,
         seed=10,
+        gp_kwargs={'kernel':'spherical_linear'}
     )
     
     results = bobe.run(

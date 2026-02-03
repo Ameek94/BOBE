@@ -264,12 +264,14 @@ class GP:
         # Set up lengthscale priors and prior function
         if self.lengthscale_prior_spec == 'DSLP':
             self.lengthscale_prior_dist = dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(self.ndim), scale=sqrt3)
+            self.global_lengthscale_prior_dist = dist.LogNormal(loc=np.log(2*jnp.sqrt(self.ndim)), scale=0.5**2)
             self.prior_func = self._standard_prior_logprob
         elif self.lengthscale_prior_spec == 'SAAS':
             self.lengthscale_prior_dist = None
             self.prior_func = self._saas_prior_logprob  
         else:
             self.lengthscale_prior_dist = make_distribution(self.lengthscale_prior_spec)
+            self.global_lengthscale_prior_dist = dist.LogNormal(loc=np.log(2*jnp.sqrt(self.ndim)), scale=0.5**2)
             self.prior_func = self._standard_prior_logprob
 
     def _setup_optimization_parameters(self):
@@ -299,11 +301,13 @@ class GP:
         self.num_hyperparams = self.hyperparam_bounds.shape[1]
         log.debug(f" Hyperparameter bounds =  {self.hyperparam_bounds}")
 
-    def _standard_prior_logprob(self, lengthscales, kernel_variance, tausq=None):
+    def _standard_prior_logprob(self, lengthscales, kernel_variance, tausq=None, a=None):
         """Standard prior log probability for DSLP and custom priors."""
         logprior = self.kernel_variance_prior_dist.log_prob(kernel_variance)
         if self.lengthscale_prior_dist is not None:
             logprior += self.lengthscale_prior_dist.log_prob(lengthscales).sum()
+        if not self.a_fixed:
+            logprior += self.global_lengthscale_prior_dist.log_prob(a)
         return logprior
     
     def _saas_prior_logprob(self, lengthscales, kernel_variance, tausq):
@@ -352,7 +356,7 @@ class GP:
         mll = gp_mll(K, self.train_y, self.train_y.shape[0])
         
         # Add prior
-        mll += self.prior_func(lengthscales, kernel_variance, tausq)
+        mll += self.prior_func(lengthscales, kernel_variance, tausq, a)
         
         return -mll
 
