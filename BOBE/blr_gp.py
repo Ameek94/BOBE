@@ -32,15 +32,12 @@ class GPwithBLR(GP):
             self,
             train_x,
             train_y,
-            noise: float = 1e-8,
+            noise: float = 1e-6,
             kernel: str = "spherical_linear",
             optimizer: str = "scipy",
             optimizer_options: Dict[str, Any] = {},
-            kernel_variance_bounds: List[float] = [1e-4, 1e8],
             lengthscale_bounds: List[float] = [1.0, 5],
             lengthscales=None,
-            kernel_variance=None,
-            kernel_variance_prior=None,
             lengthscale_prior=None,
             b_bounds: List[float] = [-50, 50],
             a_prior=None,
@@ -58,22 +55,19 @@ class GPwithBLR(GP):
             raise ValueError("GPwithBLR currently only support spherical linear kernel")
 
         # Store Bounds
-        self.kernel_variance_bounds = kernel_variance_bounds
         self.lengthscale_bounds = lengthscale_bounds
         self.b_bounds = b_bounds
 
         # Hyperparameter Priors
-        self.kernel_variance_prior = kernel_variance_prior
         self.a_prior = a_prior
         self.lengthscale_prior = lengthscale_prior
 
         # Fixed Flags
-        self.fixed_kernel_variance = (kernel_variance_prior == "fixed")
         self.fixed_a = (a_prior == "fixed")
 
         # Initial hyperparameters
         self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
-        self.kernel_variance = kernel_variance if kernel_variance is not None else 1.0
+        self.kernel_variance = 1.0
         self.noise = noise
 
         # Defaults for spherical kernel
@@ -81,11 +75,11 @@ class GPwithBLR(GP):
         self.a_bounds = [self.a*1e-3, self.a*1e3]
         self.b_logits = 1.
 
-        self._setup_priors(self.lengthscale_prior, self.kernel_variance_prior)
+        self._setup_priors(self.lengthscale_prior)
         
 
         # Setup kernel
-        self.kernel = SphericalLinearKernel(self.lengthscales, self.kernel_variance, self.noise, self.a, self.b_logits)
+        self.kernel = SphericalLinearKernel(self.lengthscales, self.noise, self.a, self.b_logits)
 
         # Setup optimizer
         self.optimizer_method = optimizer
@@ -144,14 +138,12 @@ class GPwithBLR(GP):
         self.hyperparam_names = ['lengthscales']
         self.hyperparam_bounds = [self.lengthscale_bounds] * self.ndim
         
-        if not self.fixed_kernel_variance:
-            self.hyperparam_names.append('kernel_variance')
-            self.hyperparam_bounds.append(self.kernel_variance_bounds)
             
 
         if not self.fixed_a:
             self.hyperparam_names.append("a")
             self.hyperparam_bounds.append(self.a_bounds)
+
 
         self.hyperparam_bounds = jnp.log(jnp.array(self.hyperparam_bounds).T)
 
@@ -166,28 +158,20 @@ class GPwithBLR(GP):
     def get_hyperparams(self):
         hp = self.lengthscales
 
-        if not self.fixed_kernel_variance:
-            hp = jnp.hstack([hp, self.kernel_variance])
-
         if not self.fixed_a:
              hp = jnp.hstack([hp, self.a])
+        
 
         hp = jnp.hstack([hp, self.kernel.b_logits])
 
         return hp
     
     def _parse_hyperparams(self, log_params):
-        """Parse log parameters into lengthscales, kernel_variance, and optionally tausq."""
+        """Parse log parameters."""
         idx = 0
 
         lengthscales = jnp.exp(log_params[idx:idx + self.ndim])
         idx += self.ndim
-
-        if self.fixed_kernel_variance:
-            kernel_variance = self.kernel_variance
-        else:
-            kernel_variance = jnp.exp(log_params[idx])
-            idx += 1
         
         if self.fixed_a:
             a = self.a
@@ -197,10 +181,10 @@ class GPwithBLR(GP):
         
         b_logits = log_params[idx]
 
-        return lengthscales, kernel_variance, b_logits, a
+        return lengthscales,  b_logits, a 
     
 
-    def _setup_priors(self, lengthscale_prior, kernel_variance_prior):
+    def _setup_priors(self, lengthscale_prior):
         self.lengthscale_prior_spec = lengthscale_prior
         if self.lengthscale_prior_spec is None:
             # Default to DSLP Prior
@@ -208,14 +192,6 @@ class GPwithBLR(GP):
         else:
             # For now do the same thing in either case
             self.lengthscale_prior_dist = dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(self.ndim), scale=sqrt3)
-        
-        self.kernel_variance_prior_spec = kernel_variance_prior
-        if self.kernel_variance_prior_spec is None:
-            self.kernel_variance_prior_spec = {'name': 'Uniform', 'low': self.kernel_variance_bounds[0], 'high': self.kernel_variance_bounds[1]}
-        if not self.fixed_kernel_variance:
-            self.kernel_variance_prior_dist = make_distribution(self.kernel_variance_prior_spec)
-        else:
-            self.kernel_variance_prior_dist = DummyDistribution()
             
         
         if not self.fixed_a:
@@ -228,16 +204,18 @@ class GPwithBLR(GP):
 
 
 
-    def _prior_logprob(self, lengthscales, kernel_variance, a):
+    def _prior_logprob(self, lengthscales, a):
         # DSLP Lengthscale Prior
         logprior = self.lengthscale_prior_dist.log_prob(lengthscales).sum()
         # Kernel Variance Prior
-        if not self.fixed_kernel_variance:
-            logprior += self.kernel_variance_prior_dist.log_prob(kernel_variance)
+    
         if not self.fixed_a:
             logprior += self.global_lengthscale_prior_dist.log_prob(a)
 
         return logprior
+    
+    def _noise_std(self):
+        return jnp.maximum(self.noise / (self.y_std**2), safe_noise_floor)
     
     def _rebuild_feature_cache(self):
         Psi = self.kernel._features(self.train_x)  # (N, M)
@@ -255,17 +233,22 @@ class GPwithBLR(GP):
         if self.PsiTPsi is None:
             self._rebuild_feature_cache()
 
-        tau = jnp.maximum(self.noise, 1e-30)
+        sigma2 = self._noise_std()
+        jitter = safe_noise_floor
         M = self.PsiTPsi.shape[0]
 
-        A = jnp.eye(M, dtype=self.PsiTPsi.dtype) + self.PsiTPsi / tau
-        A = A + safe_noise_floor * jnp.eye(M, dtype=self.PsiTPsi.dtype)  # tiny stabiliser
+        A = jnp.eye(M, dtype=self.PsiTPsi.dtype) + (self.PsiTPsi / sigma2)
+        A += jitter * jnp.eye(M,  dtype=self.PsiTPsi.dtype)
 
         L = jnp.linalg.cholesky(A)
-        mu_w = cho_solve((L, True), self.PsiTy / tau)
+
+        alpha = cho_solve((L, True), self.PsiTy)
+        mu_w = alpha / sigma2
 
         self.A_chol = L
         self.mu_w = mu_w
+    
+    
 
 
     def mll_feature_space(self):
@@ -273,33 +256,41 @@ class GPwithBLR(GP):
         Feature space log marginal likelihood analogue
         """
 
-        if self.PsiTPsi is None:
+        if self.Psi is None:
             self._rebuild_feature_cache()
 
-        tau = jnp.maximum(self.noise, 1e-30)
+        sigma2 = self._noise_std()
+        jitter = safe_noise_floor
+
         N = self.train_y.shape[0]
         M = self.PsiTPsi.shape[0]
 
-        A = jnp.eye(M, dtype=self.PsiTPsi.dtype) + self.PsiTPsi/tau
-        A = A + safe_noise_floor*jnp.eye(M, dtype=self.PsiTPsi.dtype)
+
+        A = jnp.eye(M,  dtype=self.PsiTPsi.dtype) + (self.PsiTPsi / sigma2)
+        A += jitter * jnp.eye(M, dtype=self.PsiTPsi.dtype)
 
         L = jnp.linalg.cholesky(A)
-        mu_w = cho_solve((L, True), self.PsiTy / tau)
 
-        logdetA = 2.0 * jnp.sum(jnp.log(jnp.diag(L)))
-        quad = self.yy / tau - (self.PsiTy @ mu_w) / tau
+        logdetA = 2 * jnp.sum(jnp.log(jnp.diag(L)))
 
-        mll = -0.5 * ( N * jnp.log(2.0 * jnp.pi) + N * jnp.log(tau) + logdetA + quad)
+        alpha = cho_solve((L, True), self.PsiTy)
 
+        quad = (self.yy / sigma2) - (self.PsiTy @ alpha) / (sigma2**2)
+
+        mll = -0.5 * (
+            N * jnp.log(2.0 * jnp.pi) 
+            + N * jnp.log(sigma2) 
+            + logdetA 
+            + quad
+        )
         return mll
 
     def neg_mll(self, log_params):
 
-        lengthscales, kernel_variance, b_logits, a = self._parse_hyperparams(log_params)
+        lengthscales, b_logits, a = self._parse_hyperparams(log_params)
 
         self.kernel.update_hyperparams(
             lengthscales=lengthscales,
-            kernel_variance=kernel_variance,
             b_logits=b_logits,
             a=a
         ) 
@@ -307,7 +298,7 @@ class GPwithBLR(GP):
         self._rebuild_feature_cache()
 
         mll = self.mll_feature_space()
-        logprior = self._prior_logprob(lengthscales, kernel_variance, a)
+        logprior = self._prior_logprob(lengthscales, a)
 
         return - (mll + logprior)
     
@@ -319,8 +310,6 @@ class GPwithBLR(GP):
         """
         if x0 is None:
             parts = [jnp.log(self.lengthscales)]
-            if not self.fixed_kernel_variance:
-                parts.append(jnp.log(self.kernel_variance))
             if not self.fixed_a:
                 parts.append(jnp.log(self.a))
             parts.append(self.b_logits)
@@ -340,16 +329,14 @@ class GPwithBLR(GP):
 
         log.info(f"Best MLL after fit: {-best_loss}")
 
-        lengthscales, kernel_variance, b_logits, a = self._parse_hyperparams(best_params_log)
+        lengthscales, b_logits, a = self._parse_hyperparams(best_params_log)
 
         self.lengthscales = lengthscales
-        self.kernel_variance = kernel_variance
         self.b_logits = b_logits
         self.a = a
 
         self.kernel.update_hyperparams(
             lengthscales=self.lengthscales,
-            kernel_variance=self.kernel_variance,
             b_logits=self.b_logits,
             a=self.a,
         )
@@ -360,17 +347,14 @@ class GPwithBLR(GP):
         return {"mll": -best_loss, "params": best_params_log}
     
     def update_hyperparams(self, hyperparams):
-        lengthscales, kernel_variance, b_logits, a = self._parse_hyperparams(hyperparams)
+        lengthscales, b_logits, a = self._parse_hyperparams(hyperparams)
 
         self.lengthscales = lengthscales
-        self.kernel_variance = kernel_variance
         self.a = a
         self.b_logits = b_logits
 
-
         self.kernel.update_hyperparams(
             lengthscales=self.lengthscales,
-            kernel_variance=self.kernel_variance,
             b_logits=self.b_logits,
             a=self.a,
         )
@@ -389,7 +373,7 @@ class GPwithBLR(GP):
         x = jnp.atleast_2d(x)
         return jax.vmap(self.predict_mean_single, in_axes=0)(x)
     
-    def predict_var_single(self, x):
+    def predict_var_single(self, x, include_noise=True):
         x = jnp.atleast_2d(x)
         Psi = self.kernel._features(x)
 
@@ -399,6 +383,9 @@ class GPwithBLR(GP):
         var_std = jnp.where(jnp.isnan(var_std), safe_noise_floor, var_std)
         var_std = jnp.where(var_std < safe_noise_floor, safe_noise_floor, var_std)
 
+        if include_noise:
+            var_std += self._noise_std()
+
         return (self.y_std**2) * var_std
     
     def predict_var_batched(self, x):
@@ -406,7 +393,7 @@ class GPwithBLR(GP):
         return jax.vmap(self.predict_var_single, in_axes=0)(x)
     
 
-    def predict_single(self, x):
+    def predict_single(self, x, include_noise=True):
         x = jnp.atleast_2d(x)
         Psi = self.kernel._features(x)
 
@@ -416,6 +403,9 @@ class GPwithBLR(GP):
 
         var = jnp.where(jnp.isnan(var), safe_noise_floor, var)
         var = jnp.where(var < safe_noise_floor, safe_noise_floor, var)
+
+        if include_noise:
+            var += self._noise_std()
 
         return mean, var
     
@@ -428,7 +418,6 @@ class GPwithBLR(GP):
         ls_str = {name: f"{float(val):.4f}" for name, val in zip(self.param_names, self.lengthscales)}
         param_dict = {
             'lengthscales': ls_str,
-            'kernel_variance': f"{float(self.kernel_variance):.4f}",
         }
         if 'a' in self.hyperparam_names:
             param_dict['a'] = f"{float(self.a):.4f}"
@@ -447,7 +436,6 @@ class GPwithBLR(GP):
 
             # Hyperparameters
             'lengthscales': np.array(self.lengthscales),
-            'kernel_variance': float(self.kernel_variance),
             'noise': float(self.noise),
             
             "a": float(self.a),
@@ -459,11 +447,9 @@ class GPwithBLR(GP):
             
             # Model configuration
             'kernel_name': self.kernel_name,
-            'fixed_kernel_variance': self.fixed_kernel_variance,
             "fixed_a": self.fixed_a,
 
             'lengthscale_prior_spec': self.lengthscale_prior_spec,
-            'kernel_variance_prior_spec': self.kernel_variance_prior_spec,
             "a_prior_spec": self.a_prior,
             
             'optimizer_method': self.optimizer_method,
@@ -471,7 +457,6 @@ class GPwithBLR(GP):
 
             # Bounds
             'lengthscale_bounds': self.lengthscale_bounds,
-            'kernel_variance_bounds': self.kernel_variance_bounds,
             "a_bounds": self.a_bounds,
             "b_bounds": self.b_bounds,
 
@@ -495,10 +480,7 @@ class GPwithBLR(GP):
             optimizer=state['optimizer_method'],
             optimizer_options=state['optimizer_options'],
             lengthscales=state['lengthscales'],
-            kernel_variance=state['kernel_variance'],
             lengthscale_bounds=state['lengthscale_bounds'],
-            kernel_variance_bounds=state['kernel_variance_bounds'],
-            kernel_variance_prior=state.get('kernel_variance_prior_spec'),
             lengthscale_prior=state.get('lengthscale_prior_spec'),
             a_prior=state.get("a_prior_spec", None),
             b_bounds=state.get("b_bounds", [-50.0, 50.0]),
@@ -512,7 +494,6 @@ class GPwithBLR(GP):
 
         gp.kernel.update_hyperparams(
             lengthscales=gp.lengthscales,
-            kernel_variance=gp.kernel_variance,
             a=gp.a,
             b_logits=gp.b_logits
         )
@@ -580,7 +561,7 @@ class GPwithBLR(GP):
         self.recompute_cholesky()
 
     
-    def fantasy_var(self, new_x, mc_points, k_train_mc=None):
+    def fantasy_var(self, new_x, mc_points, k_train_mc=None, include_noise=True):
         """
         BLR fantasy variance at mc_points after adding new_x
         Ignores k_train_mc (dense-GP optimisation input), kept for signature compatibility
@@ -589,31 +570,34 @@ class GPwithBLR(GP):
         new_x = jnp.atleast_2d(new_x)
         mc_points = jnp.atleast_2d(mc_points)
 
-        # Current caches
-        PsiTPsi = self.PsiTPsi
+        if self.PsiTPsi is None:
+            self._rebuild_feature_cache()
+
+        sigma2 = self._noise_std()
+        jitter = safe_noise_floor
 
         # Feature for new point
         psi_new = self.kernel._features(new_x) # (1, M)
 
         # Update sufficient statistics
-        PsiTPsi_new = PsiTPsi + (psi_new.T @ psi_new) # (M, M)
+        PsiTPsi_new = self.PsiTPsi + (psi_new.T @ psi_new) # (M, M)
         # PsiTy would depend on y_new, but variance doesn't need it.
         # We'll just recompute A from PsiTPsi_new.
-
-        tau = jnp.maximum(self.noise, 1e-30)
         M = PsiTPsi_new.shape[0]
+        A = jnp.eye(M, dtype=PsiTPsi_new.dtype) + (PsiTPsi_new / sigma2)
+        A += jitter * jnp.eye(M, dtype=PsiTPsi_new.dtype)
 
-        A = jnp.eye(M, dtype=PsiTPsi_new.dtype) + PsiTPsi_new / tau
-        A = A + safe_noise_floor * jnp.eye(M, dtype=PsiTPsi_new.dtype)
         L = jnp.linalg.cholesky(A)
 
         # Predictive variance at mc_points: psi_*^T A^{-1} psi_*
         Psi_mc = self.kernel._features(mc_points)         # (Nmc, M)
         v = solve_triangular(L, Psi_mc.T, lower=True)     # (M, Nmc)
-        var_std = jnp.sum(v * v, axis=0)
+        var_std = jnp.sum(v * v, axis=0)                  # (Nmc,)
 
         var_std = jnp.where(jnp.isnan(var_std), safe_noise_floor, var_std)
         var_std = jnp.where(var_std < safe_noise_floor, safe_noise_floor, var_std)
+
+        var_std += sigma2 if include_noise else 0.0
 
         return var_std * (self.y_std **2)
                             
@@ -621,8 +605,6 @@ class GPwithBLR(GP):
 
     def init_params_optim_space(self):
         out = jnp.log(self.lengthscales)
-        if not self.fixed_kernel_variance:
-            out = jnp.r_[out, jnp.log(self.kernel_variance)]
         if not self.fixed_a:
             out = jnp.r_[out, jnp.log(self.a)]
         

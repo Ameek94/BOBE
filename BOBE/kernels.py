@@ -244,8 +244,8 @@ class SphericalLinearKernel(Kernel):
     where P is the inverse sterographic projection onto the unit sphere.
     """
 
-    def __init__(self, lengthscales, kernel_variance, noise=1e-8, a=None, b_logits=None):
-        super().__init__(lengthscales, kernel_variance, noise)
+    def __init__(self, lengthscales, noise=1e-8, a=None, b_logits=None):
+        super().__init__(lengthscales, None, noise)
         D = self.lengthscales.shape[0]
         self.a = 2*jnp.sqrt(D) if a is None else a
         self.b_logits = 1.0 if b_logits is None else b_logits
@@ -281,6 +281,7 @@ class SphericalLinearKernel(Kernel):
         b1 = jax.nn.sigmoid(jnp.asarray(self.b_logits).reshape(()))
         b0 = 1.0 - b1
         return b0, b1
+    
     def _features(self, x):
         """
         Feature map Psi(x) in R^{M}, M = D+2
@@ -288,10 +289,6 @@ class SphericalLinearKernel(Kernel):
         phi(x) = P(u) in R^{D+1}
         b1 = sigmoid(b_logits), b0 = 1 - b1
         psi(x) = [ sqrt(b0), sqrt(b1) * phi(x) ] in R^{D+2}
-
-        Optional amplitude:
-        kernel_variance: scalar > 0
-        Psi <- sqrt(kernel_variance) * Psi
         """
         phi = self._proj(x)                             # (N, D+1)
         b0, b1 = self._b_weights()
@@ -303,7 +300,7 @@ class SphericalLinearKernel(Kernel):
         col0 = jnp.full((N, 1), c0, dtype=phi.dtype)
         Psi = jnp.concatenate([col0, c1 * phi], axis=-1) # (N, D+2)
 
-        Psi = jnp.sqrt(jnp.maximum(self.kernel_variance, 0.0)) * Psi
+        #Psi = jnp.sqrt(jnp.maximum(self.kernel_variance, 0.0)) * Psi
 
         return Psi
 
@@ -314,10 +311,19 @@ class SphericalLinearKernel(Kernel):
         S = pa @ pb.T
 
         b0, b1 = self._b_weights()
-        K = self.kernel_variance*(b0 + b1 *S)
+        K = b0 + b1 * S
         
-        if include_noise and (xa.shape[0] == xb.shape[0]) and jnp.array_equal(xa, xb):
-            #K += self.noise * jnp.eye(K.shape[0], dtype=K.dtype)
+        if include_noise:
             K += self.noise * jnp.eye(K.shape[0], dtype=K.dtype)
         
         return K
+    
+    def diagonal(self, x, include_noise=True):
+        n = x.shape[0]
+        b0, b1 = self._b_weights()
+        diag = (b0 + b1) * jnp.ones((n,), dtype=x.dtype)
+
+        if include_noise:
+            diag += self.noise
+
+        return diag
