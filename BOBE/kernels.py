@@ -252,10 +252,11 @@ class SphericalLinearKernel(Kernel):
 
     def _scale(self, x):
         x = jnp.asarray(x)
+        ls = jnp.asarray(self.lengthscales)
         x = 2.0 * (x - 0.5)
-        ls = jnp.asarray(self.lengthscales).reshape((1, -1))
 
         return x / (self.a * ls)
+
     
     def _proj(self, x):
         """
@@ -265,41 +266,58 @@ class SphericalLinearKernel(Kernel):
         """
 
         u = self._scale(x)
+        ru = jnp.sum(u * u, axis=-1, keepdims=True)
+        denom = jnp.maximum(ru + 1, 1e-30)
 
-        ru = jnp.sum(jnp.square(u), axis=-1, keepdims=True)
+        head = 2.0 * u / denom
+        tail = (ru - 1.0) / denom
+        p = jnp.concatenate([head, tail], axis=-1)
 
+        nrm = jnp.linalg.norm(p, axis=-1, keepdims=True)
+        return p / jnp.maximum(nrm, 1e-30)
+    
+    def _b_weights(self):
 
-        denom = ru + 1.0
+        b1 = jax.nn.sigmoid(jnp.asarray(self.b_logits).reshape(()))
+        b0 = 1.0 - b1
+        return b0, b1
+    def _features(self, x):
+        """
+        Feature map Psi(x) in R^{M}, M = D+2
 
-        denom_safe = jnp.where(denom < 1e-30, 1e-30, denom)
+        phi(x) = P(u) in R^{D+1}
+        b1 = sigmoid(b_logits), b0 = 1 - b1
+        psi(x) = [ sqrt(b0), sqrt(b1) * phi(x) ] in R^{D+2}
 
-        head = 2.0 * u / denom_safe
-        tail = (ru - 1.0) / denom_safe
+        Optional amplitude:
+        kernel_variance: scalar > 0
+        Psi <- sqrt(kernel_variance) * Psi
+        """
+        phi = self._proj(x)                             # (N, D+1)
+        b0, b1 = self._b_weights()
 
+        c0 = jnp.sqrt(jnp.maximum(b0, 0.0))
+        c1 = jnp.sqrt(jnp.maximum(b1, 0.0))
 
-        return jnp.concatenate([head, tail], axis=-1)
+        N = phi.shape[0]
+        col0 = jnp.full((N, 1), c0, dtype=phi.dtype)
+        Psi = jnp.concatenate([col0, c1 * phi], axis=-1) # (N, D+2)
 
+        Psi = jnp.sqrt(jnp.maximum(self.kernel_variance, 0.0)) * Psi
 
-
+        return Psi
 
     def covariance(self, xa, xb, include_noise=True):
         pa = self._proj(xa)
         pb = self._proj(xb)
 
-        pa = pa / jnp.maximum(jnp.linalg.norm(pa, axis=-1, keepdims=True), 1e-30)
-        pb = pb / jnp.maximum(jnp.linalg.norm(pb, axis=-1, keepdims=True), 1e-30)
-    
-
         S = pa @ pb.T
 
-        b1 = jax.nn.sigmoid(jnp.asarray(self.b_logits).reshape(()))
-        b0 = 1.0 - b1
-        K = self.kernel_variance*(b0 + b1 * S)
+        b0, b1 = self._b_weights()
+        K = self.kernel_variance*(b0 + b1 *S)
         
-        same_inputs = (xa is xb) or jnp.array_equal(xa, xb)
-        if include_noise and same_inputs:
+        if include_noise and (xa.shape[0] == xb.shape[0]) and jnp.array_equal(xa, xb):
             #K += self.noise * jnp.eye(K.shape[0], dtype=K.dtype)
-            diag_floor = jnp.maximum(self.noise, 1e-7 * jnp.maximum(1.0, self.kernel_variance))
-            K = K + diag_floor * jnp.eye(K.shape[0], dtype=K.dtype)
+            K += self.noise * jnp.eye(K.shape[0], dtype=K.dtype)
         
         return K

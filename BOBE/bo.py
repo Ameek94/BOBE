@@ -7,6 +7,7 @@ from typing import Optional, Union, Tuple, Dict, Any, Callable
 # from .acquisition import WIPV, EI #, logEI
 from .gp import GP
 from .clf_gp import GPwithClassifier
+from .blr_gp import GPwithBLR
 from .likelihood import Likelihood, CobayaLikelihood
 from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
 from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng, get_new_jax_key
@@ -614,6 +615,8 @@ class BOBE:
             'optimizer': optimizer
         })
         
+        use_blr = ("kernel" in gp_kwargs and gp_kwargs['kernel'] == 'spherical_linear')
+
         # Create GP or GPwithClassifier
         if use_clf:
             clf_threshold = max(75, get_threshold_for_nsigma(clf_nsigma_threshold, self.ndim))
@@ -627,8 +630,12 @@ class BOBE:
                 'gp_threshold': 2 * clf_threshold
             })
             self.gp = GPwithClassifier(**gp_kwargs)
+        elif use_blr:
+            self.gp = GPwithBLR(**gp_kwargs)
         else:
             self.gp = GP(**gp_kwargs)
+
+        log.info(f"BO GP Settings: {use_clf=}, {use_blr=}")
         
         self.results_manager.start_timing('GP Training')
         log.info(f"Hyperparameters before refit: {self.gp.hyperparams_dict()}")

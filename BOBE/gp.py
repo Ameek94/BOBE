@@ -12,7 +12,7 @@ log = get_logger("gp")
 from .optim import optimize_optax, optimize_scipy
 from .utils.seed import get_new_jax_key, get_numpy_rng
 import numpyro.distributions as dist
-from .kernels import Kernel, RBFKernel, MaternKernel, SphericalLinearKernel
+from .kernels import Kernel, RBFKernel, MaternKernel
 
 
 safe_noise_floor = 1e-12
@@ -110,10 +110,9 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
 
 class GP:
     
-    def __init__(self,train_x,train_y,noise=1e-5,kernel="rbf",optimizer="scipy",optimizer_options={},
-                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [1.0,5],lengthscales=None,kernel_variance=None,
-                 kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], 
-                 b_bounds=[ -10.0, 10.0], a_fixed = False, param_names: List[str] = None):
+    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
+                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,5],lengthscales=None,kernel_variance=None,
+                 kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], param_names: List[str] = None):
         """
         Initialize the Gaussian Process model.
 
@@ -161,24 +160,14 @@ class GP:
         self.param_names = param_names if param_names is not None else ['x_'+str(i) for i in range(self.ndim)]
 
         # Setup kernel and initial hyperparameters
-        kernel_classes = {"rbf": RBFKernel, "matern": MaternKernel, "spherical_linear": SphericalLinearKernel}
-
-        if kernel is None:
-            kernel = 'rbf'
-        
-        if kernel not in kernel_classes:
-            raise ValueError(f"Unsupported kernel: {kernel}. Supported kernels are: {list(kernel_classes.keys())}")
-        
-        self.kernel_name = kernel #if kernel == "rbf" else "matern"
+        self.kernel_name = kernel if kernel == "rbf" else "matern"
         self.lengthscales = lengthscales if lengthscales is not None else jnp.ones(self.ndim)
         self.kernel_variance = kernel_variance if kernel_variance is not None else 1.0
         self.noise = noise
         
         # Instantiate kernel object
-        
+        kernel_classes = {"rbf": RBFKernel, "matern": MaternKernel}
         self.kernel = kernel_classes[self.kernel_name](self.lengthscales, self.kernel_variance, self.noise)
-
-        log.info(f"Initialized GP with kernel: {self.kernel_name}")
         
         # Compute initial kernel matrices
         K = self.kernel.covariance(self.train_x, self.train_x, include_noise=True)
@@ -197,14 +186,6 @@ class GP:
         # Store bounds
         self.lengthscale_bounds = lengthscale_bounds
         self.kernel_variance_bounds = kernel_variance_bounds
-        if self.kernel_name == 'spherical_linear':
-            self.b_logits = 1.0
-            self.b_bounds = b_bounds
-            self.a_fixed = a_fixed
-            self.a = 2*jnp.sqrt(self.ndim)
-            if not self.a_fixed:
-                self.a_bounds = [0.1*self.a, 10*self.a]
-            
         # Can store tausq for convenience even though it is only used for SAAS
         self.tausq = tausq if tausq is not None else 1.0
         self.tausq_bounds = tausq_bounds
@@ -213,8 +194,6 @@ class GP:
         self._setup_kernel_variance_prior(kernel_variance_prior)
         self._setup_lengthscale_prior(lengthscale_prior)
         self._setup_optimization_parameters()
-        log.info(self.hyperparam_bounds)
-        log.info(self.hyperparam_names)
 
     def _setup_training_data(self, train_x, train_y):
         """Setup and validate training data, compute standardization parameters."""
@@ -264,14 +243,12 @@ class GP:
         # Set up lengthscale priors and prior function
         if self.lengthscale_prior_spec == 'DSLP':
             self.lengthscale_prior_dist = dist.LogNormal(loc=sqrt2 + 0.5*jnp.log(self.ndim), scale=sqrt3)
-            self.global_lengthscale_prior_dist = dist.LogNormal(loc=np.log(2*jnp.sqrt(self.ndim)), scale=0.5**2)
             self.prior_func = self._standard_prior_logprob
         elif self.lengthscale_prior_spec == 'SAAS':
             self.lengthscale_prior_dist = None
             self.prior_func = self._saas_prior_logprob  
         else:
             self.lengthscale_prior_dist = make_distribution(self.lengthscale_prior_spec)
-            self.global_lengthscale_prior_dist = dist.LogNormal(loc=np.log(2*jnp.sqrt(self.ndim)), scale=0.5**2)
             self.prior_func = self._standard_prior_logprob
 
     def _setup_optimization_parameters(self):
@@ -288,26 +265,15 @@ class GP:
             self.hyperparam_names.append('tausq')
             self.hyperparam_bounds.append(self.tausq_bounds)
 
-        if self.kernel_name == 'spherical_linear' and not self.a_fixed:
-            self.hyperparam_names.append("a")
-            self.hyperparam_bounds.append(self.a_bounds)
-
         self.hyperparam_bounds = jnp.log(jnp.array(self.hyperparam_bounds).T)
-
-        if self.kernel_name == 'spherical_linear':
-            self.hyperparam_names.append('b_logits')
-            self.hyperparam_bounds = jnp.concatenate([self.hyperparam_bounds, jnp.array([self.b_bounds]).T], axis=1)
-
         self.num_hyperparams = self.hyperparam_bounds.shape[1]
         log.debug(f" Hyperparameter bounds =  {self.hyperparam_bounds}")
 
-    def _standard_prior_logprob(self, lengthscales, kernel_variance, tausq=None, a=None):
+    def _standard_prior_logprob(self, lengthscales, kernel_variance, tausq=None):
         """Standard prior log probability for DSLP and custom priors."""
         logprior = self.kernel_variance_prior_dist.log_prob(kernel_variance)
         if self.lengthscale_prior_dist is not None:
             logprior += self.lengthscale_prior_dist.log_prob(lengthscales).sum()
-        if not self.a_fixed:
-            logprior += self.global_lengthscale_prior_dist.log_prob(a)
         return logprior
     
     def _saas_prior_logprob(self, lengthscales, kernel_variance, tausq):
@@ -328,35 +294,22 @@ class GP:
         else:
             kernel_variance = hyperparams[self.ndim]
             tausq = hyperparams[self.ndim + 1] if len(hyperparams) > self.ndim + 1 else self.tausq
-        
-        if self.kernel_name == 'spherical_linear':
-            if 'a' in self.hyperparam_names:
-                a = hyperparams[-2]
-            else:
-               a = self.a
-            b_logits = log_params[-1]
-            #log.info(f"HPs after setup {lengthscales}, {kernel_variance}, {tausq}, {b_logits}")
-            return lengthscales, kernel_variance, tausq, b_logits, a
-
+            
         return lengthscales, kernel_variance, tausq
 
     def neg_mll(self, log_params):
         """
         Computes the negative log marginal likelihood for the GP with given hyperparameters.
         """
+        lengthscales, kernel_variance, tausq = self._parse_hyperparams(log_params)
+        
         # Update kernel hyperparameters and compute kernel matrix
-        if self.kernel_name == 'spherical_linear':
-            lengthscales, kernel_variance, tausq, b_logits, a = self._parse_hyperparams(log_params)
-            self.kernel.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance, b_logits=b_logits, a=a)
-        else:
-            lengthscales, kernel_variance, tausq, = self._parse_hyperparams(log_params)
-            self.kernel.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance)
+        self.kernel.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance)
         K = self.kernel.covariance(self.train_x, self.train_x, include_noise=True)
-
         mll = gp_mll(K, self.train_y, self.train_y.shape[0])
         
         # Add prior
-        mll += self.prior_func(lengthscales, kernel_variance, tausq, a)
+        mll += self.prior_func(lengthscales, kernel_variance, tausq)
         
         return -mll
 
@@ -392,9 +345,7 @@ class GP:
             n_restarts=x0.shape[0], # The number of restarts is the size of the chunk
             optimizer_options=optimizer_options
         )
-        
-        log.info(f"Best MLL after fit: {-best_loss}")
-
+                
         # Return the result in the format the pool expects
         return {
             'mll': -best_loss,
@@ -405,26 +356,13 @@ class GP:
         """
         Update the GP hyperparameters and recompute the Cholesky and alphas.
         """
-        if self.kernel_name == 'spherical_linear':
-            lengthscales, kernel_variance, tausq, b_logits, a = self._parse_hyperparams(hyperparams)
-
-            self.lengthscales = lengthscales
-            if not self.fixed_kernel_variance:
-                self.kernel_variance = kernel_variance
-            self.tausq = tausq
-            if not self.a_fixed:
-                self.a = a
-            self.b_logits = b_logits
-            # Update kernel object
-            self.kernel.update_hyperparams(lengthscales=self.lengthscales, kernel_variance=self.kernel_variance, b_logits=self.b_logits, a = self.a)
-        else:
-            lengthscales, kernel_variance, tausq = self._parse_hyperparams(hyperparams)
-            self.lengthscales = lengthscales
-            if not self.fixed_kernel_variance:
-                self.kernel_variance = kernel_variance
-            self.tausq = tausq
-            # Update kernel object
-            self.kernel.update_hyperparams(lengthscales=self.lengthscales, kernel_variance=self.kernel_variance)
+        lengthscales, kernel_variance, tausq = self._parse_hyperparams(hyperparams)
+        self.lengthscales = lengthscales
+        if not self.fixed_kernel_variance:
+            self.kernel_variance = kernel_variance
+        self.tausq = tausq
+        # Update kernel object
+        self.kernel.update_hyperparams(lengthscales=self.lengthscales, kernel_variance=self.kernel_variance)
         self.recompute_cholesky()
     
     def predict_mean_single(self,x):
@@ -735,11 +673,6 @@ class GP:
             hp = jnp.hstack([hp, self.kernel_variance])
         if self.lengthscale_prior_spec == 'SAAS':
             hp = jnp.hstack([hp, self.tausq])
-        if self.kernel_name == 'spherical_linear':
-            if not self.a_fixed:
-                hp = jnp.hstack([hp, self.a])
-
-            hp = jnp.hstack([hp, self.kernel.b_logits])
         return hp
     
     def hyperparams_dict(self):
@@ -750,10 +683,4 @@ class GP:
         }
         if 'tausq' in self.hyperparam_names:
             param_dict['tausq'] = f"{float(self.tausq):.4f}"
-        if 'a' in self.hyperparam_names:
-            param_dict['a'] = f"{float(self.a):.4f}"
-        if 'b_logits' in self.hyperparam_names:
-            param_dict['b_logits'] = f"{float(self.b_logits):.4f}"
-       
-        
         return param_dict

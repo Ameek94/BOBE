@@ -7,6 +7,7 @@ from BOBE.utils.seed import set_global_seed, get_numpy_rng, get_new_jax_key
 from BOBE.utils.log import get_logger
 from BOBE.gp import GP
 from BOBE.clf_gp import GPwithClassifier
+from BOBE.blr_gp import GPwithBLR
 from BOBE.likelihood import Likelihood, CobayaLikelihood
 log = get_logger('pool')
 
@@ -274,19 +275,10 @@ class MPI_Pool:
         rng = np.random.default_rng() if rng is None else rng
         n_params = gp.hyperparam_bounds.shape[1]  # hp bounds are (2, n_params) shaped
  
-        # Prepare initial parameters for all restarts
-        if gp.kernel_name == 'spherical_linear':
-            hp = gp.get_hyperparams()
-            log_hps = hp[:n_params-1]
-            b_logits = hp[-1:]
-            log.info(log_hps)
-            log.info(b_logits)
-            init_params = jnp.concatenate([
-                jnp.log(log_hps), 
-                b_logits
-                ])
-        else:
-            init_params = jnp.log(gp.get_hyperparams())
+        
+        init_params = gp.init_params_optim_space() if hasattr(gp, "init_params_optim_space") else jnp.log(gp.get_hyperparams())
+
+        init_params = np.atleast_2d(np.array(init_params)) # (1, n_params)
 
         if n_restarts > 1:
             x0_random = rng.uniform(
@@ -294,6 +286,7 @@ class MPI_Pool:
                 gp.hyperparam_bounds[1], 
                 size=(n_restarts - 1, n_params)
             )
+            assert init_params.shape[1] == n_params, (init_params.shape, n_params)
             x0 = np.vstack([init_params, x0_random])
         else:
             x0 = np.atleast_2d(init_params)

@@ -74,6 +74,7 @@ __all__ = [
     "BOBE",
     "GP",
     "GPwithClassifier",
+    "GPwithBLR",
     # Utilities
     "get_dimension_based_defaults",
     # Likelihood classes
