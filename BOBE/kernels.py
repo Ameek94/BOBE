@@ -6,9 +6,11 @@ JAX JIT compilation is handled at higher levels (acquisition functions, optimiza
 """
 
 from abc import ABC, abstractmethod
-from math import sqrt
+from math import sqrt, pi
 import jax
 import jax.numpy as jnp
+from jax.scipy.linalg import cho_solve, solve_triangular
+from .priors import build_prior_state
 
 jax.config.update("jax_enable_x64", True)
 
@@ -17,6 +19,46 @@ sqrt2 = sqrt(2.)
 sqrt3 = sqrt(3.)
 sqrt5 = sqrt(5.)
 
+safe_noise_floor = 1e-12
+
+
+@jax.jit
+def gp_mll(k,train_y,num_points):
+    """
+    Computes the negative marginal log likelihood of the GP
+    """
+    L = jnp.linalg.cholesky(k)
+    alpha = cho_solve((L,True),train_y)
+    mll = -0.5*jnp.einsum("ij,ji",train_y.T,alpha) - jnp.sum(jnp.log(jnp.diag(L))) - 0.5*num_points*jnp.log(2*pi)
+    return mll
+
+@jax.jit
+def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
+    # solve L v = k  -> v has shape (n,)
+    v = solve_triangular(L, k, lower=True)
+
+    # new diagonal entry
+    diag = jnp.sqrt(k_self - jnp.dot(v, v))
+
+    # print(f"Shapes L: {L.shape}, k: {k.shape}, k_self: {k_self}, v: {v.shape}, diag: {diag.shape}")
+
+    # build a zero (n+1)x(n+1) and fill blocks
+    n = L.shape[0]
+    new_L = jnp.zeros((n+1, n+1), dtype=L.dtype)
+    new_L = new_L.at[:n, :n].set(L)      # top-left
+    new_L = new_L.at[n, :n].set(v)       # bottom-left
+    new_L = new_L.at[n, n].set(diag)     # bottom-right
+    return new_L
+
+
+def _hp(hp_init: dict, key: str, default):
+    """
+    Fetch a hyperparam for hp_init, falling back to default when None
+    """
+    if hp_init is None:
+        return default
+    v = hp_init.get(key, default)
+    return default if v is None else v
 
 class Kernel(ABC):
     """
@@ -32,22 +74,159 @@ class Kernel(ABC):
         Observation noise level
     """
     
-    def __init__(self, lengthscales, kernel_variance, noise=1e-8):
+    def __init__(self, hp_init: dict, noise=1e-8):
         """
         Initialize kernel with hyperparameters.
         
         Parameters
         ----------
-        lengthscales : jnp.ndarray
-            Lengthscale for each input dimension
-        kernel_variance : float
-            Kernel variance/amplitude parameter
+        hp_init: dict, optional
+            Dictionary with all user parsed hyperparameter initial values.
         noise : float, optional
             Noise level added to diagonal. Default is 1e-8.
         """
-        self.lengthscales = jnp.array(lengthscales)
-        self.kernel_variance = kernel_variance
+        self.hp_init = hp_init or {}
+
+        self.bounds_spec = self.hp_init.get("bounds", {}) or {}
+        self.prior_spec = self.hp_init.get("priors", {}) or {}
+
+        self.lengthscales = _hp(hp_init, "lengthscales", None)
+        if self.lengthscales is not None:
+            self.lengthscales = jnp.array(self.lengthscales, dtype=jnp.float64)
+        
+        self.ndim = self.lengthscales.shape[0]
+        self.kernel_variance = _hp(hp_init, "kernel_variance", None)
+        if self.kernel_variance is not None:
+            self.kernel_variance = jnp.array(self.kernel_variance, dtype=jnp.float64)
         self.noise = noise
+
+        self.tausq = _hp(hp_init, "tausq", None)
+        if self.tausq is not None:
+            self.tausq = jnp.array(self.tausq, dtype=jnp.float64)
+
+        self.fixed_kernel_variance = False
+        #self.tausq_enabled = False
+
+        self._is_fit = False
+        self.cholesky = None
+        self.alphas = None
+
+        self.train_x = None
+        self.train_y = None
+
+        self.num_hyperparams = None
+        self.hyperparam_bounds = None
+
+    def configure_priors(self):
+        ps = build_prior_state(
+            ndim=self.ndim,
+            kernel_variance_prior_spec=self.prior_spec.get("kernel_variance", None),
+            kernel_variance_bounds=self.bounds_spec.get("kernel_variance", None),
+            lengthscale_prior_spec=self.prior_spec.get("lengthscales", None),
+            lengthscale_bounds=self.bounds_spec.get("lengthscales", None),
+        )
+        self.prior_state = ps
+        self.logprior = ps['logprior_fn']
+
+        self.fixed_kernel_variance = ps['fixed_kernel_variance']
+        self.lengthscale_prior = ps['lengthscale_prior']
+        self.tausq_enabled = ps['tausq_enabled']
+    
+    def configure_hyperparam_optimisation(self):
+        lengthscale_bounds = self.bounds_spec.get("lengthscales", None)
+        kernel_variance_bounds = self.bounds_spec.get("kernel_variance", None)
+        tausq_bounds = self.bounds_spec.get("tausq", None)
+
+        if lengthscale_bounds is None:
+            raise ValueError("Kernel requires bounds for lengthscales")
+        
+        names = ["lengthscales"]
+        bounds_list = [lengthscale_bounds] * self.ndim
+
+        if not getattr(self, "fixed_kernel_variance", False):
+            if kernel_variance_bounds is None:
+                raise ValueError("Kernel requires bounds for kernel variance")
+            names.append("kernel_variance")
+            bounds_list.append(kernel_variance_bounds)
+        
+        if getattr(self, "tausq_enabled", False):
+            if tausq_bounds is None:
+                raise ValueError("Kernel requires bounds for tausq")
+            names.append("tausq")
+            bounds_list.append(tausq_bounds)
+
+        self.hyperparam_names = tuple(names)
+
+        # Convert to log-space bounds as (2, num_params)
+        # bounds_list is list of [low, high] or tuples
+        b = jnp.array(bounds_list, dtype=jnp.float64).T    # (2, P)
+        self.hyperparam_bounds = jnp.log(b)
+        self.num_hyperparams = int(self.hyperparam_bounds.shape[1])
+    
+    def logprior(self, lengthscales, kernel_variance, tausq) -> jnp.ndarray:
+        """
+        Default prior: DSLP
+        """
+        fn = getattr(self, "logprior_fn", None)
+        if fn is None:
+            return jnp.array(0.0, dtype=jnp.float64)
+        else:
+            return fn(lengthscales, kernel_variance, tausq)
+
+    def get_hyperparams(self):
+        parts = [self.lengthscales]
+
+        if not getattr(self, "fixed_kernel_variance", False):
+            parts.append(jnp.array([self.kernel_variance], dtype=jnp.float64))
+        
+        if getattr(self, "tausq_enabled", False):
+            parts.append(jnp.array([getattr(self, "tausq", 1.0)], dtype=jnp.float64))
+        
+        return jnp.concatenate(parts, axis=0)
+    
+    def initial_log_params(self):
+        return jnp.log(self.get_hyperparams())
+    
+    
+    def parse_hyperparams(self, log_params: jnp.ndarray):
+        """
+        Parse optimiser space log params into lengthscale and kernel variance
+        """
+
+        hyp = jnp.exp(log_params)
+        lengthscales = hyp[:self.ndim]
+
+        idx = self.ndim
+
+        if getattr(self, "fixed_kernel_variance", False):
+            kernel_variance = self.kernel_variance
+        else:
+            kernel_variance = hyp[idx]
+            idx += 1
+        
+        if getattr(self, "tausq_enabled", False):
+            tausq = hyp[idx]
+        else:
+            tausq = getattr(self, "tausq", 1.0)
+        
+        return lengthscales, kernel_variance, tausq
+    
+    def build_posterior_cache(self, train_x: jnp.ndarray, train_y: jnp.ndarray) -> None:
+        """
+        Build and store linear algebra objected neede for prediction / fantasy
+        self.cholesky (lower-triangle)
+        self.alphas   (K^{-1} y)
+        """
+        K = self.covariance(train_x, train_x, include_noise=True)
+        L = jnp.linalg.cholesky(K)
+        alpha = cho_solve((L, True), train_y)
+
+        self.cholesky = L
+        self.alphas = alpha
+
+        self.train_x = train_x
+        self.train_y = train_y
+        self._is_fit = True
     
     def sq_dist(self, xa, xb):
         """
@@ -113,8 +292,75 @@ class Kernel(ABC):
         if include_noise:
             diag += self.noise
         return diag
+
+    def predict_mean_single(self, x: jnp.ndarray, y_mean: float, y_std: float) -> jnp.ndarray:
+        """
+        Single point prediction of mean
+        """
+        if self.alphas is None:
+            raise ValueError("Kernel posteror cache missing")
+        
+        x = jnp.atleast_2d(x)
+        k12 = self.covariance(self.train_x, x, include_noise=False) # shape (N,1)
+        mean = jnp.einsum('ij,ji', k12.T, self.alphas)
+        return mean*y_std + y_mean 
     
-    def update_hyperparams(self, lengthscales=None, kernel_variance=None, noise=None, b_logits=None, a=None):
+    def predict_var_single(self, x: jnp.ndarray, y_std: float) -> jnp.ndarray:
+        if self.cholesky is None:
+            raise ValueError("Kernel posteror cache missing")
+        
+        x = jnp.atleast_2d(x)
+        k12 = self.covariance(self.train_x, x, include_noise=False) # shape (N,1)
+        vv = solve_triangular(self.cholesky, k12, lower=True) # shape (N,1)
+        k22 = self.diagonal(x, include_noise=True) # shape (1,) for x (1,ndim)
+        var = k22 - jnp.sum(vv*vv,axis=0) 
+        var = jnp.clip(var, safe_noise_floor, None)
+        return y_std**2 * var.squeeze()
+    
+    def fantasy_var(self, new_x: jnp.ndarray,  mc_points: jnp.ndarray, k_train_mc: jnp.ndarray, y_std: float) -> jnp.ndarray:
+        """
+        Computes the variance of the GP at the mc_points assuming a single point new_x is added to the training set
+        """
+        if self.cholesky is None:
+            raise ValueError("Kernel posteror cache missing")
+        
+        new_x = jnp.atleast_2d(new_x)
+        # new_train_x = jnp.concatenate([self.train_x,new_x])
+        k = self.covariance(self.train_x, new_x, include_noise=False).flatten()           # shape (n,)
+        k_self = self.diagonal(new_x, include_noise=True)[0]  # scalar
+        k11_cho = fast_update_cholesky(self.cholesky,k,k_self)
+
+        # Compute only the extra row for new_x
+        k_new_mc = self.covariance(new_x, mc_points, include_noise=False)  # shape (1, n_mc)
+        k12 = jnp.vstack([k_train_mc,k_new_mc])
+        k22 = self.diagonal(mc_points, include_noise=True) # (N_mc,)
+        vv = solve_triangular(k11_cho, k12, lower=True) # shape (N_train,N_mc)
+        var = k22 - jnp.sum(vv*vv,axis=0) 
+        # handle nans and negative variances due to numerical issues
+        var = jnp.where(jnp.isnan(var),safe_noise_floor,var)
+        var = jnp.where(var<safe_noise_floor,safe_noise_floor,var)
+        return var * y_std**2 
+    
+    def mll(self, log_params: jnp.ndarray) -> jnp.ndarray:
+        """
+        Computes the negative log marginal likelihood for the GP with given hyperparameters.
+        """
+        if not self._is_fit:
+            raise ValueError("Kernel posteror cache missing")
+        lengthscales, kernel_variance, tausq = self.parse_hyperparams(log_params)
+        
+        # Update kernel hyperparameters and compute kernel matrix
+        self.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance)
+        
+        K = self.covariance(self.train_x, self.train_x, include_noise=True)
+        mll = gp_mll(K, self.train_y, self.train_y.shape[0])
+        
+        # Add prior
+        mll += self.logprior(lengthscales, kernel_variance, tausq)
+        
+        return -mll
+    
+    def update_hyperparams(self, *parsed, lengthscales=None, kernel_variance=None, noise=None):
         """
         Update kernel hyperparameters.
         
@@ -127,16 +373,23 @@ class Kernel(ABC):
         noise : float, optional
             New noise level
         """
+        if parsed:
+            if len(parsed) == 3:
+                lengthscales, kernel_variance, tausq = parsed
+            elif len(parsed) == 2:
+                lengthscales, kernel_variance = parsed
+            elif len(parsed) == 1:
+                (lengthscales,) = parsed
+            else:
+                raise ValueError(f"Unexpected parsed hyperparam tuple length: {len(parsed)}")
+        
+
         if lengthscales is not None:
             self.lengthscales = jnp.array(lengthscales)
         if kernel_variance is not None:
             self.kernel_variance = kernel_variance
         if noise is not None:
             self.noise = noise
-        if a is not None:
-            self.a = a
-        if b_logits is not None:
-            self.b_logits = b_logits
     
     def __call__(self, xa, xb, include_noise=True):
         """Convenience method - same as covariance()"""
@@ -244,86 +497,368 @@ class SphericalLinearKernel(Kernel):
     where P is the inverse sterographic projection onto the unit sphere.
     """
 
-    def __init__(self, lengthscales, noise=1e-8, a=None, b_logits=None):
-        super().__init__(lengthscales, None, noise)
-        D = self.lengthscales.shape[0]
-        self.a = 2*jnp.sqrt(D) if a is None else a
-        self.b_logits = 1.0 if b_logits is None else b_logits
+    def __init__(self, hp_init, noise=1e-8, bounds=None):
+        super().__init__(hp_init, noise)
+        # Posterior state (set by fit)
 
-    def _scale(self, x):
-        x = jnp.asarray(x)
-        ls = jnp.asarray(self.lengthscales)
-        x = 2.0 * (x - 0.5)
+        self._printed_x_states= 0
 
-        return x / (self.a * ls)
+        self.kernel_variance = None
+        self.fixed_kernel_variance = True
+        self.tausq_enabled = False
+
+        self.raw_coeffs = jnp.array(_hp(hp_init, "raw_coeffs", [0.0, 0.0]), dtype=jnp.float64)
+        self.raw_global_lengthscale = jnp.array(_hp(hp_init, "raw_global_lengthscale", 0.0), dtype=jnp.float64)
+
+        # self.raw_coeffs = jnp.array([0.0, 0.0], dtype=jnp.float64)         # default -> softmax = (0.5, 0.5)
+        # self.raw_global_lengthscale = jnp.array(0.0, dtype=jnp.float64)      # default -> sigmoid(0) = 0.5
+
+        # bounds
+        self.mins = None
+        self.maxs = None
+        self.centers = None
+        self.ndim = self.lengthscales.shape[0]
+        input_bounds = self.hp_init.get("input_bounds", (0.0, 1.0))
+        self.mins, self.maxs, self.centers = self.ensure_bounds(input_bounds, self.ndim, dtype=jnp.float64)
+
+        # posterior state (set by fit)
+        self.Phi = None
+        self.L = None
+        self.mu_w = None
+
+    def configure_hyperparam_optimisation(self):
+        lengthscale_bounds = self.bounds_spec["lengthscales"]
+        raw_coeffs_bounds = self.bounds_spec['raw_coeffs']
+        raw_global_lengthscale_bounds = self.bounds_spec['raw_global_lengthscale']
+        # if raw_global_lengthscale_bounds is None:
+        #     raw_global_lengthscale_bounds = [0.1*jnp.sqrt(self.ndim), 10*jnp.sqrt(self.ndim)]
+
+        if lengthscale_bounds is None or raw_coeffs_bounds is None or raw_global_lengthscale_bounds is None:
+            raise ValueError(f"Spherical Linear Kernel requires bounds for lengthscales, raw coeffs and raw global lengthscale: {lengthscale_bounds=}, {raw_coeffs_bounds=}, {raw_global_lengthscale_bounds=}")
+
+
+        self.hyperparam_names = tuple(
+            [f"log_lengthscales_{i}" for i in range(self.ndim)] + ["raw_coeffs", "raw_global_lengthscale"]
+        )
+        
+        ls_b = jnp.log(jnp.array(lengthscale_bounds, dtype=jnp.float64)) # (2,)
+        ls_block = jnp.stack(
+            [
+                jnp.full((self.ndim,), ls_b[0]), 
+                jnp.full((self.ndim,), ls_b[1]),
+            ], 
+        axis=0
+        ) # (2, D)
+        
+        rc_b = jnp.array(raw_coeffs_bounds, dtype=jnp.float64)
+        rg_b = jnp.array(raw_global_lengthscale_bounds, dtype=jnp.float64)
+
+        rc_block = jnp.stack(
+            [
+                jnp.full((2,), rc_b[0]), 
+                jnp.full((2,), rc_b[1])
+            ], 
+            axis=0
+            ) # (2, 2)
+        rg_block = jnp.stack(
+            [
+                jnp.full((1,), rg_b[0]), 
+                jnp.full((1,), rg_b[1])
+            ], 
+            axis=0) # (2, 1)
+
+        self.hyperparam_bounds = jnp.concatenate([ls_block, rc_block, rg_block], axis=1) # (2, D+3)
+        self.num_hyperparams = int(self.hyperparam_bounds.shape[1])
+
+
+    def logprior(self, lengthscales, raw_coeffs, raw_global_lengthscale):
+        raise NotImplementedError
+    
+
+    def update_hyperparams(self, *parsed, lengthscales=None, raw_coeffs=None, raw_global_lengthscale=None, noise=None):
+
+        if parsed:
+            if len(parsed) != 3:
+                raise ValueError(f"Unexpected parsed hyperparam tuple length: {len(parsed)}")
+            lengthscales, raw_coeffs, raw_global_lengthscale = parsed
+
+        if lengthscales is not None:
+            self.lengthscales = jnp.array(lengthscales)
+        if raw_coeffs is not None:
+            self.raw_coeffs = jnp.array(raw_coeffs)
+        if raw_global_lengthscale is not None:
+            self.raw_global_lengthscale = jnp.array(raw_global_lengthscale)
+        if noise is not None:
+            self.noise = noise
+
+    def parse_hyperparams(self, log_params):
+        log_params = log_params.reshape(-1,)
+        lengthscales = jnp.exp(log_params[:self.ndim])
+        raw_coeffs = log_params[self.ndim:self.ndim+2]
+        raw_global_lengthscale = log_params[self.ndim+2]
+        return lengthscales, raw_coeffs, raw_global_lengthscale
+    
+    def get_hyperparams(self):
+        return jnp.concatenate(
+            [
+                jnp.log(self.lengthscales),
+                self.raw_coeffs.reshape(-1),
+                jnp.atleast_1d(self.raw_global_lengthscale),
+            ],
+            axis=0,
+        )
+    
+    def initial_log_params(self):
+        return self.get_hyperparams()
+    
+    def build_posterior_cache(self, train_x, train_y):
+        Phi = self.phi(train_x)
+        y = jnp.squeeze(train_y)
+
+        N, M = Phi.shape
+        sigma2 = jnp.maximum(self.noise, safe_noise_floor)
+        inv_sigma2 = 1.0 / sigma2
+
+        A = jnp.eye(M, dtype=Phi.dtype) + inv_sigma2 * (Phi.T @ Phi)
+        A = 0.5 * (A + A.T)
+        A += safe_noise_floor * jnp.eye(M, dtype=A.dtype)
+    
+        #jitter = jnp.maximum(safe_noise_floor, 1e-10 * jnp.mean(jnp.diag(A)))
+
+        L = jnp.linalg.cholesky(A)
+
+        v = Phi.T @ y
+        mu_w = inv_sigma2 * cho_solve((L, True), v)
+
+        self.Phi = Phi
+        self.L = L
+        self.mu_w = mu_w
+
+        self.train_x = train_x
+        self.train_y = train_y
+        self._is_fit = True
+
+    def inv_stereographic_projection(self, u: jnp.ndarray) -> jnp.ndarray:
+        """
+        u: (..., N, D)
+        returns: (..., N, D+1) on unit sphere
+        """
+        u_sq = jnp.sum(u * u, axis=-1, keepdims=True)                    # (..., N, 1)
+        denom = 1.0 + u_sq                                               # (..., N, 1)
+        return jnp.concatenate([2.0 * u, (u_sq - 1.0)], axis=-1) / denom
+    
+    def ensure_bounds(self, bounds, D: int, dtype=jnp.float64):
+        """
+        bounds: either (min, max) or sequence of (min_d, max_d)
+        returns: mins, maxs, centers as (D,)
+        """
+        if isinstance(bounds, (float, int)):
+            raise TypeError("bounds must be (min, max) or array-like of shape (D,2); got scalar.")
+
+        if isinstance(bounds, (tuple, list)) and len(bounds) == 2 and isinstance(bounds[0], (float, int)):
+            mins = jnp.full((D,), bounds[0], dtype=dtype)
+            maxs = jnp.full((D,), bounds[1], dtype=dtype)
+        else:
+            b = jnp.asarray(bounds, dtype=dtype)
+            if b.shape != (D, 2):
+                raise ValueError(f"bounds must have shape (D,2) with D={D}; got {b.shape}.")
+            mins = b[:, 0]
+            maxs = b[:, 1]
+        centers = 0.5 * (mins + maxs)
+        return mins, maxs, centers
+
+    def spherical_linear_features(self, X: jnp.ndarray) -> jnp.ndarray:
+        """
+        X: (N, D) assumed within [mins, maxs]
+        returns Phi: (N, D+2) where kernel is Phi @ Phi.T
+        """
+
+        #assert jnp.all(X <= maxs) and jnp.all(X >= mins)
+
+        # Softmax -> weights b0 (constant), b1 (linear)
+        coeffs = jax.nn.softmax(self.raw_coeffs)                                 # (2,)
+        b0, b1 = coeffs[0], coeffs[1]
+
+        # Sigmoid -> g in (0,1)
+        g = jax.nn.sigmoid(jnp.squeeze(self.raw_global_lengthscale))               # scalar
+
+        # max_sq_norm = sum(((max - min)/(2*lengthscales))^2)
+        half_range = 0.5 * (self.maxs - self.mins)                                    # (D,)
+        max_sq_norm = jnp.sum((half_range / self.lengthscales) ** 2)             # scalar
+
+        global_lengthscale = jnp.sqrt(g * max_sq_norm)                      # scalar
+
+        # Center + scale by ARD lengthscales, then divide by global lengthscale
+        U = (X - self.centers) / self.lengthscales
+        U = U / global_lengthscale
+
+        # Inverse stereographic projection -> (N, D+1)
+        S = self.inv_stereographic_projection(U[:, None, :]).squeeze(axis=1)    # (N, D+1)
+
+        # Append constant and apply sqrt weights
+        term0_sqrt = jnp.sqrt(b0)
+        term1_sqrt = jnp.sqrt(b1)
+
+        Phi = jnp.concatenate(
+            [
+                jnp.full((X.shape[0], 1), term0_sqrt, dtype=X.dtype),
+                S * term1_sqrt, 
+            ],
+            axis=-1
+        )                                                                   # (N, D+2)
+        return Phi
+    
+    def spherical_linear_kernel_matrix(self, Phi1: jnp.ndarray, Phi2: jnp.ndarray | None = None) -> jnp.ndarray:
+        """
+        Returns K = Phi1 @ Phi2.T (or Phi1 @ Phi1.T if Phi2 is None)
+        """
+
+        if Phi2 is None:
+            return Phi1 @ Phi1.T
+        return Phi1 @ Phi2.T
+    
+    def spherical_linear_kernel_diag(self, Phi: jnp.ndarray) -> jnp.ndarray:
+        """
+        Diagonal of K = Phi Phi^T is row-wise squared norm of Phi
+        """
+        return jnp.sum(Phi * Phi, axis=-1)
 
     
-    def _proj(self, x):
-        """
-        Inverse stereographic projection from R^D -> S^D (subset of R^{D+1})
-        If u in R^D then
-        P(u) = [2u / (||u||^2 + 1), (||u||^2 - 1) / (||u||^2 + 1)]
-        """
-
-        u = self._scale(x)
-        ru = jnp.sum(u * u, axis=-1, keepdims=True)
-        denom = jnp.maximum(ru + 1, 1e-30)
-
-        head = 2.0 * u / denom
-        tail = (ru - 1.0) / denom
-        p = jnp.concatenate([head, tail], axis=-1)
-
-        nrm = jnp.linalg.norm(p, axis=-1, keepdims=True)
-        return p / jnp.maximum(nrm, 1e-30)
+    def phi(self, X: jnp.ndarray) -> jnp.ndarray:
+        # compute features using stored bounds + hyperparams
+        if self.mins is None or self.maxs is None or self.centers is None:
+            raise ValueError("Bounds not set. Please provide bounds at init or set self.mins/maxs/centers first")
+        return self.spherical_linear_features(X)
     
-    def _b_weights(self):
-
-        b1 = jax.nn.sigmoid(jnp.asarray(self.b_logits).reshape(()))
-        b0 = 1.0 - b1
-        return b0, b1
-    
-    def _features(self, x):
-        """
-        Feature map Psi(x) in R^{M}, M = D+2
-
-        phi(x) = P(u) in R^{D+1}
-        b1 = sigmoid(b_logits), b0 = 1 - b1
-        psi(x) = [ sqrt(b0), sqrt(b1) * phi(x) ] in R^{D+2}
-        """
-        phi = self._proj(x)                             # (N, D+1)
-        b0, b1 = self._b_weights()
-
-        c0 = jnp.sqrt(jnp.maximum(b0, 0.0))
-        c1 = jnp.sqrt(jnp.maximum(b1, 0.0))
-
-        N = phi.shape[0]
-        col0 = jnp.full((N, 1), c0, dtype=phi.dtype)
-        Psi = jnp.concatenate([col0, c1 * phi], axis=-1) # (N, D+2)
-
-        #Psi = jnp.sqrt(jnp.maximum(self.kernel_variance, 0.0)) * Psi
-
-        return Psi
-
     def covariance(self, xa, xb, include_noise=True):
-        pa = self._proj(xa)
-        pb = self._proj(xb)
+        """
+        Feature-space kernel: K = Phi(xa) Phi(xb)^T
+        """
 
-        S = pa @ pb.T
+        Phi_a = self.phi(xa)
+        Phi_b = self.phi(xb)
 
-        b0, b1 = self._b_weights()
-        K = b0 + b1 * S
-        
-        if include_noise:
-            K += self.noise * jnp.eye(K.shape[0], dtype=K.dtype)
-        
+        K = self.spherical_linear_kernel_matrix(Phi_a, Phi_b)
+
+        # if include_noise:
+        #     K += self.noise * jnp.eye(K.shape[0], dtype=K.dtype)
         return K
     
     def diagonal(self, x, include_noise=True):
-        n = x.shape[0]
-        b0, b1 = self._b_weights()
-        diag = (b0 + b1) * jnp.ones((n,), dtype=x.dtype)
-
+        Phi = self.phi(x)
+        diag = self.spherical_linear_kernel_diag(Phi)
         if include_noise:
             diag += self.noise
-
         return diag
+    
+
+    def mll(self, log_params) -> jnp.ndarray:
+        """
+        Feature space log marginal likelihood analogue.
+        """
+
+        if not self._is_fit:
+            raise ValueError("Kernel posteror cache missing")
+
+        lengthscales, raw_coeffs, raw_global_lengthscale = self.parse_hyperparams(log_params)
+        self.update_hyperparams(
+            lengthscales,
+            raw_coeffs,
+            raw_global_lengthscale
+        )
+
+
+        X = self.train_x
+        y = jnp.squeeze(self.train_y)
+
+        Phi = self.phi(X)
+        N, M = Phi.shape
+
+        sigma2 = jnp.maximum(self.noise, safe_noise_floor)
+        inv_sigma2 = 1.0 / sigma2
+
+        A = jnp.eye(M, dtype=Phi.dtype) + inv_sigma2 * (Phi.T @ Phi)
+        A = 0.5 * (A + A.T)
+        A += safe_noise_floor * jnp.eye(M, dtype=A.dtype)
+    
+        #jitter = jnp.maximum(safe_noise_floor, 1e-10 * jnp.mean(jnp.diag(A)))
+
+        L = jnp.linalg.cholesky(A)
+        logdetA = 2.0 * jnp.sum(jnp.log(jnp.diag(L)))
+
+        v = Phi.T @ y
+        Ainv_v = cho_solve((L, True), v)
+
+        yy = jnp.dot(y , y)
+        quad = (yy / sigma2) - (jnp.dot(v, Ainv_v)) / (sigma2 ** 2)
+
+        mll_val =  -0.5 * (N * jnp.log(2.0 * jnp.pi) + N * jnp.log(sigma2) + logdetA + quad)
+
+        mll_val += self.logprior(
+            lengthscales=lengthscales, 
+            raw_coeffs=raw_coeffs, 
+            raw_global_lengthscale=raw_global_lengthscale)
+
+        return -(mll_val)
+    
+
+    def _Ainv_dot(self, V: jnp.ndarray) -> jnp.ndarray:
+        """Compute A^{-1} V using stored chol(A) - self.L"""
+        if self.L is None:
+            raise ValueError("Kernel not fitted: self.L is None")
+        
+        L = self.L
+
+        if V.ndim == 1:
+            V2 = V[:, None]
+            tmp = solve_triangular(L, V2, lower=True)
+            out = solve_triangular(L.T, tmp, lower=False)
+            return out[:, 0]
+
+        tmp = solve_triangular(L, V, lower=True)
+        return solve_triangular(L.T, tmp, lower=False)
+
+    def predict_mean_single(self, x: jnp.ndarray, y_mean: float, y_std: float) -> jnp.ndarray:
+
+        if self.mu_w is None:
+            raise ValueError("Kernel not fit: self.mu_w is None")
+
+        x = jnp.atleast_2d(x)
+        phi_x = jnp.squeeze(self.phi(x), axis=0)
+        mu_std = phi_x @ self.mu_w
+        return mu_std * y_std + y_mean
+    
+    def predict_var_single(self, x: jnp.ndarray, y_std: int) -> jnp.ndarray:
+        x = jnp.atleast_2d(x)
+        phi_x = jnp.squeeze(self.phi(x), axis=0)
+
+        Ainv_phi = self._Ainv_dot(phi_x)
+
+        var_std = phi_x @ Ainv_phi
+        var_std += self.noise
+        return var_std * y_std**2
+    
+    def fantasy_var(self, new_x: jnp.ndarray, mc_points: jnp.ndarray, k_train_mc: jnp.ndarray, y_std: int) -> jnp.ndarray:
+        new_x = jnp.atleast_2d(new_x)
+        phi_new = jnp.squeeze(self.phi(new_x), axis = 0)
+
+        u = phi_new / jnp.sqrt(self.noise)
+        Ainv_u = self._Ainv_dot(u)
+        denom = 1.0 + (u @ Ainv_u)
+        denom = jnp.maximum(denom, safe_noise_floor)
+
+        Phi_mc = self.phi(mc_points)
+
+        Ainv_PhiT = self._Ainv_dot(Phi_mc.T)
+        s = jnp.sum(Phi_mc.T * Ainv_PhiT, axis=0)
+
+        c = Phi_mc @ Ainv_u
+
+        var_std = (s - (c * c) / denom)
+
+        var_std += self.noise
+
+        #var_std += self.noise
+
+        return var_std * y_std**2
+

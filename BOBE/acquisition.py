@@ -172,12 +172,15 @@ class AcquisitionFunction:
 
         if n_batch > 1:
             # Create dummy GP without classifier functionality, for now we do not use batching for EI/LogEI
-            dummy_gp = GP(train_x=gp.train_x, 
-                         train_y=gp.train_y*gp.y_std + gp.y_mean,
-                         noise=gp.noise,
-                         kernel=gp.kernel_name,
-                         lengthscales=gp.lengthscales,
-                         kernel_variance=gp.kernel_variance,)
+            state = gp.state_dict()
+            dummy_gp = GP.from_state_dict(state)
+            # dummy_gp = GP(train_x=gp.train_x, 
+            #              train_y=gp.train_y*gp.y_std + gp.y_mean,
+            #              noise=gp.noise,
+            #              kernel=gp.kernel_name,
+            #              lengthscales=gp.kernel.lengthscales,
+            #              kernel_variance=gp.kernel.kernel_variance,)
+            
                         
             dummy_gp.update(x_next, dummy_gp.predict_mean_single(x_next))
             for i in range(1,n_batch):
@@ -436,7 +439,7 @@ class WIPV(WeightedIntegratedPosteriorBase):
     name: str = "WIPV"
 
     def fun(self, x, gp,  mc_points=None, k_train_mc = None):
-        var = gp.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc)
+        var = gp.kernel.fantasy_var(new_x=x, mc_points=mc_points,k_train_mc=k_train_mc)
         return jnp.mean(var)
 
 

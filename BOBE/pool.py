@@ -7,7 +7,7 @@ from BOBE.utils.seed import set_global_seed, get_numpy_rng, get_new_jax_key
 from BOBE.utils.log import get_logger
 from BOBE.gp import GP
 from BOBE.clf_gp import GPwithClassifier
-from BOBE.blr_gp import GPwithBLR
+#from BOBE.blr_gp import GPwithBLR
 from BOBE.likelihood import Likelihood, CobayaLikelihood
 log = get_logger('pool')
 
@@ -273,17 +273,17 @@ class MPI_Pool:
             n_restarts = min(n_restarts, 2 * self.size)
 
         rng = np.random.default_rng() if rng is None else rng
-        n_params = gp.hyperparam_bounds.shape[1]  # hp bounds are (2, n_params) shaped
+        n_params = gp.kernel.hyperparam_bounds.shape[1]  # hp bounds are (2, n_params) shaped
  
         
-        init_params = gp.init_params_optim_space() if hasattr(gp, "init_params_optim_space") else jnp.log(gp.get_hyperparams())
+        init_params = gp.kernel.initial_log_params()
 
         init_params = np.atleast_2d(np.array(init_params)) # (1, n_params)
 
         if n_restarts > 1:
             x0_random = rng.uniform(
-                gp.hyperparam_bounds[0], 
-                gp.hyperparam_bounds[1], 
+                gp.kernel.hyperparam_bounds[0], 
+                gp.kernel.hyperparam_bounds[1], 
                 size=(n_restarts - 1, n_params)
             )
             assert init_params.shape[1] == n_params, (init_params.shape, n_params)
@@ -295,7 +295,7 @@ class MPI_Pool:
         if not self.is_mpi or not use_pool:
             log.info(f"Running serial GP fit with {n_restarts} restarts.")
             results = gp.fit(x0=x0, maxiter=maxiters)
-            gp.update_hyperparams(results['params'])
+            #gp.update_hyperparams(results['params'])
             return results
         
         # MPI Parallel Block - distribute restarts across workers
@@ -312,7 +312,7 @@ class MPI_Pool:
             payload = {
                 'state_dict': state_dict, 
                 'fit_params': fit_params, 
-                'use_clf': isinstance(gp, GPwithClassifier)
+                'use_clf': isinstance(gp, GPwithClassifier),
             }
             self.comm.send((self.TASK_GP_FIT, payload), dest=i)
 
@@ -328,8 +328,11 @@ class MPI_Pool:
 
         # Select best result and update GP
         best_result = max(all_results, key=lambda r: r['mll'])
-        best_params = best_result['params']
-        gp.update_hyperparams(best_params)
+        best_params_log = best_result['params']
+        parsed = gp.kernel.parse_hyperparams(best_params_log)
+        gp.kernel.update_hyperparams(*parsed)
+        gp.kernel.build_posterior_cache(gp.train_x, gp.train_y)
+        #gp.update_hyperparams(best_params)
         
         return best_result
 

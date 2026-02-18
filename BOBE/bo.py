@@ -7,7 +7,7 @@ from typing import Optional, Union, Tuple, Dict, Any, Callable
 # from .acquisition import WIPV, EI #, logEI
 from .gp import GP
 from .clf_gp import GPwithClassifier
-from .blr_gp import GPwithBLR
+#from .blr_gp import GPwithBLR
 from .likelihood import Likelihood, CobayaLikelihood
 from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
 from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng, get_new_jax_key
@@ -614,8 +614,6 @@ class BOBE:
             'param_names': self.loglikelihood.param_list, 
             'optimizer': optimizer
         })
-        
-        use_blr = ("kernel" in gp_kwargs and gp_kwargs['kernel'] == 'spherical_linear')
 
         # Create GP or GPwithClassifier
         if use_clf:
@@ -630,12 +628,8 @@ class BOBE:
                 'gp_threshold': 2 * clf_threshold
             })
             self.gp = GPwithClassifier(**gp_kwargs)
-        elif use_blr:
-            self.gp = GPwithBLR(**gp_kwargs)
         else:
             self.gp = GP(**gp_kwargs)
-
-        log.info(f"BO GP Settings: {use_clf=}, {use_blr=}")
         
         self.results_manager.start_timing('GP Training')
         log.info(f"Hyperparameters before refit: {self.gp.hyperparams_dict()}")
@@ -705,11 +699,16 @@ class BOBE:
         self.results_manager.end_timing('GP Training')
 
         # Extract GP hyperparameters for tracking
-        lengthscales = list(self.gp.lengthscales)
-        kernel_variance = float(self.gp.kernel_variance)
-        self.results_manager.update_gp_hyperparams(step, lengthscales, kernel_variance)
+        hp = self.gp.hyperparams_dict()
+        if "lengthscales" in hp and "kernel_variance" in hp:
+            lengthscales = [float(v) for v in hp["lengthscales"].values()]
+            kernel_variance = float(hp["kernel_variance"])
+            #lengthscales = list(self.gp.kernel.lengthscales)
+            #kernel_variance = float(self.gp.kernel.kernel_variance)
+            self.results_manager.update_gp_hyperparams(step, lengthscales, kernel_variance)
+        # Add a way to track other hyperparams by making result manager kernel agnostic
 
-        log.info(f"Hyperparameters after refit: {self.gp.hyperparams_dict()}")
+        log.info(f"Hyperparameters after refit: {hp}")
 
         if isinstance(self.gp, GPwithClassifier):
             self.results_manager.start_timing('Classifier Training')
