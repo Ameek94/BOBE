@@ -50,6 +50,25 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
     new_L = new_L.at[n, n].set(diag)     # bottom-right
     return new_L
 
+@jax.jit
+def woodbury_solve(L, y, noise):
+    # L: (n,k), y: (n,), noise: scalar
+    # Returns alpha = (L L^T + noise I)^{-1} y
+    inv_noise = 1.0 / noise
+
+    Lt_y = L.T @ y                                         # (k,)
+    B = jnp.eye(L.shape[1]) + inv_noise * (L.T @ L)        # (k,k) the plus sign here is different from gpytorch which is not the standard form of the woodbury 
+    cholB = jnp.linalg.cholesky(B)
+    tmp = cho_solve((cholB, True), Lt_y)
+    alpha = inv_noise * y - (inv_noise**2) * (L @ tmp)
+    return alpha, cholB
+
+@jax.jit
+def woodbury_logdet(L, noise, cholB):
+    # log| noise I + L L^T | = n log noise + log|B|
+    n = L.shape[0]
+    logdetB = 2.0 * jnp.sum(jnp.log(jnp.diag(cholB)))
+    return n * jnp.log(noise) + logdetB
 
 def _hp(hp_init: dict, key: str, default):
     """
@@ -497,14 +516,14 @@ class SphericalLinearKernel(Kernel):
     where P is the inverse sterographic projection onto the unit sphere.
     """
 
-    def __init__(self, hp_init, noise=1e-8, bounds=None):
+    def __init__(self, hp_init, noise=1e-8):
         super().__init__(hp_init, noise)
         # Posterior state (set by fit)
 
         self._printed_x_states= 0
 
         self.kernel_variance = None
-        self.fixed_kernel_variance = True
+        self.fixed_kernel_variance = False
         self.tausq_enabled = False
 
         self.raw_coeffs = jnp.array(_hp(hp_init, "raw_coeffs", [0.0, 0.0]), dtype=jnp.float64)
@@ -523,8 +542,10 @@ class SphericalLinearKernel(Kernel):
 
         # posterior state (set by fit)
         self.Phi = None
-        self.L = None
-        self.mu_w = None
+        self.alpha= None
+        self.cholB = None
+        # self.L = None
+        # self.mu_w = None
 
     def configure_hyperparam_optimisation(self):
         lengthscale_bounds = self.bounds_spec["lengthscales"]
@@ -612,40 +633,26 @@ class SphericalLinearKernel(Kernel):
         return self.get_hyperparams()
     
     def build_posterior_cache(self, train_x, train_y):
-        Phi = self.phi(train_x)
+        Phi = self.spherical_linear_features(train_x)
         y = jnp.squeeze(train_y)
 
-        N, M = Phi.shape
-        sigma2 = jnp.maximum(self.noise, safe_noise_floor)
-        inv_sigma2 = 1.0 / sigma2
-
-        A = jnp.eye(M, dtype=Phi.dtype) + inv_sigma2 * (Phi.T @ Phi)
-        A = 0.5 * (A + A.T)
-        A += safe_noise_floor * jnp.eye(M, dtype=A.dtype)
-    
-        #jitter = jnp.maximum(safe_noise_floor, 1e-10 * jnp.mean(jnp.diag(A)))
-
-        L = jnp.linalg.cholesky(A)
-
-        v = Phi.T @ y
-        mu_w = inv_sigma2 * cho_solve((L, True), v)
+        alpha, cholB = woodbury_solve(Phi, y, self.noise)
 
         self.Phi = Phi
-        self.L = L
-        self.mu_w = mu_w
+        self.alpha = alpha
+        self.cholB = cholB
+
+        self.logdetKy = woodbury_logdet(Phi, self.noise, cholB)
 
         self.train_x = train_x
         self.train_y = train_y
         self._is_fit = True
 
-    def inv_stereographic_projection(self, u: jnp.ndarray) -> jnp.ndarray:
-        """
-        u: (..., N, D)
-        returns: (..., N, D+1) on unit sphere
-        """
-        u_sq = jnp.sum(u * u, axis=-1, keepdims=True)                    # (..., N, 1)
-        denom = 1.0 + u_sq                                               # (..., N, 1)
-        return jnp.concatenate([2.0 * u, (u_sq - 1.0)], axis=-1) / denom
+    def project_onto_unit_sphere(self, x: jnp.ndarray) -> jnp.ndarray:
+        x_sq_norm = jnp.sum(x * x, axis=-1, keepdims=True)
+        x_ = jnp.concatenate([2 * x, (x_sq_norm - 1.0)], axis=-1) 
+        x_ *= 1.0 / (1.0 + x_sq_norm)
+        return x_
     
     def ensure_bounds(self, bounds, D: int, dtype=jnp.float64):
         """
@@ -667,86 +674,56 @@ class SphericalLinearKernel(Kernel):
         centers = 0.5 * (mins + maxs)
         return mins, maxs, centers
 
+    
     def spherical_linear_features(self, X: jnp.ndarray) -> jnp.ndarray:
         """
         X: (N, D) assumed within [mins, maxs]
         returns Phi: (N, D+2) where kernel is Phi @ Phi.T
         """
+        # constants
+        lengthscale = self.lengthscales
+        max_sq_norm = jnp.sum(((self.maxs - self.mins) / (2.0 * lengthscale))**2, keepdims=True)
+        global_ls = jax.nn.sigmoid(self.raw_global_lengthscale)
+        global_ls_eff = jnp.sqrt(global_ls * max_sq_norm)
 
-        #assert jnp.all(X <= maxs) and jnp.all(X >= mins)
+        # center and scale
+        X1 = (X - self.centers) / lengthscale
+        X1 = X1 / global_ls_eff
 
-        # Softmax -> weights b0 (constant), b1 (linear)
-        coeffs = jax.nn.softmax(self.raw_coeffs)                                 # (2,)
-        b0, b1 = coeffs[0], coeffs[1]
+        # project onto sphere
+        S = self.project_onto_unit_sphere(X1)
 
-        # Sigmoid -> g in (0,1)
-        g = jax.nn.sigmoid(jnp.squeeze(self.raw_global_lengthscale))               # scalar
-
-        # max_sq_norm = sum(((max - min)/(2*lengthscales))^2)
-        half_range = 0.5 * (self.maxs - self.mins)                                    # (D,)
-        max_sq_norm = jnp.sum((half_range / self.lengthscales) ** 2)             # scalar
-
-        global_lengthscale = jnp.sqrt(g * max_sq_norm)                      # scalar
-
-        # Center + scale by ARD lengthscales, then divide by global lengthscale
-        U = (X - self.centers) / self.lengthscales
-        U = U / global_lengthscale
-
-        # Inverse stereographic projection -> (N, D+1)
-        S = self.inv_stereographic_projection(U[:, None, :]).squeeze(axis=1)    # (N, D+1)
-
-        # Append constant and apply sqrt weights
-        term0_sqrt = jnp.sqrt(b0)
-        term1_sqrt = jnp.sqrt(b1)
+        # weighted concat
+        terms = jax.nn.softmax(self.raw_coeffs)
+        term0_sqrt = jnp.sqrt(terms[0])
+        term1_sqrt = jnp.sqrt(terms[1])
 
         Phi = jnp.concatenate(
             [
-                jnp.full((X.shape[0], 1), term0_sqrt, dtype=X.dtype),
-                S * term1_sqrt, 
+                S * term1_sqrt,
+                jnp.full((X.shape[0], 1), term0_sqrt, dtype=X.dtype)
             ],
             axis=-1
-        )                                                                   # (N, D+2)
+        )
+
         return Phi
-    
-    def spherical_linear_kernel_matrix(self, Phi1: jnp.ndarray, Phi2: jnp.ndarray | None = None) -> jnp.ndarray:
-        """
-        Returns K = Phi1 @ Phi2.T (or Phi1 @ Phi1.T if Phi2 is None)
-        """
 
-        if Phi2 is None:
-            return Phi1 @ Phi1.T
-        return Phi1 @ Phi2.T
-    
-    def spherical_linear_kernel_diag(self, Phi: jnp.ndarray) -> jnp.ndarray:
-        """
-        Diagonal of K = Phi Phi^T is row-wise squared norm of Phi
-        """
-        return jnp.sum(Phi * Phi, axis=-1)
-
-    
-    def phi(self, X: jnp.ndarray) -> jnp.ndarray:
-        # compute features using stored bounds + hyperparams
-        if self.mins is None or self.maxs is None or self.centers is None:
-            raise ValueError("Bounds not set. Please provide bounds at init or set self.mins/maxs/centers first")
-        return self.spherical_linear_features(X)
     
     def covariance(self, xa, xb, include_noise=True):
         """
         Feature-space kernel: K = Phi(xa) Phi(xb)^T
         """
+        Phi_a = self.spherical_linear_features(xa)
+        Phi_b = self.spherical_linear_features(xb)
+        K = Phi_a @ Phi_b.T
 
-        Phi_a = self.phi(xa)
-        Phi_b = self.phi(xb)
-
-        K = self.spherical_linear_kernel_matrix(Phi_a, Phi_b)
-
-        # if include_noise:
-        #     K += self.noise * jnp.eye(K.shape[0], dtype=K.dtype)
+        if include_noise:
+            K += self.noise * jnp.eye(K.shape[0], dtype=K.dtype)
         return K
     
     def diagonal(self, x, include_noise=True):
-        Phi = self.phi(x)
-        diag = self.spherical_linear_kernel_diag(Phi)
+        Phi = self.spherical_linear_features(x)
+        diag = jnp.sum(Phi * Phi, axis=-1)
         if include_noise:
             diag += self.noise
         return diag
@@ -771,28 +748,12 @@ class SphericalLinearKernel(Kernel):
         X = self.train_x
         y = jnp.squeeze(self.train_y)
 
-        Phi = self.phi(X)
-        N, M = Phi.shape
+        Phi = self.spherical_linear_features(X)
+        alpha, cholB = woodbury_solve(Phi, y, self.noise)
+        logdetKy = woodbury_logdet(Phi, self.noise, cholB)
 
-        sigma2 = jnp.maximum(self.noise, safe_noise_floor)
-        inv_sigma2 = 1.0 / sigma2
-
-        A = jnp.eye(M, dtype=Phi.dtype) + inv_sigma2 * (Phi.T @ Phi)
-        A = 0.5 * (A + A.T)
-        A += safe_noise_floor * jnp.eye(M, dtype=A.dtype)
-    
-        #jitter = jnp.maximum(safe_noise_floor, 1e-10 * jnp.mean(jnp.diag(A)))
-
-        L = jnp.linalg.cholesky(A)
-        logdetA = 2.0 * jnp.sum(jnp.log(jnp.diag(L)))
-
-        v = Phi.T @ y
-        Ainv_v = cho_solve((L, True), v)
-
-        yy = jnp.dot(y , y)
-        quad = (yy / sigma2) - (jnp.dot(v, Ainv_v)) / (sigma2 ** 2)
-
-        mll_val =  -0.5 * (N * jnp.log(2.0 * jnp.pi) + N * jnp.log(sigma2) + logdetA + quad)
+        N = Phi.shape[0]
+        mll_val = -0.5 * (y @ alpha + logdetKy + N * jnp.log(2.0 * jnp.pi))
 
         mll_val += self.logprior(
             lengthscales=lengthscales, 
@@ -802,63 +763,59 @@ class SphericalLinearKernel(Kernel):
         return -(mll_val)
     
 
-    def _Ainv_dot(self, V: jnp.ndarray) -> jnp.ndarray:
-        """Compute A^{-1} V using stored chol(A) - self.L"""
-        if self.L is None:
-            raise ValueError("Kernel not fitted: self.L is None")
-        
-        L = self.L
-
-        if V.ndim == 1:
-            V2 = V[:, None]
-            tmp = solve_triangular(L, V2, lower=True)
-            out = solve_triangular(L.T, tmp, lower=False)
-            return out[:, 0]
-
-        tmp = solve_triangular(L, V, lower=True)
-        return solve_triangular(L.T, tmp, lower=False)
-
     def predict_mean_single(self, x: jnp.ndarray, y_mean: float, y_std: float) -> jnp.ndarray:
-
-        if self.mu_w is None:
-            raise ValueError("Kernel not fit: self.mu_w is None")
-
-        x = jnp.atleast_2d(x)
-        phi_x = jnp.squeeze(self.phi(x), axis=0)
-        mu_std = phi_x @ self.mu_w
+        if self.alpha is None or self.Phi is None:
+            raise ValueError("Kernel not fit")
+        
+        phi_x = jnp.squeeze(self.spherical_linear_features(jnp.atleast_2d(x)), axis=0)
+        k_xX = phi_x @ self.Phi.T
+        mu_std = k_xX @ self.alpha
         return mu_std * y_std + y_mean
     
+    
     def predict_var_single(self, x: jnp.ndarray, y_std: int) -> jnp.ndarray:
-        x = jnp.atleast_2d(x)
-        phi_x = jnp.squeeze(self.phi(x), axis=0)
+        phi_x = jnp.squeeze(self.spherical_linear_features(jnp.atleast_2d(x)), axis=0)
 
-        Ainv_phi = self._Ainv_dot(phi_x)
+        k_xx = phi_x @ phi_x
+        k_xX = phi_x @ self.Phi.T
 
-        var_std = phi_x @ Ainv_phi
-        var_std += self.noise
-        return var_std * y_std**2
+        Ky_inv_kXx, _ = woodbury_solve(self.Phi, k_xX, self.noise)
+        var_latent = k_xx - (k_xX @ Ky_inv_kXx)
+
+        var_latent = jnp.maximum(var_latent, safe_noise_floor)
+
+        return var_latent * (y_std**2) 
     
     def fantasy_var(self, new_x: jnp.ndarray, mc_points: jnp.ndarray, k_train_mc: jnp.ndarray, y_std: int) -> jnp.ndarray:
-        new_x = jnp.atleast_2d(new_x)
-        phi_new = jnp.squeeze(self.phi(new_x), axis = 0)
+        """
+        Woodbury version of fantasy variance
+        Computes posterior variance at MC points after adding a fantasy observation at new_x
+        """
 
-        u = phi_new / jnp.sqrt(self.noise)
-        Ainv_u = self._Ainv_dot(u)
-        denom = 1.0 + (u @ Ainv_u)
-        denom = jnp.maximum(denom, safe_noise_floor)
+        # Features
+        Phi_train = self.Phi                                                                 # (N, k)
+        Phi_mc = self.spherical_linear_features(mc_points)                                   # (M, k)
+        phi_new = jnp.squeeze(self.spherical_linear_features(jnp.atleast_2d(new_x)), axis=0) # (k,)
 
-        Phi_mc = self.phi(mc_points)
+        # Kernel blocks in feature space
+        K_mX = Phi_mc @ Phi_train.T                                                          # (M, N)
+        k_Xx = Phi_train @ phi_new                                                           # (N,)
+        K_mm_diag = jnp.sum(Phi_mc * Phi_mc, axis=1)                                         # (M,)
 
-        Ainv_PhiT = self._Ainv_dot(Phi_mc.T)
-        s = jnp.sum(Phi_mc.T * Ainv_PhiT, axis=0)
+        # Woodbury Solves
+        Ky_inv_kXx, _ = woodbury_solve(Phi_train, k_Xx, self.noise)                          # (N,)
+        Ky_inv_KXm, _ = woodbury_solve(Phi_train, Phi_train @ Phi_mc.T, self.noise)          # (N, M)
 
-        c = Phi_mc @ Ainv_u
+        # Base posterior variance at MC points
+        proj_diag = jnp.sum(K_mX * Ky_inv_KXm.T, axis=1)                                     # diag(K_mX Ky^{-1} K_Xm)
+        s = K_mm_diag - proj_diag
 
-        var_std = (s - (c * c) / denom)
+        # Rank-1 fantasy update
+        c = K_mX @ Ky_inv_kXx
+        denom = 1.0 + k_Xx @ Ky_inv_kXx
 
-        var_std += self.noise
+        var = s - (c * c) / denom
 
-        #var_std += self.noise
+        var = jnp.maximum(var, safe_noise_floor)
 
-        return var_std * y_std**2
-
+        return var * (y_std**2)

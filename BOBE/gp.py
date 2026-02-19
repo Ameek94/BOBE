@@ -20,9 +20,9 @@ safe_noise_floor = 1e-12
 class GP:
     
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
-                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [2.5e-2, 5],lengthscales=None,kernel_variance=None,
+                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.05, 10],lengthscales=None, kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior="DSLP", tausq=None, tausq_bounds=[1e-4,1e4], 
-                 raw_coeffs=None, raw_coeff_bounds=[-50, 50], raw_global_lengthscale=None, raw_global_lengthscale_bounds=[-6, 6], 
+                 raw_coeffs=None, raw_coeff_bounds=[-6, 6], raw_global_lengthscale=None, raw_global_lengthscale_bounds=[-1.5, 1.5], 
                  param_names: List[str] = None):
         """
         Initialize the Gaussian Process model.
@@ -168,7 +168,7 @@ class GP:
         log.debug(f"GP training size = {self.train_x.shape[0]}")
 
 
-    def fit(self, x0: np.ndarray = None, maxiter: int = 500) -> dict:
+    def fit(self, x0: np.ndarray = None, maxiter: int = 1000) -> dict:
         """
         Performs a serial fit for a given batch of starting points (x0).
         This method is called by each MPI process on its assigned chunk.
@@ -190,6 +190,8 @@ class GP:
             #x0 = jnp.log(self.kernel.get_hyperparams())[None, :]
             x0 = self.kernel.initial_log_params()[None, :]
 
+        #log.info(f"Initial Params for restarts: {x0}")
+
         optimizer_options = self.optimizer_options.copy()
 
         best_params_log, best_loss = self.mll_optimize(
@@ -205,6 +207,8 @@ class GP:
         parsed = self.kernel.parse_hyperparams(best_params_log)
         self.kernel.update_hyperparams(*parsed)
         self.kernel.build_posterior_cache(self.train_x, self.train_y)
+
+        log.info(f"Best MLL:  {-best_loss}")
 
         # Return the result in the format the pool expects
         return {
