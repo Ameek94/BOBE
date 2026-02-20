@@ -12,7 +12,7 @@ log = get_logger("gp")
 from .optim import optimize_optax, optimize_scipy
 from .utils.seed import get_numpy_rng
 #import numpyro.distributions as dist
-from .kernels import RBFKernel, MaternKernel, SphericalLinearKernel
+from .kernels import RBFKernel, MaternKernel, SphericalLinearKernel, AdditiveKernel
 
 
 safe_noise_floor = 1e-12
@@ -23,6 +23,7 @@ class GP:
                  kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.05, 10],lengthscales=None, kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior="DSLP", tausq=None, tausq_bounds=[1e-4,1e4], 
                  raw_coeffs=None, raw_coeff_bounds=[-6, 6], raw_global_lengthscale=None, raw_global_lengthscale_bounds=[-1.5, 1.5], 
+                 groups=None, enable_group_outputscale=False,
                  param_names: List[str] = None):
         """
         Initialize the Gaussian Process model.
@@ -79,7 +80,7 @@ class GP:
         self.param_names = param_names if param_names is not None else ['x_'+str(i) for i in range(self.ndim)]
 
         # Setup kernel and initial hyperparameters
-        kernel_classes = {"rbf": RBFKernel, "matern": MaternKernel, 'spherical_linear': SphericalLinearKernel}
+        kernel_classes = {"rbf": RBFKernel, "matern": MaternKernel, 'spherical_linear': SphericalLinearKernel, 'additive': AdditiveKernel}
         if kernel not in kernel_classes:
             raise ValueError(f"Unknown Kernel '{kernel}'. Available: {list(kernel_classes)}")
         self.kernel_name = kernel #if kernel == "rbf" else "matern"
@@ -103,6 +104,8 @@ class GP:
             "tausq": tausq,
             "raw_coeffs": raw_coeffs,
             "raw_global_lengthscale":raw_global_lengthscale,
+            "groups": groups,
+            "enable_group_outputscale": enable_group_outputscale,
             "bounds":{
                 "lengthscales": lengthscale_bounds,
                 "kernel_variance": kernel_variance_bounds,
@@ -205,7 +208,7 @@ class GP:
         )
         
         parsed = self.kernel.parse_hyperparams(best_params_log)
-        self.kernel.update_hyperparams(*parsed)
+        self.kernel.update_hyperparams(parsed=parsed)
         self.kernel.build_posterior_cache(self.train_x, self.train_y)
 
         log.info(f"Best MLL:  {-best_loss}")
@@ -521,8 +524,10 @@ class GP:
         lp = self.kernel.initial_log_params()
         parsed = self.kernel.parse_hyperparams(lp)
 
-        if isinstance(self.kernel, (RBFKernel, MaternKernel)):
-            lengthscales, kernel_variance, tausq = parsed
+        if isinstance(self.kernel, (RBFKernel, MaternKernel, AdditiveKernel)):
+            lengthscales = parsed.get("lengthscales")
+            kernel_variance = parsed.get("kernel_variance")
+            tausq = parsed.get("tausq")
             ls_str = {name: f"{float(val):.4f}" for name, val in zip(self.param_names, np.array(lengthscales))}
             out = {"lengthscales": ls_str}
 
@@ -533,7 +538,9 @@ class GP:
                 out['tausq'] = f"{float(tausq):.4f}"
             return out
         else:
-            lengthscales, raw_coeffs, raw_global_lengthscale = parsed
+            lengthscales = parsed.get("lengthscales")
+            raw_coeffs = parsed.get("raw_coeffs")
+            raw_global_lengthscale = parsed.get("raw_global_lengthscale")
             ls_str = {name: f"{float(val):.4f}" for name, val in zip(self.param_names, np.array(lengthscales))}
 
             coeffs = jax.nn.softmax(jnp.array(raw_coeffs))

@@ -11,6 +11,8 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import cho_solve, solve_triangular
 from .priors import build_prior_state
+from dataclasses import dataclass
+from typing import Callable, Optional, Sequence, Tuple, Any, Dict
 
 jax.config.update("jax_enable_x64", True)
 
@@ -21,6 +23,34 @@ sqrt5 = sqrt(5.)
 
 safe_noise_floor = 1e-12
 
+@dataclass(frozen=True)
+class ParamSpec:
+    """
+    Describes a learned/fixed hyperparameter block
+
+    name: attribute on self (e.g "lengthscale", "kernel_variance")
+    size: number of scalars in this block
+    bounds_key: key in self.bounds_spec used for bounds; if None -> no bounds required
+    transform: "log" or "identity" in optimiser space
+    enabled_fn: returns True if param participates in optimisation (e.g not fixed)
+    default_fn: supplies default value if attribute is None
+    """
+    name: str
+    size: int
+    bounds_key: Optional[str]
+    transform: str # "log" or "identity"
+    enabled_fn: Callable[[Any], bool]
+    default_fn: Callable[[Any], jnp.ndarray]
+    label_prefix: Optional[str] = None # for hyperparam_names
+
+    def _replace(self, **kwargs) -> "ParamSpec":
+        return replace(self, **kwargs)
+
+def _as_f64(x):
+    return jnp.array(x, dtype=jnp.float64)
+
+def _to_1d(x: jnp.ndarray) -> jnp.ndarray:
+    return x.reshape(-1,)
 
 @jax.jit
 def gp_mll(k,train_y,num_points):
@@ -150,37 +180,162 @@ class Kernel(ABC):
         self.fixed_kernel_variance = ps['fixed_kernel_variance']
         self.lengthscale_prior = ps['lengthscale_prior']
         self.tausq_enabled = ps['tausq_enabled']
+
+    def param_spec(self) -> Tuple[ParamSpec, ...]:
+        """
+        Default param spec for "dense" kernels:
+            lengthscales (D) [always enabled]
+            kernel_variance (1) [disabled if fixed_kernel_variance=True]
+            tausq (1) [enabled if tausq_enabled=True]
+        """
+        D = int(self.ndim)
+
+        def lengthscales_enabled(_self):
+            return True
+        def lengthscales_default(_self):
+            if _self.lengthscales is None:
+                return jnp.ones((D,), dtype=jnp.float64)
+            return _as_f64(_self.lengthscales)
+        def kv_enabled(_self):
+            return not getattr(_self, "fixed_kernel_variance", False)
+        def kv_default(_self):
+            if _self.kernel_variance is None:
+                return _as_f64(1.0)
+            return _as_f64(_self.kernel_variance)
+        def tausq_enabled(_self):
+            return bool(getattr(_self, "tausq_enabled", False))
+        def tausq_default(_self):
+            t = getattr(_self, "tausq", None)
+            if t is None:
+                return _as_f64(1.0)
+            return _as_f64(t)
+        return (
+            ParamSpec(
+                name="lengthscales",
+                size=D,
+                bounds_key="lengthscales",
+                transform="log",
+                enabled_fn=lengthscales_enabled,
+                default_fn=lengthscales_default,
+                label_prefix="log_lengthscales"
+            ),
+            ParamSpec(
+                name="kernel_variance",
+                size=1,
+                bounds_key="kernel_variance",
+                transform="log",
+                enabled_fn=kv_enabled,
+                default_fn=kv_default,
+                label_prefix="log_kernel_variance"
+            ),
+            ParamSpec(
+                name="tausq",
+                size=1,
+                bounds_key="tausq",
+                transform="log",
+                enabled_fn=tausq_enabled,
+                default_fn=tausq_default,
+                label_prefix="log_tausq"
+            ),
+            
+        )
+    
+    def _enabled_param_specs(self) -> Tuple[ParamSpec, ...]:
+        return tuple(ps for ps in self.param_spec() if ps.enabled_fn(self))
     
     def configure_hyperparam_optimisation(self):
-        lengthscale_bounds = self.bounds_spec.get("lengthscales", None)
-        kernel_variance_bounds = self.bounds_spec.get("kernel_variance", None)
-        tausq_bounds = self.bounds_spec.get("tausq", None)
+        specs = self._enabled_param_specs()
 
-        if lengthscale_bounds is None:
-            raise ValueError("Kernel requires bounds for lengthscales")
+        names =[]
+        bounds_list = []
+
+        for ps in specs:
+            # Names
+            if ps.size == 1:
+                names.append(ps.label_prefix or ps.name)
+            else:
+                prefix = ps.label_prefix or ps.name
+                names += [f"{prefix}_{i}" for i in range(ps.size)]
+            # Bounds
+            if ps.bounds_key is None:
+                raise ValueError(f"ParamSpec {ps.name} requires nounds_key or override configure_hyperparam_optimisation")
+            
+            b = self.bounds_spec.get(ps.bounds_key, None)
+            if b is None:
+                raise ValueError(f" Kernel requires bounds for {ps.bounds_key} (for param {ps.name})")
+            bounds_list += [b] * ps.size
         
-        names = ["lengthscales"]
-        bounds_list = [lengthscale_bounds] * self.ndim
-
-        if not getattr(self, "fixed_kernel_variance", False):
-            if kernel_variance_bounds is None:
-                raise ValueError("Kernel requires bounds for kernel variance")
-            names.append("kernel_variance")
-            bounds_list.append(kernel_variance_bounds)
-        
-        if getattr(self, "tausq_enabled", False):
-            if tausq_bounds is None:
-                raise ValueError("Kernel requires bounds for tausq")
-            names.append("tausq")
-            bounds_list.append(tausq_bounds)
-
         self.hyperparam_names = tuple(names)
 
-        # Convert to log-space bounds as (2, num_params)
-        # bounds_list is list of [low, high] or tuples
-        b = jnp.array(bounds_list, dtype=jnp.float64).T    # (2, P)
-        self.hyperparam_bounds = jnp.log(b)
+        b = jnp.array(bounds_list, dtype=jnp.float64).T
+        if any(ps.transform == "log" for ps in specs):
+            self.hyperparam_bounds = jnp.log(b)
+        else:
+            self.hyperparam_bounds = b
         self.num_hyperparams = int(self.hyperparam_bounds.shape[1])
+
+    def get_hyperparams(self) -> jnp.ndarray:
+        """
+        Returns hyperparams in non-log space
+        """
+        parts = []
+        for ps in self._enabled_param_specs():
+            val = getattr(self, ps.name, None)
+            if val is None:
+                val = ps.default_fn(self)
+                setattr(self, ps.name, val)
+            v = _to_1d(_as_f64(val))
+            if ps.size == 1 and v.shape[0] != 1:
+                v = v[1]
+            if v.shape[0] != ps.size:
+                raise ValueError(f"{ps.name} must have size {ps.size}, got {v.shape}")
+            parts.append(v)
+        
+        return jnp.concatenate(parts, axis=0) if parts else jnp.zeros((0,), dtype=jnp.float64)
+    
+    def initial_log_params(self) -> jnp.ndarray:
+        """
+        Converts hyperparams to log space for optimiser
+        """
+        hyp = self.get_hyperparams()
+        return jnp.log(hyp)
+    
+    def parse_hyperparams(self, log_params: jnp.ndarray) -> Dict[str, jnp.ndarray]:
+        """
+        Parse optimiser-space log_params into a dict {name: value_in_natural_space}
+        """
+        specs = self._enabled_param_specs()
+        log_params = _to_1d(log_params)
+        hyp = jnp.exp(log_params)
+
+        out = {}
+        idx = 0
+        for ps in specs:
+            block = hyp[idx:idx + ps.size]
+            idx += ps.size
+            if ps.size == 1:
+                out[ps.name] = block[0]
+            else:
+                out[ps.name] = block
+        return out
+    
+    def update_hyperparams(self, parsed: Optional[Dict[str, jnp.ndarray]] = None, lengthscales=None, kernel_variance=None, tausq=None, noise=None):
+        if parsed is not None:
+            if "lengthscales" in parsed and lengthscales is None:
+                lengthscales = parsed["lengthscales"]
+            if "kernel_variance" in parsed and kernel_variance is None:
+                kernel_variance = parsed["kernel_variance"]
+            if "tausq" in parsed and tausq is None:
+                tausq = parsed["tausq"]
+        
+        if lengthscales is not None:
+            self.lengthscales = _as_f64(lengthscales)
+        if kernel_variance is not None:
+            self.kernel_variance = _as_f64(kernel_variance)
+        if tausq is not None and getattr(self, "tausq_enabled", False):
+            self.tausq = _as_f64(tausq)
+        if noise is not None:
+            self.noise = noise
     
     def logprior(self, lengthscales, kernel_variance, tausq) -> jnp.ndarray:
         """
@@ -191,44 +346,6 @@ class Kernel(ABC):
             return jnp.array(0.0, dtype=jnp.float64)
         else:
             return fn(lengthscales, kernel_variance, tausq)
-
-    def get_hyperparams(self):
-        parts = [self.lengthscales]
-
-        if not getattr(self, "fixed_kernel_variance", False):
-            parts.append(jnp.array([self.kernel_variance], dtype=jnp.float64))
-        
-        if getattr(self, "tausq_enabled", False):
-            parts.append(jnp.array([getattr(self, "tausq", 1.0)], dtype=jnp.float64))
-        
-        return jnp.concatenate(parts, axis=0)
-    
-    def initial_log_params(self):
-        return jnp.log(self.get_hyperparams())
-    
-    
-    def parse_hyperparams(self, log_params: jnp.ndarray):
-        """
-        Parse optimiser space log params into lengthscale and kernel variance
-        """
-
-        hyp = jnp.exp(log_params)
-        lengthscales = hyp[:self.ndim]
-
-        idx = self.ndim
-
-        if getattr(self, "fixed_kernel_variance", False):
-            kernel_variance = self.kernel_variance
-        else:
-            kernel_variance = hyp[idx]
-            idx += 1
-        
-        if getattr(self, "tausq_enabled", False):
-            tausq = hyp[idx]
-        else:
-            tausq = getattr(self, "tausq", 1.0)
-        
-        return lengthscales, kernel_variance, tausq
     
     def build_posterior_cache(self, train_x: jnp.ndarray, train_y: jnp.ndarray) -> None:
         """
@@ -366,49 +483,20 @@ class Kernel(ABC):
         """
         if not self._is_fit:
             raise ValueError("Kernel posteror cache missing")
-        lengthscales, kernel_variance, tausq = self.parse_hyperparams(log_params)
         
+        parsed = self.parse_hyperparams(log_params)
         # Update kernel hyperparameters and compute kernel matrix
-        self.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance)
+        self.update_hyperparams(parsed=parsed)
         
         K = self.covariance(self.train_x, self.train_x, include_noise=True)
         mll = gp_mll(K, self.train_y, self.train_y.shape[0])
         
         # Add prior
-        mll += self.logprior(lengthscales, kernel_variance, tausq)
+        mll += self.logprior(lengthscales=parsed.get("lengthscales", self.lengthscales), 
+                             kernel_variance=parsed.get("kernel_variance", self.kernel_variance), 
+                             tausq=parsed.get("tausq", getattr(self, "tausq", 1.0)))
         
         return -mll
-    
-    def update_hyperparams(self, *parsed, lengthscales=None, kernel_variance=None, noise=None):
-        """
-        Update kernel hyperparameters.
-        
-        Parameters
-        ----------
-        lengthscales : jnp.ndarray, optional
-            New lengthscale values
-        kernel_variance : float, optional
-            New kernel variance
-        noise : float, optional
-            New noise level
-        """
-        if parsed:
-            if len(parsed) == 3:
-                lengthscales, kernel_variance, tausq = parsed
-            elif len(parsed) == 2:
-                lengthscales, kernel_variance = parsed
-            elif len(parsed) == 1:
-                (lengthscales,) = parsed
-            else:
-                raise ValueError(f"Unexpected parsed hyperparam tuple length: {len(parsed)}")
-        
-
-        if lengthscales is not None:
-            self.lengthscales = jnp.array(lengthscales)
-        if kernel_variance is not None:
-            self.kernel_variance = kernel_variance
-        if noise is not None:
-            self.noise = noise
     
     def __call__(self, xa, xb, include_noise=True):
         """Convenience method - same as covariance()"""
@@ -520,8 +608,6 @@ class SphericalLinearKernel(Kernel):
         super().__init__(hp_init, noise)
         # Posterior state (set by fit)
 
-        self._printed_x_states= 0
-
         self.kernel_variance = None
         self.fixed_kernel_variance = False
         self.tausq_enabled = False
@@ -596,12 +682,16 @@ class SphericalLinearKernel(Kernel):
         raise NotImplementedError
     
 
-    def update_hyperparams(self, *parsed, lengthscales=None, raw_coeffs=None, raw_global_lengthscale=None, noise=None):
-
-        if parsed:
-            if len(parsed) != 3:
-                raise ValueError(f"Unexpected parsed hyperparam tuple length: {len(parsed)}")
-            lengthscales, raw_coeffs, raw_global_lengthscale = parsed
+    def update_hyperparams(self, parsed=None, lengthscales=None, raw_coeffs=None, raw_global_lengthscale=None, noise=None):
+        if parsed is not None:
+            if isinstance(parsed, dict):
+                lengthscales = parsed.get("lengthscales", lengthscales)
+                raw_coeffs = parsed.get("raw_coeffs", raw_coeffs)
+                raw_global_lengthscale = parsed.get("raw_global_lengthscale", raw_global_lengthscale)
+            else:
+                if len(parsed) != 3:
+                    raise ValueError(f"Expected (lengthscales, raw_coeffs, raw_global_lengthscale), got {len(parsed)}")
+                lengthscales, raw_coeffs, raw_global_lengthscale = parsed
 
         if lengthscales is not None:
             self.lengthscales = jnp.array(lengthscales)
@@ -617,8 +707,11 @@ class SphericalLinearKernel(Kernel):
         lengthscales = jnp.exp(log_params[:self.ndim])
         raw_coeffs = log_params[self.ndim:self.ndim+2]
         raw_global_lengthscale = log_params[self.ndim+2]
-        return lengthscales, raw_coeffs, raw_global_lengthscale
-    
+        return {
+            "lengthscales": lengthscales, 
+            "raw_coeffs": raw_coeffs, 
+            "raw_global_lengthscale": raw_global_lengthscale,
+        }
     def get_hyperparams(self):
         return jnp.concatenate(
             [
@@ -736,14 +829,9 @@ class SphericalLinearKernel(Kernel):
 
         if not self._is_fit:
             raise ValueError("Kernel posteror cache missing")
-
-        lengthscales, raw_coeffs, raw_global_lengthscale = self.parse_hyperparams(log_params)
-        self.update_hyperparams(
-            lengthscales,
-            raw_coeffs,
-            raw_global_lengthscale
-        )
-
+        
+        parsed = self.parse_hyperparams(log_params)
+        self.update_hyperparams(parsed=parsed)
 
         X = self.train_x
         y = jnp.squeeze(self.train_y)
@@ -756,9 +844,9 @@ class SphericalLinearKernel(Kernel):
         mll_val = -0.5 * (y @ alpha + logdetKy + N * jnp.log(2.0 * jnp.pi))
 
         mll_val += self.logprior(
-            lengthscales=lengthscales, 
-            raw_coeffs=raw_coeffs, 
-            raw_global_lengthscale=raw_global_lengthscale)
+            lengthscales=parsed.get("lengthscales", self.lengthscales), 
+            raw_coeffs=parsed.get("raw_coeffs", self.raw_coeffs), 
+            raw_global_lengthscale=parsed.get("raw_global_lengthscale", self.raw_global_lengthscale)) 
 
         return -(mll_val)
     
@@ -819,3 +907,265 @@ class SphericalLinearKernel(Kernel):
         var = jnp.maximum(var, safe_noise_floor)
 
         return var * (y_std**2)
+    
+
+
+class AdditiveKernel(Kernel):
+    """ 
+    Additive RBF kernel over groups of dimensions.
+
+    K(x, x') = sum_{g=1..G} s_g * exp(-0.5 ||(x_g - x'_g) / ell_g||^2)
+    - Always has per dim lengthscales (ell_j, j=1..D)
+    - If enable_group_outputscale=False -> Single global outputscale:
+        K(x, x') = kernel_variance * sum_g exp(-0.5 * dist_g^2)
+    - If enable_group_outputscale=True -> Outputscale per kernel
+        K(x, x') = sum_g group_outputscales[g] * exp(-0.5 * dist_g^2)
+
+    """
+    def __init__(self, hp_init, noise=1e-8):
+        super().__init__(hp_init, noise)
+
+        groups = hp_init.get("groups", None)
+
+        if groups is None or len(groups) == 0:
+            raise ValueError("AdditiveKernel requires groups > 0")
+
+        self.groups = [jnp.array(g, dtype=jnp.int32) for g in groups]
+        self.num_groups = len(self.groups)
+
+        self.enable_group_outputscale = bool(hp_init.get("enable_group_outputscale", False))
+
+        if self.enable_group_outputscale:
+            g_os = hp_init.get("group_outputscales", None) if hp_init is not None else None
+            if g_os is None:
+                g_os = jnp.ones((self.num_groups,), dtype=jnp.float64)
+            self.group_outputscales = jnp.array(g_os, dtype=jnp.float64)
+            if self.group_outputscales.shape != (self.num_groups,):
+                raise ValueError(f"group_outputscales must have shape ({self.num_groups},) got {self.group_outputscales.shape}")
+        else:
+            self.group_outputscales = None
+        
+        all_idx = jnp.concatenate(self.groups, axis=0)
+        if jnp.any(all_idx < 0) or jnp.any(all_idx >= self.ndim):
+            raise ValueError(f"group indices must be in [0, {self.ndim-1}]. Got min={int(all_idx.min())}, max={int(all_idx.max())}")
+        sorted_idx = jnp.sort(all_idx)
+        if sorted_idx.shape[0] != jnp.unique(sorted_idx).shape[0]:
+            raise ValueError("AdditiveKernel groups overlap (duplicate dimension indices).")
+        if sorted_idx.shape[0] != self.ndim:
+            present = set(map(int, np.array(sorted_idx)))
+            missing = [d for d in range(self.ndim) if d not in present]
+            raise ValueError(
+                f"AdditiveKernel groups must form a partition of all D={self.ndim} dims. "
+                f"Missing dims: {missing}"
+            )
+
+
+    def param_spec(self):
+        base = list(super().param_spec())
+
+        if self.enable_group_outputscale:
+            new = []
+            for ps in base:
+                if ps.name == "kernel_variance":
+                    new.append(ps._replace(enabled_fn=lambda _self: False))
+                else:
+                    new.append(ps)
+            def g_os_enabled(_self): 
+                return True
+            def g_os_default(_self):
+                v = getattr(_self, "group_outputscales", None)
+                if v is None:
+                    v = jnp.ones((self.num_groups,), dtype=jnp.float64)
+                    _self.group_outputscales = v
+                return _as_f64(v)
+            new.append(
+                ParamSpec(
+                    names="group_outputscales",
+                    size=int(self.num_groups),
+                    bounds_key="kernel_variance",
+                    transform="log",
+                    enabled_fn=g_os_enabled,
+                    default_fn=g_os_default,
+                    label_prefix="log_group_outputscales",
+                )
+            )
+            return tuple(new)
+        return tuple(base)
+    
+    # def configure_hyperparam_optimisation(self):
+    #     """
+    #     Optimiser-space params are log-space (consistent with base kernel)
+    #     Always has:
+    #         log_lengthscales[0:D]
+    #     If enable_group_outputscale==False;
+    #         log_kernel_variance (unless fixed)
+    #     If enabled_group_outputscale==True:
+    #         log_group_outputscales[0:G]
+    #     If tausq_enabled:
+    #         log_tausq
+    #     """
+
+    #     lengthscale_bounds = self.bounds_spec.get("lengthscales", None)
+    #     kernel_variance_bounds = self.bounds_spec.get("kernel_variance", None)
+    #     tausq_bounds = self.bounds_spec.get("tausq", None)
+
+    #     if lengthscale_bounds is None:
+    #         raise ValueError("AdditiveKernel requires bounds for lengthscales")
+        
+    #     names = [f"log_lengthscales_{i}" for i in range(self.ndim)]
+    #     bounds_list = [lengthscale_bounds] * self.ndim
+
+    #     if self.enable_group_outputscale:
+    #         if kernel_variance_bounds is None:
+    #             raise ValueError("AdditiveKernel (group outputscales) requires kernel_variance bounds to use as group-scale bounds")
+    #         names += [f"log_group_outputscales_{g}" for g in range(self.num_groups)]
+    #         bounds_list += [kernel_variance_bounds]*self.num_groups
+    #     else:
+    #         if not getattr(self, "fixed_kernel_variance", False):
+    #             if kernel_variance_bounds is None:
+    #                 raise ValueError("AdditiveKernel requires bounds for kernel_variance")
+    #             names.append("log_kernel_variance")
+    #             bounds_list.append(kernel_variance_bounds)
+    #     if getattr(self, "tausq_enabled", False):
+    #         if tausq_bounds is None:
+    #             raise ValueError("AdditiveKernel requires bounds for tausq when enabled")
+    #         names.append("log_tausq")
+    #         bounds_list.append(tausq_bounds)
+
+    #     self.hyperparam_names = tuple(names)
+        
+    #     b = jnp.array(bounds_list, dtype=jnp.float64).T    # (2, P)
+    #     self.hyperparam_bounds = jnp.log(b)
+    #     self.num_hyperparams = int(self.hyperparam_bounds.shape[1])
+        
+    # def parse_hyperparams(self, log_params):
+    #     log_params = log_params.reshape(-1,)
+    #     hyp = jnp.exp(log_params)
+
+    #     idx = 0
+    #     lengthscales = hyp[idx:idx + self.ndim]
+    #     idx += self.ndim
+
+    #     if self.enable_group_outputscale:
+    #         group_outputscales = hyp[idx:idx + self.num_groups]
+    #         idx += self.num_groups
+    #         if getattr(self, "tausq_enabled", False):
+    #             tausq = hyp[idx]
+    #         else:
+    #             tausq = getattr(self, "tausq", 1.0)
+    #         return lengthscales, group_outputscales, tausq
+        
+    #     if getattr(self, "fixed_kernel_variance", False):
+    #         kernel_variance = self.kernel_variance
+    #     else:
+    #         kernel_variance = hyp[idx]
+    #         idx += 1
+    #     if getattr(self, "tausq_enabled", False):
+    #         tausq = hyp[idx]
+    #     else:
+    #         tausq = getattr(self, "tausq", 1.0)
+    #     return lengthscales, kernel_variance, tausq
+    
+    # def get_hyperparams(self):
+    #     """
+    #     Return hyperparams in non-log space
+    #     """
+    #     parts = [self.lengthscales]
+
+    #     if self.enable_group_outputscale:
+    #         parts.append(self.group_outputscales)
+    #     else:
+    #         if not getattr(self, "fixed_kernel_variance", False):
+    #             parts.append(jnp.array([self.kernel_variance], dtype=jnp.float64))
+    #     if getattr(self, "tausq_enabled", False):
+    #         parts.append(jnp.array([getattr(self, "tausq", 1.0)], dtype=jnp.float64))
+    #     return jnp.concatenate(parts, axis=0)
+    
+    # def initial_log_params(self):
+    #     return jnp.log(self.get_hyperparams())
+    
+    # def update_hyperparams(self, *parsed, lengthscales=None, kernel_variance=None, group_outputscales=None, tausq=None, noise=None):
+    #     if parsed:
+    #         if self.enable_group_outputscale:
+    #             if len(parsed) != 3:
+    #                 raise ValueError(f"Expected lengthscales, group_outputscales and tausq, only got {len(parsed)} hyperparams")
+    #             lengthscales, group_outputscales, tausq = parsed
+    #         else:
+    #             if len(parsed) == 3:
+    #                 lengthscales, kernel_variance, tausq = parsed
+    #             elif len(parsed) == 2:
+    #                 lengthscales, kernel_variance = parsed
+    #             elif len(parsed) == 1:
+    #                 (lengthscales,) = parsed
+    #             else:
+    #                 raise ValueError(f"Unexpected parsed hyperparam number: {len(parsed)}")
+    #     if lengthscales is not None:
+    #         self.lengthscales = jnp.array(lengthscales, dtype=jnp.float64)
+    #     if self.enable_group_outputscale:
+    #         if group_outputscales is not None:
+    #             g_os = jnp.array(group_outputscales, dtype=jnp.float64)
+    #             if g_os.shape != (self.num_groups,):
+    #                 raise ValueError(f"Group Outputscales must have shape ({self.num_groups},)")
+    #             self.group_outputscales = g_os
+    #     else:
+    #         if kernel_variance is not None:
+    #             self.kernel_variance = jnp.array(kernel_variance, dtype=jnp.float64)
+    #     if getattr(self, "tausq_enabled", False) and (tausq is not None):
+    #         self.tausq = jnp.array(tausq, dtype=jnp.float64)
+        
+    #     if noise is not None:
+    #         self.noise = noise
+
+    # def _group_sq_dist(self, xa: jnp.ndarray, xb: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
+    #     """
+    #     Squared distance restricted to a subset of dimensions, with per-dim lengthscales
+    #     xa: (n1, D), xb: (n2, D), idx: (d_g,)
+    #     returns (n1, n2)
+    #     """
+    #     xa_g = xa[:, idx] / self.lengthscales[idx]
+    #     xb_g = xb[:, idx] / self.lengthscales[idx]
+    #     return self.sq_dist(xa_g, xb_g)
+    
+    def covariance(self, xa, xb, include_noise=True):
+        """
+        K = sum_g w_g * exp(-0.5 * sqdist_g)
+        """
+        n1, n2 = xa.shape[0], xb.shape[0]
+        K_sum = jnp.zeros((n1, n2), dtype=jnp.float64)
+
+        for g, idx in enumerate(self.groups):
+            xa_g = xa[:, idx] / self.lengthscales[idx]
+            xb_g = xb[:, idx] / self.lengthscales[idx]
+            sq = self.sq_dist(xa_g, xb_g)
+            Kg = jnp.exp(-0.5 * sq)
+
+            if self.enable_group_outputscale:
+                Kg *= self.group_outputscales[g]
+            K_sum += Kg 
+
+        if not self.enable_group_outputscale:
+            K_sum *= self.kernel_variance
+        
+        if include_noise:
+            K_sum += self.noise * jnp.eye(K_sum.shape[0], dtype=K_sum.dtype)
+        
+        return K_sum
+    
+    def diagonal(self, x, include_noise=True):
+        """
+        Diagonal for additive GP
+            each exp(-0.5*0) = 1
+            so diag = sum_g w_g (or kernel_variance * sum_g 1) [+ noise]
+        """
+        n = x.shape[0]
+        if self.enable_group_outputscale:
+            diag = jnp.sum(self.group_outputscales) 
+        else:
+            diag = self.kernel_variance * float(self.num_groups)
+        
+        diag *= jnp.ones((n,), dtype=jnp.float64)
+        
+        if include_noise:
+            diag += self.noise
+        return diag
+
