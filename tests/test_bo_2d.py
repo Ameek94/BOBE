@@ -29,75 +29,152 @@ def himmelblau_loglike(x):
     return -((x[0]**2 + x[1] - 11)**2 + (x[0] + x[1]**2 - 7)**2)
 
 
+def check_output_files(output_dir, base_name, check_chains=True):
+    """
+    Helper function to verify expected output files are created.
+    
+    Parameters
+    ----------
+    output_dir : str
+        Directory where output files should be located
+    base_name : str
+        Base name of the output files (likelihood name)
+    check_chains : bool
+        If True, also check for chain files (only relevant for WIPV/WIPStd modes)
+    """
+    # Files that should always be present
+    required_files = [
+        f"{base_name}.minimum.txt",    # GetDist minimum table format
+        f"{base_name}.minimum",        # GetDist minimum detailed format
+        f"{base_name}_results.pkl",    # Main results pickle
+        f"{base_name}_timing.json"     # Timing data
+    ]
+    
+    # Chain files and stats only created when samples exist (WIPV/WIPStd with nested sampling)
+    chain_files = [
+        f"{base_name}.txt",            # GetDist chain file
+        f"{base_name}.paramnames",     # GetDist parameter names
+        f"{base_name}.ranges",         # GetDist parameter ranges
+        f"{base_name}_stats.json",     # Summary statistics (requires samples)
+    ]
+    
+    expected_files = required_files
+    if check_chains:
+        expected_files += chain_files
+    
+    print("\nChecking for expected output files:")
+    all_exist = True
+    for filename in expected_files:
+        filepath = os.path.join(output_dir, filename)
+        exists = os.path.exists(filepath)
+        status = "✓" if exists else "✗"
+        print(f"  {status} {filename}")
+        if not exists:
+            all_exist = False
+    
+    assert all_exist, "Some expected output files were not created"
+    
+    # Verify minimum files have basic content
+    minimum_txt = os.path.join(output_dir, f"{base_name}.minimum.txt")
+    minimum_file = os.path.join(output_dir, f"{base_name}.minimum")
+    
+    with open(minimum_txt, 'r') as f:
+        txt_lines = f.readlines()
+    assert len(txt_lines) >= 2, "Minimum .txt file should have at least 2 lines"
+    assert txt_lines[0].startswith('#'), "First line should be header"
+    
+    with open(minimum_file, 'r') as f:
+        min_lines = f.readlines()
+    assert len(min_lines) >= 4, "Minimum file should have at least 4 lines"
+    assert '-log(Like)' in min_lines[0], "Should contain log-likelihood"
+    
+    print("✓ All expected output files verified")
+
+
 def test_bobe_ei_2d():
     """Test BOBE with EI acquisition on 2D Rosenbrock function."""
     print("\n" + "="*80)
     print("TEST: BOBE with EI on 2D Rosenbrock")
     print("="*80)
     
-    param_bounds = np.array([[-2, 2], [-2, 2]]).T
-    param_list = ['x', 'y']
+    import tempfile
+    import shutil
     
-    bobe = BOBE(
-        loglikelihood=rosenbrock_loglike,
-        param_list=param_list,
-        param_bounds=param_bounds,
-        likelihood_name="rosenbrock_ei_test",
-        n_sobol_init=4,
-        save=False,
-        use_clf=False,
-        seed=42,
-        verbosity='WARNING'
-    )
+    # Create temporary directory for output
+    temp_dir = tempfile.mkdtemp()
     
-    # Run with EI
-    results = bobe.run(
-        acq='ei',  # lowercase
-        min_evals=15,
-        max_evals=40,
-        max_gp_size=40,
-        ei_goal=1e-6,
-        fit_n_points=5,
-        batch_size=1
-    )
-    
-    # Workers return None
-    if results is None:
-        return None
-    
-    # Check results structure
-    assert 'gp' in results, "Results missing 'gp' key"
-    assert 'likelihood' in results, "Results missing 'likelihood' key"
-    assert 'results_manager' in results, "Results missing 'results_manager' key"
-    assert 'best_val' in results, "Results missing 'best_val' key"
-    assert 'best_pt' in results, "Results missing 'best_pt' key"
-    assert 'termination_reason' in results, "Results missing 'termination_reason' key"
-    
-    # EI doesn't generate samples or logz - should be empty dicts
-    assert 'samples' in results, "Results missing 'samples' key"
-    assert 'logz' in results, "Results missing 'logz' key"
-    assert results['samples'] == {}, "EI should have empty samples dict"
-    assert results['logz'] == {}, "EI should have empty logz dict"
-    
-    # Check GP was trained (should have at least initial points)
-    assert results['gp'].train_x.shape[0] >= 10, "GP has fewer training points than expected"
-    assert results['gp'].train_x.shape[1] == 2, "GP has wrong dimensionality"
-    
-    # Check best point is reasonable (should be close to global optimum at [1, 1])
-    best_pt = results['best_pt']
-    best_val = results['best_val']
-    
-    print(f"\nBest point found: x={best_pt[0]:.4f}, y={best_pt[1]:.4f}")
-    print(f"Best value: {best_val:.4f}")
-    print(f"Distance from optimum (1, 1): {np.linalg.norm(best_pt - np.array([1, 1])):.4f}")
-    print(f"Termination reason: {results['termination_reason']}")
-    print(f"Total evaluations: {results['gp'].train_x.shape[0]}")
-    
-    # Check that best value is better than initial random samples (should be negative and large)
-    assert best_val > -1000, f"Best value {best_val} is unexpectedly poor"
-    
-    print("\n✓ EI test passed")
-    return results
+    try:
+        param_bounds = np.array([[-2, 2], [-2, 2]]).T
+        param_list = ['x', 'y']
+        
+        bobe = BOBE(
+            loglikelihood=rosenbrock_loglike,
+            param_list=param_list,
+            param_bounds=param_bounds,
+            likelihood_name="rosenbrock_ei_test",
+            n_sobol_init=4,
+            save=True,
+            save_dir=temp_dir,
+            use_clf=False,
+            seed=42,
+            verbosity='WARNING'
+        )
+        
+        # Run with EI
+        results = bobe.run(
+            acq='ei',  # lowercase
+            min_evals=15,
+            max_evals=40,
+            max_gp_size=40,
+            ei_goal=1e-6,
+            fit_n_points=5,
+            batch_size=1
+        )
+        
+        # Workers return None
+        if results is None:
+            return None
+        
+        # Check results structure
+        assert 'gp' in results, "Results missing 'gp' key"
+        assert 'likelihood' in results, "Results missing 'likelihood' key"
+        assert 'results_manager' in results, "Results missing 'results_manager' key"
+        assert 'best_val' in results, "Results missing 'best_val' key"
+        assert 'best_pt' in results, "Results missing 'best_pt' key"
+        assert 'termination_reason' in results, "Results missing 'termination_reason' key"
+        
+        # EI doesn't generate samples or logz - should be empty dicts
+        assert 'samples' in results, "Results missing 'samples' key"
+        assert 'logz' in results, "Results missing 'logz' key"
+        assert results['samples'] == {}, "EI should have empty samples dict"
+        assert results['logz'] == {}, "EI should have empty logz dict"
+        
+        # Check GP was trained (should have at least initial points)
+        assert results['gp'].train_x.shape[0] >= 10, "GP has fewer training points than expected"
+        assert results['gp'].train_x.shape[1] == 2, "GP has wrong dimensionality"
+        
+        # Check best point is reasonable (should be close to global optimum at [1, 1])
+        best_pt = results['best_pt']
+        best_val = results['best_val']
+        
+        print(f"\nBest point found: x={best_pt[0]:.4f}, y={best_pt[1]:.4f}")
+        print(f"Best value: {best_val:.4f}")
+        print(f"Distance from optimum (1, 1): {np.linalg.norm(best_pt - np.array([1, 1])):.4f}")
+        print(f"Termination reason: {results['termination_reason']}")
+        print(f"Total evaluations: {results['gp'].train_x.shape[0]}")
+        
+        # Check that best value is better than initial random samples (should be negative and large)
+        assert best_val > -1000, f"Best value {best_val} is unexpectedly poor"
+        
+        # Check output files (EI mode doesn't create chain files)
+        check_output_files(temp_dir, "rosenbrock_ei_test", check_chains=False)
+        
+        print("\n✓ EI test passed")
+        return results
+        
+    finally:
+        # Clean up temporary directory
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def test_bobe_wipstd_2d():
@@ -106,90 +183,86 @@ def test_bobe_wipstd_2d():
     print("TEST: BOBE with WIPStd on 2D Himmelblau")
     print("="*80)
     
-    param_bounds = np.array([[-5, 5], [-5, 5]]).T
-    param_list = ['x', 'y']
+    import tempfile
+    import shutil
     
-    bobe = BOBE(
-        loglikelihood=himmelblau_loglike,
-        param_list=param_list,
-        param_bounds=param_bounds,
-        likelihood_name="himmelblau_test",
-        n_sobol_init=4,
-        save=False,
-        use_clf=False,
-        seed=123,
-        verbosity='WARNING'
-    )
+    # Create temporary directory for output
+    temp_dir = tempfile.mkdtemp()
     
-    # Run with WIPStd
-    results = bobe.run(
-        acq='wipstd',  # lowercase
-        min_evals=25,
-        max_evals=60,
-        max_gp_size=60,
-        logz_threshold=0.5,
-        convergence_n_iters=2,
-        fit_n_points=8,
-        ns_n_points=15,
-        batch_size=1,
-        mc_points_method='uniform'
-    )
-    
-    # Workers return None
-    if results is None:
-        return None
-    
-    # Check results structure
-    assert 'gp' in results, "Results missing 'gp' key"
-    assert 'likelihood' in results, "Results missing 'likelihood' key"
-    assert 'results_manager' in results, "Results missing 'results_manager' key"
-    assert 'best_val' in results, "Results missing 'best_val' key"
-    assert 'best_pt' in results, "Results missing 'best_pt' key"
-    assert 'termination_reason' in results, "Results missing 'termination_reason' key"
-    
-    # Check GP was trained
-    assert results['gp'].train_x.shape[0] >= 30, "GP has fewer than min_evals training points"
-    assert results['gp'].train_x.shape[1] == 2, "GP has wrong dimensionality"
-    
-    # Himmelblau has 4 minima, all with value 0
-    # Check best point is reasonable
-    best_pt = results['best_pt']
-    best_val = results['best_val']
-    
-    print(f"\nBest point found: x={best_pt[0]:.4f}, y={best_pt[1]:.4f}")
-    print(f"Best value: {best_val:.4f}")
-    print(f"Termination reason: {results['termination_reason']}")
-    print(f"Total evaluations: {results['gp'].train_x.shape[0]}")
-    
-    # Check that best value is reasonable (negative Himmelblau min is 0, so best should be close to 0)
-    assert best_val > -500, f"Best value {best_val} is unexpectedly poor"
-    
-    # Check samples were generated (for WIPStd)
-    if 'samples' in results and results['samples']:
-        print(f"Generated {len(results['samples']['x'])} samples")
-        assert len(results['samples']['x']) > 0, "No samples generated"
-    
-    print("\n✓ WIPStd test passed")
-    return results
-    # Check best point is reasonable
-    best_pt = results['best_pt']
-    best_val = results['best_val']
-    
-    print(f"\nBest point found: x={best_pt[0]:.4f}, y={best_pt[1]:.4f}")
-    print(f"Best value: {best_val:.4f}")
-    print(f"Termination reason: {results['termination_reason']}")
-    print(f"Total evaluations: {results['gp'].train_x.shape[0]}")
-    
-    # Check that best value is reasonable (negative Himmelblau min is 0, so best should be close to 0)
-    assert best_val > -500, f"Best value {best_val} is unexpectedly poor"
-    
-    # Check samples were generated (for WIPStd)
-    if 'samples' in results and results['samples']:
-        print(f"Generated {len(results['samples']['x'])} samples")
-        assert len(results['samples']['x']) > 0, "No samples generated"
-    
-    print("\n✓ WIPStd test passed")
-    return results
+    try:
+        param_bounds = np.array([[-5, 5], [-5, 5]]).T
+        param_list = ['x', 'y']
+        
+        bobe = BOBE(
+            loglikelihood=himmelblau_loglike,
+            param_list=param_list,
+            param_bounds=param_bounds,
+            likelihood_name="himmelblau_test",
+            n_sobol_init=4,
+            save=True,
+            save_dir=temp_dir,
+            use_clf=False,
+            seed=123,
+            verbosity='WARNING'
+        )
+        
+        # Run with WIPStd
+        results = bobe.run(
+            acq='wipstd',  # lowercase
+            min_evals=25,
+            max_evals=60,
+            max_gp_size=60,
+            logz_threshold=0.5,
+            convergence_n_iters=2,
+            fit_n_points=8,
+            ns_n_points=15,
+            batch_size=1,
+            mc_points_method='uniform'
+        )
+        
+        # Workers return None
+        if results is None:
+            return None
+        
+        # Check results structure
+        assert 'gp' in results, "Results missing 'gp' key"
+        assert 'likelihood' in results, "Results missing 'likelihood' key"
+        assert 'results_manager' in results, "Results missing 'results_manager' key"
+        assert 'best_val' in results, "Results missing 'best_val' key"
+        assert 'best_pt' in results, "Results missing 'best_pt' key"
+        assert 'termination_reason' in results, "Results missing 'termination_reason' key"
+        
+        # Check GP was trained
+        assert results['gp'].train_x.shape[0] >= 30, "GP has fewer than min_evals training points"
+        assert results['gp'].train_x.shape[1] == 2, "GP has wrong dimensionality"
+        
+        # Himmelblau has 4 minima, all with value 0
+        # Check best point is reasonable
+        best_pt = results['best_pt']
+        best_val = results['best_val']
+        
+        print(f"\nBest point found: x={best_pt[0]:.4f}, y={best_pt[1]:.4f}")
+        print(f"Best value: {best_val:.4f}")
+        print(f"Termination reason: {results['termination_reason']}")
+        print(f"Total evaluations: {results['gp'].train_x.shape[0]}")
+        
+        # Check that best value is reasonable (negative Himmelblau min is 0, so best should be close to 0)
+        assert best_val > -500, f"Best value {best_val} is unexpectedly poor"
+        
+        # Check samples were generated (for WIPStd)
+        if 'samples' in results and results['samples']:
+            print(f"Generated {len(results['samples']['x'])} samples")
+            assert len(results['samples']['x']) > 0, "No samples generated"
+        
+        # Check output files (WIPStd mode creates chain files)
+        check_output_files(temp_dir, "himmelblau_test", check_chains=True)
+        
+        print("\n✓ WIPStd test passed")
+        return results
+        
+    finally:
+        # Clean up temporary directory
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def test_bobe_with_classifier():

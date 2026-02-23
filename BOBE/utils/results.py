@@ -185,6 +185,11 @@ class BOBEResults:
         self.converged = False
         self.termination_reason = "Unknown"
         self.gp_info = {}  # Store GP and classifier information
+        
+        # Best point information (for getdist minimum files)
+        self.best_point = None
+        self.best_loglike = None
+        self.best_iteration = None
     
     def _load_existing_results(self, output_file: str) -> Optional[Dict[str, Any]]:
         """
@@ -518,18 +523,22 @@ class BOBEResults:
                  logz_dict: Optional[Dict[str, float]] = None,
                  converged: bool = False,
                  termination_reason: str = "Max iterations reached",
-                 gp_info: Optional[Dict[str, Any]] = None):
+                 gp_info: Optional[Dict[str, Any]] = None,
+                 best_point: Optional[np.ndarray] = None,
+                 best_loglike: Optional[float] = None,
+                 best_iteration: Optional[int] = None):
         """
         Finalize the results with final samples and metadata.
         
         Args:
-            samples: Final parameter samples [n_samples, n_params]
-            weights: Sample weights [n_samples]
-            loglikes: Log-likelihood values [n_samples]
+            samples_dict: Dictionary with 'x', 'weights', 'logl' keys for final samples
             logz_dict: Final evidence information
             converged: Whether the run converged
             termination_reason: Reason for termination
             gp_info: Dictionary containing GP and classifier information
+            best_point: Best point found (physical parameter space)
+            best_loglike: Best log-likelihood value
+            best_iteration: Iteration where best point was found
         """
         self.end_time = time.time()
         
@@ -550,8 +559,15 @@ class BOBEResults:
         self.converged = converged
         self.termination_reason = termination_reason
         self.gp_info = gp_info or {}
+        
+        # Store best point information
+        self.best_point = best_point
+        self.best_loglike = best_loglike
+        self.best_iteration = best_iteration
 
         log.info(f"Finalized BOBE results: converged={converged}, reason={termination_reason}")
+        if best_point is not None and best_loglike is not None:
+            log.info(f"Best point: logL={best_loglike:.6f} at iteration {best_iteration}")
 
         # Save all results
         self.save_all_formats()
@@ -668,6 +684,9 @@ class BOBEResults:
         
         # Timing data
         self.save_timing_data()
+        
+        # GetDist minimum files (best point)
+        self.save_minimum_files()
     
     def save_main_results(self):
         """Save main comprehensive results file."""
@@ -702,6 +721,66 @@ class BOBEResults:
         getdist_samples.saveAsText(root=output_file, make_dirs=True)
         log.info(f"Saved GetDist format files to {output_file}")
         log.info("Created: .txt (chain), .paramnames (parameter info), .ranges (parameter bounds)")
+    
+    def save_minimum_files(self):
+        """
+        Save best point in GetDist minimum format.
+        
+        Creates two files:
+        - .minimum.txt: Simple table with best point
+        - .minimum: Formatted text with parameter details
+        """
+        if self.best_point is None or self.best_loglike is None:
+            log.debug("No best point data available, skipping minimum files")
+            return
+        
+        best_point = np.atleast_1d(self.best_point)
+        
+        if len(best_point) != self.ndim:
+            log.warning(f"Best point dimension {len(best_point)} != {self.ndim}, skipping minimum files")
+            return
+        
+        minuslogpost = -self.best_loglike
+        chi_sq = 2.0 * minuslogpost
+        
+        # Write .minimum.txt file (simple table format)
+        minimum_txt_file = f"{self.save_path}.minimum.txt"
+        try:
+            with open(minimum_txt_file, 'w') as f:
+                # Header line
+                header = "#        weight    minuslogpost"
+                for param_name in self.param_names:
+                    header += f"  {param_name:>13s}"
+                f.write(header + "\n")
+                
+                # Data line (weight is always 1 for single best point)
+                line = f"              1  {minuslogpost:13.7f}"
+                for val in best_point:
+                    line += f"  {val:13.8e}"
+                f.write(line + "\n")
+            
+            log.info(f"Saved minimum table to {minimum_txt_file}")
+        except Exception as e:
+            log.warning(f"Failed to save .minimum.txt file: {e}")
+        
+        # Write .minimum file (formatted text with labels)
+        minimum_file = f"{self.save_path}.minimum"
+        try:
+            with open(minimum_file, 'w') as f:
+                # Header with likelihood info
+                f.write(f" -log(Like) = {minuslogpost:.12f}\n")
+                f.write(f"  chi-sq    = {chi_sq:.12f}\n")
+                f.write("\n")
+                
+                # Parameter list with index, value, name, and LaTeX label
+                for i, (param_name, param_label, val) in enumerate(zip(
+                    self.param_names, self.param_labels, best_point), start=1):
+                    # Format: index (right-aligned, width 5), value (scientific), name, label
+                    f.write(f"{i:>5d}  {val:.9e}   {param_name:40s}  {param_label}\n")
+            
+            log.info(f"Saved minimum point details to {minimum_file}")
+        except Exception as e:
+            log.warning(f"Failed to save .minimum file: {e}")
         
     
     def save_summary_stats(self):

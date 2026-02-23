@@ -850,7 +850,10 @@ class BOBE:
             logz_dict=logz_dict,
             converged=self.converged,
             termination_reason=self.termination_reason,
-            gp_info=gp_info
+            gp_info=gp_info,
+            best_point=self.best_pt,
+            best_loglike=self.best_f,
+            best_iteration=self.best_pt_iteration
         )
 
         # Create final results dictionary with only the specified keys
