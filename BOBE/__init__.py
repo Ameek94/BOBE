@@ -60,6 +60,7 @@ from .acquisition import EI, LogEI, WIPV, WIPStd
 from .utils import (
     BOBEResults,
     BOBESummaryPlotter,
+    ParameterTransform,
     get_logger,
     setup_logging,
     scale_to_unit,
@@ -86,6 +87,7 @@ __all__ = [
     # Utilities
     "BOBEResults",
     "BOBESummaryPlotter",
+    "ParameterTransform",
     "get_logger",
     "setup_logging",
     "scale_to_unit",

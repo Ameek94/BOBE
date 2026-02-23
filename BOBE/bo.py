@@ -9,6 +9,7 @@ from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import Likelihood, CobayaLikelihood
 from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
+from .utils.transforms import ParameterTransform
 from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng, get_new_jax_key
 from .samplers import nested_sampling_Dy, sample_GP_NUTS
 from .utils.log import get_logger, update_verbosity
@@ -122,6 +123,9 @@ class BOBE:
                  minus_inf=-1e10,
                  seed: Optional[int] = None,
                  verbosity: str = 'INFO',
+                 rotation_matrix=None,
+                 rotation_center=None,
+                 rotation_is_fisher=False,
                  ):
         """
         Initialize the BOBE (Bayesian Optimization for Bayesian Evidence) sampler.
@@ -190,6 +194,17 @@ class BOBE:
             Random seed for reproducibility. Default is None.
         verbosity : str, optional
             Logging verbosity level: 'DEBUG', 'INFO', 'WARNING', 'ERROR'. Default is 'INFO'.
+        rotation_matrix : array-like, shape (ndim, ndim), optional
+            Covariance matrix (or Fisher matrix if rotation_is_fisher=True) for whitening
+            the parameter space. Decorrelates parameters to improve GP performance for
+            nearly-Gaussian likelihoods. Default is None (no rotation).
+        rotation_center : array-like, shape (ndim,), optional
+            Center point for the rotation in physical parameter space (e.g., best-fit
+            or fiducial parameter values). If None with rotation_matrix given,
+            defaults to the midpoint of param_bounds. Default is None.
+        rotation_is_fisher : bool, optional
+            If True, rotation_matrix is a Fisher matrix (will be inverted to get
+            the covariance). Default is False.
             
         Notes
         -----
@@ -216,6 +231,14 @@ class BOBE:
             likelihood_name, confidence_for_unbounded, minus_inf
         )
         self.ndim = len(self.loglikelihood.param_list)
+        
+        # Create the parameter transform (handles unit-cube scaling and optional rotation)
+        self.transform = ParameterTransform(
+            param_bounds=self.loglikelihood.param_bounds,
+            rotation_matrix=rotation_matrix,
+            rotation_center=rotation_center,
+            rotation_is_fisher=rotation_is_fisher,
+        )
         
         if not self.is_main:
             # Workers only need likelihood and seed - everything else is handled in worker_wait
@@ -246,7 +269,7 @@ class BOBE:
         # Extract best point from GP
         if self.gp.train_y.size > 0:
             idx_best = jnp.argmax(self.gp.train_y)
-            self.best_pt = scale_from_unit(self.gp.train_x[idx_best], self.loglikelihood.param_bounds).flatten()
+            self.best_pt = np.asarray(self.transform.from_unit(self.gp.train_x[idx_best])).flatten()
             best_f_from_gp = float(self.gp.train_y.max()) * self.gp.y_std + self.gp.y_mean
         else:
             best_f_from_gp = -np.inf
@@ -262,8 +285,9 @@ class BOBE:
             self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
             log.info(f"Initial best point {self.best} with value = {self.best_f:.6f}")
         
-        # Save initial GP
+        # Save initial GP and transform state
         self.gp.save(filename=f"{self.save_path}_gp")
+        self._save_transform()
         log.info(f"Saving GP to file {self.save_path}_gp")
         
         # Initialize for KL divergence tracking
@@ -342,7 +366,8 @@ class BOBE:
                 'clf_type': clf_type,
                 'clf_nsigma_threshold': clf_nsigma_threshold,
                 'minus_inf': minus_inf,
-                'seed': seed
+                'seed': seed,
+                'transform_state': self.transform.state_dict(),
             },
             likelihood_name=self.loglikelihood.name,
             resume_from_existing=resume
@@ -399,6 +424,9 @@ class BOBE:
                 self.best_pt_iteration = 0
                 log.info("Starting fresh optimization")
             
+            # Restore the parameter transform from the saved state
+            self._load_transform(resume_file)
+            
             self.fresh_start = False
             
         except Exception as e:
@@ -406,6 +434,39 @@ class BOBE:
             log.info("Starting a fresh run instead.")
             self.fresh_start = True
     
+    def _save_transform(self):
+        """Save the parameter transform state to disk."""
+        transform_file = self.save_path + '_transform.npz'
+        state = self.transform.state_dict()
+        np.savez(transform_file, **{k: v for k, v in state.items()})
+        log.debug(f"Saved transform state to {transform_file}")
+    
+    def _load_transform(self, resume_file):
+        """
+        Load the parameter transform state from a previous run.
+        
+        Falls back to the current transform if no saved state exists
+        (e.g. resuming from a run that did not use rotation).
+        """
+        transform_file = resume_file + '_transform.npz'
+        if os.path.exists(transform_file) or os.path.exists(transform_file + '.npz'):
+            try:
+                fname = transform_file if os.path.exists(transform_file) else transform_file + '.npz'
+                data = np.load(fname, allow_pickle=True)
+                state = {}
+                for key in data.files:
+                    value = data[key]
+                    if isinstance(value, np.ndarray) and value.shape == ():
+                        state[key] = value.item()
+                    else:
+                        state[key] = value
+                self.transform = ParameterTransform.from_state_dict(state)
+                log.info(f"Restored transform state from {fname}")
+            except Exception as e:
+                log.warning(f"Failed to load transform state from {transform_file}: {e}. Using current transform.")
+        else:
+            log.debug("No saved transform state found, using current transform.")
+
     def _handle_fresh_start(self, n_cobaya_init, n_sobol_init, init_train_x, init_train_y,
                            use_clf, clf_type, clf_use_size, clf_update_step,
                            clf_nsigma_threshold, minus_inf, optimizer, gp_kwargs):
@@ -523,7 +584,7 @@ class BOBE:
         self.results_manager.end_timing('True Objective Evaluations')
         
         # Convert to unit space for GP
-        train_x = jnp.array(scale_to_unit(init_points, self.loglikelihood.param_bounds))
+        train_x = jnp.array(self.transform.to_unit(init_points))
         train_y = jnp.array(init_vals)
         
         return train_x, train_y
@@ -552,7 +613,7 @@ class BOBE:
         if self.is_main:
             self.results_manager.start_timing('True Objective Evaluations')
             sobol = qmc.Sobol(d=self.ndim, scramble=True, rng=self.np_rng).random(n_sobol)
-            sobol_points = scale_from_unit(sobol, self.loglikelihood.param_bounds)
+            sobol_points = np.asarray(self.transform.from_unit(sobol))
             log.info(f"Evaluating {len(sobol_points)} Sobol initial points")
             
             # Use pool to evaluate points in parallel
@@ -757,7 +818,7 @@ class BOBE:
             return None
         
         new_pts_u = jnp.atleast_2d(new_pts_u)
-        new_pts = scale_from_unit(new_pts_u, self.loglikelihood.param_bounds)
+        new_pts = np.asarray(self.transform.from_unit(new_pts_u))
         
         self.results_manager.start_timing('True Objective Evaluations')
         
@@ -926,7 +987,7 @@ class BOBE:
         # Compute KL divergences if we have nested sampling samples
         successive_kl = None
         
-        equal_samples = scale_from_unit(equal_samples, self.loglikelihood.param_bounds)
+        equal_samples = np.asarray(self.transform.from_unit(equal_samples))
     
 
         if self.prev_samples is not None:
@@ -1452,7 +1513,7 @@ class BOBE:
             weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
             loglikes = mc_samples['logp']
                 
-        samples = scale_from_unit(samples, self.loglikelihood.param_bounds)
+        samples = np.asarray(self.transform.from_unit(samples))
 
         self.samples_dict = {
             'x': samples,
