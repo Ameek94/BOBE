@@ -397,6 +397,9 @@ class WeightedIntegratedPosteriorBase(AcquisitionFunction):
         best_x = mc_points[jnp.argmin(acq_vals)]
         x0_acq = best_x
 
+        print("Best acquisition on MC points")
+        print(x0_acq, acq_val_min)
+
         if gp.train_x.shape[0] > 500:
             return x0_acq, float(acq_val_min)
         else:
@@ -479,11 +482,37 @@ def get_mc_samples(gp: GP,warmup_steps=512, num_samples=1024, thinning=4,method=
         mc_samples['x'] = points
     else:
         raise ValueError(f"Unknown method {method} for sampling GP")
+    
+    # Filter out NaN samples early
+    samples = mc_samples['x']
+    if np.any(np.isnan(samples)):
+        valid_mask = ~np.any(np.isnan(samples), axis=1)
+        n_bad = np.sum(~valid_mask)
+        log.warning(f"Filtered {n_bad} NaN samples from MC chain ({n_bad/len(samples)*100:.1f}%)")
+        mc_samples['x'] = samples[valid_mask]
+        if 'logp' in mc_samples:
+            mc_samples['logp'] = mc_samples['logp'][valid_mask]
+    
     return mc_samples
 
 
 def get_mc_points(mc_samples, mc_points_size=128, rng=None):
-    mc_size = max(mc_samples['x'].shape[0], mc_points_size)
-    rng = rng if rng is not None else get_numpy_rng()   
-    idxs = rng.choice(mc_size, size=mc_points_size, replace=False)
-    return mc_samples['x'][idxs]
+    """Select a subset of MC samples for acquisition function evaluation."""
+    samples = mc_samples['x']
+    n_available = samples.shape[0]
+    
+    # Check for NaN in samples
+    if np.any(np.isnan(samples)):
+        log.warning(f"NaN detected in mc_samples! Filtering out {np.sum(np.any(np.isnan(samples), axis=1))} bad samples.")
+        valid_mask = ~np.any(np.isnan(samples), axis=1)
+        samples = samples[valid_mask]
+        n_available = samples.shape[0]
+        if n_available == 0:
+            raise ValueError("All MC samples contain NaN - cannot proceed.")
+    
+    rng = rng if rng is not None else get_numpy_rng()
+    
+    # Use min to avoid out-of-bounds indexing
+    n_select = min(n_available, mc_points_size)
+    idxs = rng.choice(n_available, size=n_select, replace=False)
+    return samples[idxs]

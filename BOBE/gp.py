@@ -425,6 +425,24 @@ class GP:
         new_x = jnp.atleast_2d(new_x)
         new_y = jnp.atleast_2d(new_y)
 
+        # Check for NaN in inputs
+        if jnp.any(jnp.isnan(new_x)):
+            log.warning(f"NaN detected in new_x! Filtering out {jnp.sum(jnp.any(jnp.isnan(new_x), axis=1))} bad points.")
+            valid_mask = ~jnp.any(jnp.isnan(new_x), axis=1)
+            new_x = new_x[valid_mask]
+            new_y = new_y[valid_mask]
+            if new_x.shape[0] == 0:
+                log.warning("All new points contain NaN - skipping update.")
+                return
+        if jnp.any(jnp.isnan(new_y)):
+            log.warning(f"NaN detected in new_y! Filtering out {jnp.sum(jnp.any(jnp.isnan(new_y), axis=1))} bad points.")
+            valid_mask = ~jnp.any(jnp.isnan(new_y), axis=1)
+            new_x = new_x[valid_mask]
+            new_y = new_y[valid_mask]
+            if new_x.shape[0] == 0:
+                log.warning("All new points contain NaN - skipping update.")
+                return
+
         duplicate = False
         new_pts_to_add = []
         new_vals_to_add = []
