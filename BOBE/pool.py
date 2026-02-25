@@ -330,7 +330,7 @@ class MPI_Pool:
         best_result = max(all_results, key=lambda r: r['mll'])
         best_params_log = best_result['params']
         parsed = gp.kernel.parse_hyperparams(best_params_log)
-        gp.kernel.update_hyperparams(*parsed)
+        gp.kernel.update_hyperparams(parsed=parsed)
         gp.kernel.build_posterior_cache(gp.train_x, gp.train_y)
         #gp.update_hyperparams(best_params)
         

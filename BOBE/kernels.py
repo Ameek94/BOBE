@@ -501,6 +501,85 @@ class Kernel(ABC):
     def __call__(self, xa, xb, include_noise=True):
         """Convenience method - same as covariance()"""
         return self.covariance(xa, xb, include_noise=include_noise)
+    
+    def fisher_from_gp(self, x_star, y_mean, y_std, sign=-1.0, eig_floor=1e-10, return_raw: bool = False):
+        """
+        Compute a Fisher-like local metric from the GP predictive mean
+
+        H = d^2/dx^2 m(x) |_{x_star}           (Hessian of predictive mean)
+        F_raw = sign * H
+
+        Default sign=-1 corresponds to F ~ -H(m), which matches the observed Fisher convention when m is a surrogate for the log-likelihood (locally concave at the mode)
+
+        Then we clip eigenvalues to enforce SPD:
+        F = Q diag(max(lam, eig_floor)) Q^T
+
+        Returns
+        -------
+        F: (D, D) SPD matrix
+        Q: (D, D) eigenvectors (columns)
+        lam: (D,) clipped eigenvalues
+        (optional) H, F_raw
+        """
+        x_star = jnp.asarray(x_star)
+        if x_star.ndim != 1:
+            raise ValueError(f"x_star must be shape (D,) got shape: {x_star.shape}")
+        
+        def mean_fn(x):
+            return self.predict_mean_single(x, y_mean=y_mean, y_std=y_std)
+        
+        H = jax.hessian(mean_fn)(x_star)
+        H = 0.5 * (H + H.T)
+
+        F_raw = sign * H
+        F_raw = 0.5 * (F_raw + F_raw.T)
+
+        lam, Q = jnp.linalg.eigh(F_raw)
+        lam_clip = jnp.maximum(lam, eig_floor)
+
+        F = (Q * lam_clip) @ Q.T
+        F = 0.5*(F + F.T)
+
+        if return_raw:
+            return F, Q, lam_clip, H, F_raw
+        return F, Q, lam_clip
+        
+    def principal_axes_from_fisher(self, F, mode: str="rotate", eig_floor: float = 1e-10):
+        """
+        Build linear transform based on Fisher matrix F
+        If mod == "rotate":
+            z = Q^T (x - x0)
+            x = x0 + Q z
+        if mode=="whiten":
+            z = sqrt(Lambda) Q^T (x - x0)
+            x = x0 + Q (Lambda^{-1/2} z)
+        Returns a dict contained Q, lam (clipped) and callables:
+            to_z(x, x0)
+            from_z(z, x0)
+        """
+
+        F = 0.5*(F + F.T)
+        lam, Q = jnp.linalg.eigh(F)
+        lam = jnp.maximum(lam, eig_floor)
+
+        if mode not in ("rotate", "whiten"):
+            raise ValueError("Mode must be 'rotate' or 'whiten'")
+        if mode == "rotate":
+            def to_z(x, x0):
+                return Q.T @ (x - x0)
+            def from_z(z, x0):
+                return x0 + Q @ z
+        elif mode == "whiten":
+            sqrt_lam = jnp.sqrt(lam)
+            inv_sqrt_lam = 1.0 / sqrt_lam
+
+            def to_z(x, x0):
+                return sqrt_lam * (Q.T @ (x - x0))
+            def from_z(z, x0):
+                return x0 + Q @ (inv_sqrt_lam * z)
+        
+        return {"Q": Q, "lam": lam, "to_z": to_z, "from_z": from_z}
+
 
 
 class RBFKernel(Kernel):
@@ -545,6 +624,11 @@ class RBFKernel(Kernel):
             K += self.noise * jnp.eye(K.shape[0])
         
         return K
+    def fisher_from_gp(self, x_star, y_mean, y_std, sign=-1, eig_floor=1e-10, return_raw = False):
+        return super().fisher_from_gp(x_star, y_mean, y_std, sign, eig_floor, return_raw)
+    
+    def principal_axes_from_fisher(self, F, mode = "rotate", eig_floor = 1e-10):
+        return super().principal_axes_from_fisher(F, mode, eig_floor)
 
 
 class MaternKernel(Kernel):

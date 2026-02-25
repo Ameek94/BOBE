@@ -241,7 +241,8 @@ class GPwithClassifier(GP):
             self.y_std = jnp.std(self.train_y) if self.train_y.shape[0] > 1 else 1.0
             self.y_mean = jnp.mean(self.train_y)
             self.train_y = (self.train_y - self.y_mean) / self.y_std
-            self.recompute_cholesky()
+            #self.recompute_cholesky()
+            self.kernel.build_posterior_cache(self.train_x, self.train_y)
 
             log.debug(f"Classifier data size: {self.train_y_clf.shape[0]},  GP data size: {self.train_y.shape[0]}")
 
@@ -337,6 +338,16 @@ class GPwithClassifier(GP):
         gp_clf = cls(
             train_x=state['train_x_clf'],
             train_y=state['train_y_clf'],
+            noise=state['noise'],
+            kernel=state['kernel_name'],
+            optimizer=state['optimizer_method'],
+            optimizer_options=state['optimizer_options'],
+            lengthscale_bounds=state['lengthscale_bounds'],
+            kernel_variance_bounds=state['kernel_variance_bounds'],
+            kernel_variance_prior=state.get('kernel_variance_prior_spec'),
+            lengthscale_prior=state.get('lengthscale_prior_spec'),
+            tausq=state.get('tausq', 1.0),
+            tausq_bounds=state.get('tausq_bounds', [-4, 4]),
             clf_type=state['clf_type'],
             clf_settings=state['clf_settings'],
             clf_use_size=state['clf_use_size'],
@@ -345,20 +356,15 @@ class GPwithClassifier(GP):
             minus_inf=state['minus_inf'],
             clf_threshold=state['clf_threshold'],
             gp_threshold=state['gp_threshold'],
-            noise=state['noise'],
-            kernel=state['kernel_name'],
-            optimizer=state['optimizer_method'],
-            optimizer_options=state['optimizer_options'],
-            kernel_variance_bounds=state['kernel_variance_bounds'],
-            lengthscale_bounds=state['lengthscale_bounds'],
-            lengthscales=state['lengthscales'],
-            kernel_variance=state['kernel_variance'],
-            kernel_variance_prior=state.get('kernel_variance_prior_spec'),
-            lengthscale_prior=state.get('lengthscale_prior_spec'),
-            tausq=state.get('tausq', 1.0),
-            tausq_bounds=state.get('tausq_bounds', [-4, 4]),
             train_clf_on_init=state.get('train_clf_on_init', True),
+            #lengthscales=state['lengthscales'],
+            #kernel_variance=state['kernel_variance'], 
         )
+
+        lp = jnp.array(state["kernel_params_log"])
+        parsed = gp_clf.kernel.parse_hyperparams(lp)
+        gp_clf.kernel.update_hyperparams(parsed=parsed)
+        gp_clf.kernel.build_posterior_cache(gp_clf.train_x, gp_clf.train_y)
         
         # # Restore computed state if available
         # if state.get('cholesky') is not None:

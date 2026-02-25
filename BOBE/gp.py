@@ -414,7 +414,7 @@ class GP:
 
         lp = jnp.array(state["kernel_params_log"])
         parsed = gp.kernel.parse_hyperparams(lp)
-        gp.kernel.update_hyperparams(*parsed)
+        gp.kernel.update_hyperparams(parsed=parsed)
         gp.kernel.build_posterior_cache(gp.train_x, gp.train_y)
         
         # Restore computed state if available
