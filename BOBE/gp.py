@@ -126,7 +126,7 @@ class GP:
         # kernel_variance = kernel_variance if kernel_variance is not None else 1.0
         self.noise = noise
         
-        # Instantiate kernel object
+        # Instantiate kernel objects
         self.kernel = kernel_classes[self.kernel_name](kernel_init, self.noise)
 
         if fisher_matrix is not None or fisher_MAP is not None:
@@ -368,6 +368,9 @@ class GP:
             
             # Kernel hyperparameters in optimiser space
             "kernel_params_log": np.array(self.kernel.initial_log_params()),
+            
+            #Groups for additive GP
+            "groups": self.kernel.groups,
     
 
             # Meta
@@ -419,7 +422,8 @@ class GP:
             kernel_variance_prior=state.get('kernel_variance_prior_spec'),
             lengthscale_prior=state.get('lengthscale_prior_spec'),
             tausq=state.get('tausq_init', 1.0),
-            tausq_bounds=state.get('tausq_bounds', [-4, 4])
+            tausq_bounds=state.get('tausq_bounds', [-4, 4]),
+            groups=state.get('groups', None)
         )
 
         lp = jnp.array(state["kernel_params_log"])

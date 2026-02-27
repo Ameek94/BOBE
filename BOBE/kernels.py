@@ -1135,7 +1135,7 @@ class AdditiveKernel(Kernel):
         groups = hp_init.get("groups", None)
 
         if groups is None or len(groups) == 0:
-            raise ValueError("AdditiveKernel requires groups > 0")
+            raise ValueError(f"AdditiveKernel requires groups > 0, got {groups}")
 
         self.groups = [jnp.array(g, dtype=jnp.int32) for g in groups]
         self.num_groups = len(self.groups)
