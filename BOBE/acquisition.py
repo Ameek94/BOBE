@@ -397,8 +397,8 @@ class WeightedIntegratedPosteriorBase(AcquisitionFunction):
         best_x = mc_points[jnp.argmin(acq_vals)]
         x0_acq = best_x
 
-        print("Best acquisition on MC points")
-        print(x0_acq, acq_val_min)
+        # print("Best acquisition on MC points")
+        # print(x0_acq, acq_val_min)
 
         if gp.train_x.shape[0] > 500:
             return x0_acq, float(acq_val_min)

@@ -40,6 +40,7 @@ setup_logging(verbosity='INFO')  # Default verbosity, can be overridden in BOBE.
 
 # Core classes
 from .bo import BOBE, get_dimension_based_defaults
+from .fisher import Fisher
 from .gp import GP
 from .clf_gp import GPwithClassifier
 
@@ -73,6 +74,7 @@ __all__ = [
     "__version__",
     # Core classes
     "BOBE",
+    "Fisher",
     "GP",
     "GPwithClassifier",
     # Utilities
