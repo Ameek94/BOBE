@@ -389,7 +389,6 @@ class WeightedIntegratedPosteriorBase(AcquisitionFunction):
         mc_points_size = acq_kwargs.get('mc_points_size', 128)
         mc_points = get_mc_points(mc_samples, mc_points_size=mc_points_size, rng=rng)
         k_train_mc = gp.kernel.covariance(gp.train_x, mc_points, include_noise=False)
-
         @jax.jit
         def mapped_fn(x):
             return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)

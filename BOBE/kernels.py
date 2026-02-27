@@ -139,6 +139,12 @@ class Kernel(ABC):
         self.bounds_spec = self.hp_init.get("bounds", {}) or {}
         self.prior_spec = self.hp_init.get("priors", {}) or {}
 
+        #Save the base lengthscales as a source of truth in the case of transforms being applied to them
+        self._base_lengthscale_bounds = None
+        b = self.bounds_spec.get("lengthscales", None)
+        if b is not None:
+            self._base_lengthscale_bounds = jnp.asarray(b, dtype=jnp.float64)
+
         self.lengthscales = _hp(hp_init, "lengthscales", None)
         if self.lengthscales is not None:
             self.lengthscales = jnp.array(self.lengthscales, dtype=jnp.float64)
@@ -166,13 +172,47 @@ class Kernel(ABC):
         self.num_hyperparams = None
         self.hyperparam_bounds = None
 
+        self._to_gp_space = lambda x: x
+        self._from_gp_space = lambda x: x
+        self._input_transform_enabled = False
+        self._input_transform_mode = None
+        self._input_transform_x0 = None
+        self._input_transform_lam = None
+        self._input_transform_Q = None
+        self._ls_scale = None
+    
+    def set_input_transform(self, to_z_fn, from_z_fn):
+        """
+        Install an input transform for the kernel
+
+        Parameters
+        ----------
+        to_z_fn(x): regularised space -> GP space
+        from_z_fn(z): GP space -> regularised space
+        """
+        self._to_gp_space = to_z_fn
+        self._from_gp_space = from_z_fn
+        self._input_transform_enabled = True
+    def clear_input_transform(self):
+        self._to_gp_space = lambda x: x
+        self._from_gp_space = lambda x: x
+        self._input_transform_enabled = False
+    def set_user_fisher(self, F, x0, mode="whiten"):
+        """
+        Same as set_fisher_transform but explicit name for user API
+        """
+        self.set_fisher_transform(F, x0, mode)
+
     def configure_priors(self):
+        ls_bound_eff = self._effective_lengthcale_bounds()
+        if ls_bound_eff is None:
+            ls_bound_eff = self.bounds_spec.get("lengthscales", None)
         ps = build_prior_state(
             ndim=self.ndim,
             kernel_variance_prior_spec=self.prior_spec.get("kernel_variance", None),
             kernel_variance_bounds=self.bounds_spec.get("kernel_variance", None),
             lengthscale_prior_spec=self.prior_spec.get("lengthscales", None),
-            lengthscale_bounds=self.bounds_spec.get("lengthscales", None),
+            lengthscale_bounds=ls_bound_eff #self.bounds_spec.get("lengthscales", None),
         )
         self.prior_state = ps
         self.logprior = ps['logprior_fn']
@@ -261,9 +301,19 @@ class Kernel(ABC):
                 raise ValueError(f"ParamSpec {ps.name} requires nounds_key or override configure_hyperparam_optimisation")
             
             b = self.bounds_spec.get(ps.bounds_key, None)
+            # Apply whitening scaling only for lengthscales
+            if ps.bounds_key == "lengthscales":
+                b = self._effective_lengthcale_bounds()
             if b is None:
                 raise ValueError(f" Kernel requires bounds for {ps.bounds_key} (for param {ps.name})")
-            bounds_list += [b] * ps.size
+            b_arr = jnp.asarray(b, dtype=jnp.float64)
+            if b_arr.ndim == 2 and b_arr.shape == (ps.size, 2):
+                bounds_list += [tuple(map(float, row)) for row in b]
+            else:
+                if b_arr.ndim != 1 or b_arr.shape != (2,):
+                    raise ValueError(f"Bounds for {ps.bounds_key} must be shape (2,) or ({ps.size},2); got {b_arr.shape}")
+                b_tuple = (float(b_arr[0]), float(b_arr[1]))
+                bounds_list += [b_tuple] * ps.size
         
         self.hyperparam_names = tuple(names)
 
@@ -424,6 +474,7 @@ class Kernel(ABC):
         diag : jnp.ndarray
             Diagonal values, shape (n,)
         """
+        x = self._to_gp_space(x)
         diag = self.kernel_variance * jnp.ones(x.shape[0])
         if include_noise:
             diag += self.noise
@@ -502,6 +553,52 @@ class Kernel(ABC):
         """Convenience method - same as covariance()"""
         return self.covariance(xa, xb, include_noise=include_noise)
     
+    def set_fisher_transform(self, F, x0, mode="whiten"):
+        """
+        Install rotation/whitening transform from Fisher matrix
+
+        Parameters
+        ----------
+        F: (D, D) Fisher matrix in regularised space
+        x0: (D,) centre point (MAP)
+        mode: "rotate" or "whiten"
+        """
+        rot = self.principal_axes_from_fisher(F, mode=mode)
+
+        to_z_base = rot["to_z"]
+        from_z_base = rot["from_z"]
+        self._input_transform_mode = mode
+        self._input_transform_Q = rot["Q"]
+        self._input_transform_lam = rot["lam"]
+        self._input_transform_x0 = jnp.asarray(x0)
+
+        if mode == "whiten":
+            self._ls_scale = jnp.sqrt(self._input_transform_lam)
+        else:
+            self._ls_scale = jnp.ones_like(self._input_transform_lam)
+
+        def to_gp(x):
+            x = jnp.asarray(x)
+            if x.ndim ==1:
+                return to_z_base(x, x0)
+            return jax.vmap(lambda v: to_z_base(v, x0))(x)
+        
+        def from_gp(z):
+            z = jnp.asarray(z)
+            if z.ndim ==1:
+                return from_z_base(z, x0)
+            return jax.vmap(lambda v: from_z_base(v, x0))(z)
+
+        self.set_input_transform(to_gp, from_gp)
+        if getattr(self, "prior_state", None) is not None:
+            print("Priors have already been configured, reconfiguring")
+            self.configure_priors()
+            
+        if getattr(self, "hyperparam_bounds", None) is not None:
+            print("Hyperparam optimisation has already been configured, reconfiguring")
+            self.configure_hyperparam_optimisation()
+
+     
     def fisher_from_gp(self, x_star, y_mean, y_std, sign=-1.0, eig_floor=1e-10, return_raw: bool = False):
         """
         Compute a Fisher-like local metric from the GP predictive mean
@@ -579,8 +676,32 @@ class Kernel(ABC):
                 return x0 + Q @ (inv_sqrt_lam * z)
         
         return {"Q": Q, "lam": lam, "to_z": to_z, "from_z": from_z}
-
-
+    
+    def _effective_lengthcale_bounds(self):
+        """
+        Returns bounds for lengthscales as either unscaled or scaled depending on whether whitening is active
+        """
+        b0 = self._base_lengthscale_bounds
+        if b0 is None:
+            print("self._base_lengthscale_bounds is None!")
+            return None
+        if self._input_transform_mode != "whiten":
+            return b0
+        s = self._ls_scale
+        if s is None:
+            print("self._ls_scale is None!")
+            return b0
+        
+        if b0.ndim == 1 and b0.shape == (2,):
+            low, high = b0[0], b0[1]
+            low_d = low*s
+            high_d = high*s
+            return jnp.stack([low_d, high_d], axis=1)
+        if b0.ndim == 2 and b0.shape == (self.ndim, 2):
+            low_d = b0[:, 0]*s
+            high_d = b0[:, 1]*s
+            return jnp.stack([low_d, high_d], axis=1)
+        raise ValueError(f"Unsupported base lengthscale bounds shape: {b0.shape}")
 
 class RBFKernel(Kernel):
     """
@@ -609,6 +730,8 @@ class RBFKernel(Kernel):
         jnp.ndarray
             Kernel matrix of shape (n1, n2).
         """
+        xa = self._to_gp_space(xa)
+        xb = self._to_gp_space(xb)
         # Scale inputs by lengthscales
         xa_scaled = xa / self.lengthscales
         xb_scaled = xb / self.lengthscales

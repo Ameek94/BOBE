@@ -20,10 +20,11 @@ safe_noise_floor = 1e-12
 class GP:
     
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
-                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.05, 10],lengthscales=None, kernel_variance=None,
+                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01, 10],lengthscales=None, kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior="DSLP", tausq=None, tausq_bounds=[1e-4,1e4], 
                  raw_coeffs=None, raw_coeff_bounds=[-6, 6], raw_global_lengthscale=None, raw_global_lengthscale_bounds=[-1.5, 1.5], 
                  groups=None, enable_group_outputscale=False,
+                 fisher_matrix=None, fisher_MAP=None,
                  param_names: List[str] = None):
         """
         Initialize the Gaussian Process model.
@@ -114,7 +115,7 @@ class GP:
                 "raw_global_lengthscale": raw_global_lengthscale_bounds,
             },
             "priors":{
-                "lengthscales": lengthscale_prior,
+                "lengthscales": lengthscale_prior if lengthscale_prior is not None else "DSLP",
                 "kernel_variance": kernel_variance_prior,
             },
             "input_bounds": (0.0, 1.0) # or (D,2)
@@ -127,6 +128,15 @@ class GP:
         
         # Instantiate kernel object
         self.kernel = kernel_classes[self.kernel_name](kernel_init, self.noise)
+
+        if fisher_matrix is not None or fisher_MAP is not None:
+            if fisher_matrix is None or fisher_MAP is None:
+                raise ValueError("Must provide both fisher_matrix and fisher_MAP, or neither")
+            self.kernel.set_user_fisher(
+                F=jnp.asarray(fisher_matrix),
+                x0=jnp.asarray(fisher_MAP),
+                mode='rotate'
+            )
 
        
         # Setup optimizer

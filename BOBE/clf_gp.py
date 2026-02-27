@@ -21,10 +21,12 @@ class GPwithClassifier(GP):
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
                  optimizer="scipy", optimizer_options={},
-                 kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.01, 5.],
+                 kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.01, 10.],
                  tausq=None, tausq_bounds=[1e-4, 1e4],
                  kernel_variance_prior=None, lengthscale_prior=None, 
                  lengthscales=None, kernel_variance=1.0,
+                 groups=None, enable_group_outputscale=False,
+                 fisher_matrix=None, fisher_MAP=None,
                  param_names=None,
                  train_clf_on_init=True,  # Prevent retraining on copy
                  ):
@@ -57,7 +59,6 @@ class GPwithClassifier(GP):
             Threshold for adding points to the GP training set. Default is 5000.
         noise, kernel, optimizer, kernel_variance_bounds, lengthscale_bounds, lengthscale_priors, lengthscales, kernel_variance:
             GP parameters (see DSLP_GP/SAAS_GP). Note: bounds are now in actual space, not log10.
-
         """
         # Store Data and Classifier Settings
         self.train_x_clf = jnp.array(train_x)
@@ -104,11 +105,15 @@ class GPwithClassifier(GP):
             'lengthscale_bounds': lengthscale_bounds,
             'lengthscales': lengthscales,
             'kernel_variance': kernel_variance,
-            'lengthscale_prior': lengthscale_prior if lengthscale_prior is not None else "DSLP",
+            'lengthscale_prior': lengthscale_prior, #if lengthscale_prior is not None else "DSLP",
             'kernel_variance_prior': kernel_variance_prior,
             'tausq': tausq,
             'tausq_bounds': tausq_bounds,
             'param_names': param_names,
+            'groups': groups,
+            'enable_group_outputscale': enable_group_outputscale,
+            'fisher_matrix': fisher_matrix,
+            'fisher_MAP': fisher_MAP,
         }
                     
         super().__init__(**gp_init_kwargs)
