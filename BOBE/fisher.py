@@ -24,7 +24,7 @@ import jax.numpy as jnp
 from scipy.stats import qmc
 
 from .bo import BOBE
-from .acquisition import WIPStd
+from .acquisition import WIPStd, get_mc_samples, get_mc_points
 from .utils.core import kl_divergence_gaussian
 from .utils.log import get_logger
 
@@ -75,7 +75,7 @@ class Fisher(BOBE):
             phase2_batches: int = 20,
             kl_tol: float = 1e-3,
             kl_n_iters: int = 2,
-            local_alpha: float = 0.25,
+            local_alpha: float = 0.5,
             **ei_kwargs):
         """
         Run Fisher estimation (Phases I – III).
@@ -168,13 +168,28 @@ class Fisher(BOBE):
             # mc_x = lo + sobol * (hi - lo)
             # mc_samples = {'x': mc_x, 'weights': np.ones(len(mc_x)), 'method': 'uniform'}
 
-            # MC samples from drawn from Fisher Gaussian approximation (for better convergence metric stability)
-            samples = np.random.multivariate_normal(
-                mean=self.fisher_peak_u,
-                cov=np.linalg.inv(self.fisher_matrix_u + 1e-12 * np.eye(len(self.fisher_peak_u))),
-                size=self.mc_points_size,)
-            samples = np.clip(samples, lo, hi)
-            mc_samples = {'x': samples, 'weights': np.ones(len(samples))}
+            # # ---- MC samples drawn from Fisher Gaussian approximation (legacy) ------
+            # samples = np.random.multivariate_normal(
+            #     mean=self.fisher_peak_u,
+            #     cov=np.linalg.inv(self.fisher_matrix_u + 1e-12 * np.eye(len(self.fisher_peak_u))),
+            #     size=self.mc_points_size,)
+            # samples = np.clip(samples, lo, hi)
+            # mc_samples = {'x': samples, 'weights': np.ones(len(samples))}
+
+            # ---- MC samples via HMC sampling from GP mean (main BOBE method) --------
+            mc_samples_full = get_mc_samples(
+                gp=self.gp,
+                warmup_steps=256,
+                num_samples=1024,
+                thinning=4,
+                method="NUTS",
+                num_chains=6,
+                np_rng=self.np_rng,
+                rng_key=None
+            )
+            # Select subset of MC points for acquisition evaluation
+            mc_samples = {'x': get_mc_points(mc_samples_full, mc_points_size=self.mc_points_size, rng=self.np_rng),
+                         'weights': np.ones(self.mc_points_size)}
 
 
             # ---- WIPStd next point restricted to V_peak -----------------
@@ -209,7 +224,8 @@ class Fisher(BOBE):
                 if prev_F is not None:
                     kl_sym = self._fim_kl(prev_F, prev_best, self.fisher_matrix_u, self.fisher_peak_u)
                     log.info(f"  FIM KL (symmetric) = {kl_sym:.6f}, tol = {kl_tol}")
-                    if kl_sym < kl_tol:
+                    fisher_pos_def = np.all(np.linalg.eigvals(self.fisher_matrix_u) > 0)
+                    if kl_sym < kl_tol and kl_sym > 0 and fisher_pos_def:
                         kl_count += 1
                         if kl_count >= kl_n_iters:
                             log.info(f"Phase II converged after {step} steps "

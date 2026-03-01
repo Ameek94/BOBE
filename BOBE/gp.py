@@ -484,6 +484,21 @@ class GP:
         self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
 
+    def remap_inputs(self, new_train_x: np.ndarray):
+        """
+        Replace train_x with new_train_x expressed in a different coordinate system
+        (e.g. after a rotation update). train_y and all hyperparameters are left
+        untouched so that a subsequent refit warm-starts from the current values.
+
+        Parameters
+        ----------
+        new_train_x : np.ndarray, shape (N, D)
+            Training inputs in the new unit-cube coordinate system.
+        """
+        self.train_x = jnp.array(new_train_x)
+        self.ndim = self.train_x.shape[1]
+        self.recompute_cholesky()
+
     def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
         Computes the variance of the GP at the mc_points assuming a single point new_x is added to the training set

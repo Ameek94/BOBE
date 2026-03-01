@@ -205,6 +205,9 @@ class ParameterTransform:
         )
         self.effective_bounds = np.vstack([theta_min_implied, theta_max_implied])
 
+        # Remember n_sigma for later rotation updates
+        self._n_sigma = n_sigma
+
         # Log diagnostics
         cond = np.max(lambdas_r) / np.min(lambdas_r) if np.min(lambdas_r) > 0 else np.inf
         log.info(f"Rotation enabled: rank={r}, n_sigma={n_sigma}")

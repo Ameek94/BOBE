@@ -124,6 +124,27 @@ class GPwithClassifier(GP):
         else:
              log.debug(f"Not enough data ({self.clf_data_size}) to use classifier (need {self.clf_use_size} points), or classifier type not set.")
 
+    def remap_inputs(self, new_train_x: np.ndarray, new_train_x_clf: np.ndarray = None):
+        """
+        Replace training inputs in both the GP and classifier with coordinates
+        expressed in the new rotated unit-cube space after a rotation update.
+
+        Parameters
+        ----------
+        new_train_x : np.ndarray, shape (N_gp, D)
+            GP training inputs in the new unit-cube space.
+        new_train_x_clf : np.ndarray, shape (N_clf, D), optional
+            Full classifier training inputs in the new unit-cube space.
+            If None, only the GP training inputs are remapped and the
+            classifier is NOT retrained (use when clf data was not changed).
+        """
+        super().remap_inputs(new_train_x)
+        if new_train_x_clf is not None:
+            self.train_x_clf = jnp.array(new_train_x_clf)
+            # Retrain classifier on the remapped coordinates
+            if self.use_clf:
+                self.train_classifier()
+
     def train_classifier(self):
         """Public method to train/retrain the classifier."""
         # Check if classifier data size has reached the threshold

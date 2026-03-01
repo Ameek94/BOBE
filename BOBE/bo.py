@@ -293,6 +293,13 @@ class BOBE:
         # Initialize for KL divergence tracking
         self.prev_samples = None
 
+        # Objective evaluation counter - restored from saved state on resume, or seeded
+        # from GP size on fresh start. gp_info is populated on resume by results_manager.
+        self.total_objective_evals = self.results_manager.gp_info.get(
+            'total_objective_evals',
+            self.results_manager.gp_info.get('total_true_evals', self.gp.npoints)  # backward compat
+        )
+
     # ============================================================================
     # INITIALIZATION HELPER METHODS
     # ============================================================================
@@ -837,7 +844,9 @@ class BOBE:
             self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt.flatten())}
             self.best_pt_iteration = step
 
-        log.info(f"Evaluated objective at {len(new_pts)} new points")
+        # Increment dedicated objective-eval counter
+        self.total_objective_evals += len(new_pts)
+        log.info(f"Evaluated objective at {len(new_pts)} new points (total objective evals: {self.total_objective_evals})")
         for k, new_pt in enumerate(new_pts):
             new_pt_vals = {name: f"{float(val):.4f}" for name, val in zip(self.loglikelihood.param_list, new_pt.flatten())}
             log.debug(f"New point {new_pt_vals}, {k+1}/{len(new_pts)}")
@@ -866,7 +875,189 @@ class BOBE:
             return True
         
         return False
-    
+
+    def _update_rotation(self, step: int) -> bool:
+        """
+        Re-estimate the covariance from current MC samples and rebuild the
+        ParameterTransform + GP training set in the new rotated unit-cube space.
+
+        Can be called even when no initial rotation matrix was provided:
+        in that case the first call establishes the rotation from scratch using
+        the current MC sample covariance, and the transform switches from a
+        simple linear scaling to a rotated eigenspace transform.
+
+        The new rotation center is taken from ``self.best_pt`` (physical space).
+        A weighted sample covariance is computed from ``self.mc_samples`` in
+        physical space.  When an existing rotation is in use, the update is
+        skipped when the symmetric KL divergence between the old and new
+        Gaussians is below ``self.rotation_kl_threshold``.  For the very first
+        rotation (no prior rotation), the KL check is bypassed and the update
+        always proceeds.
+
+        After a successful update:
+        - GP training points outside [0, 1] in the new coords are **dropped**
+          (not clipped) to avoid corrupting the emulated function.
+        - A 4-restart warm-start refit is performed (first restart from current
+          hyperparameters, subsequent ones randomised).
+
+        Parameters
+        ----------
+        step : int
+            Current BO iteration number (used for logging).
+
+        Returns
+        -------
+        bool
+            True if the rotation was updated, False if skipped.
+        """
+        # 1. Convert MC samples from old unit space to physical space
+        mc_x_unit = np.array(self.mc_samples['x'])        # (N, r)
+        mc_x_phys = self.transform.from_unit(mc_x_unit)   # (N, D)
+        N = mc_x_phys.shape[0]
+
+        if N < self.ndim + 2:
+            log.warning(f"[Rotation update] Too few MC samples ({N}) to estimate covariance; skipping.")
+            return False
+
+        # 2. Weighted sample covariance in physical space
+        weights = self.mc_samples.get('weights', None)
+        if weights is not None:
+            w = np.array(weights, dtype=np.float64)
+            w = np.clip(w, 0.0, None)
+            w_sum = w.sum()
+            if w_sum <= 0.0:
+                w = np.ones(N)
+            w /= w.sum()
+            # Covariance centered on sample mean (independent of rotation center)
+            sample_mean = np.average(mc_x_phys, weights=w, axis=0)
+            diff = mc_x_phys - sample_mean
+            new_cov = (diff * w[:, None]).T @ diff
+        else:
+            new_cov = np.cov(mc_x_phys.T)
+        new_cov = 0.5 * (new_cov + new_cov.T)
+        new_cov += 1e-10 * np.eye(self.ndim)   # numerical guard
+
+        # 3. New rotation center: use stored best-fit point (physical space)
+        new_center = np.array(self.best_pt).flatten()
+
+        # 4. KL divergence check between old and new physical-space Gaussians.
+        #    Skipped when no rotation exists yet (first rotation is always applied).
+        if self.transform.uses_rotation:
+            old_cov    = self.transform._covariance_phys
+            old_center = self.transform._theta_center
+            try:
+                kl_dict = kl_divergence_gaussian(old_center, old_cov, new_center, new_cov)
+                kl_sym  = float(kl_dict['symmetric'])
+            except (np.linalg.LinAlgError, Exception) as e:
+                log.warning(f"[Rotation update] KL divergence computation failed: {e}; skipping.")
+                return False
+
+            log.info(f"[Rotation update {self.rotation_update_count + 1}] Symmetric KL = {kl_sym:.4f} "
+                     f"(threshold = {self.rotation_kl_threshold:.4f})")
+            if kl_sym < self.rotation_kl_threshold:
+                log.info("[Rotation update] KL below threshold; skipping rotation update.")
+                return False
+        else:
+            log.info(f"[Rotation update {self.rotation_update_count + 1}] No existing rotation; "
+                     "establishing first rotation from sample covariance (KL check bypassed).")
+
+        # 5. Build new ParameterTransform
+        n_sigma = getattr(self.transform, '_n_sigma', 5.0)
+        try:
+            new_transform = ParameterTransform(
+                param_bounds=self.loglikelihood.param_bounds,
+                rotation_matrix=new_cov,
+                rotation_center=new_center,
+                rotation_is_fisher=False,
+                n_sigma=n_sigma,
+            )
+        except (ValueError, np.linalg.LinAlgError) as e:
+            log.warning(f"[Rotation update] Failed to build new transform: {e}; skipping.")
+            return False
+
+        # 6. Remap GP training data: old unit → physical → new unit, drop out-of-bounds
+        train_x_old_unit = np.array(self.gp.train_x)                       # (N_gp, r)
+        train_x_phys     = self.transform.from_unit(train_x_old_unit)      # (N_gp, D)
+        train_x_new_unit = new_transform.to_unit(train_x_phys, clip=False) # (N_gp, r)
+        in_bounds_gp = np.all((train_x_new_unit >= 0.0) & (train_x_new_unit <= 1.0), axis=1)
+        n_dropped_gp = int((~in_bounds_gp).sum())
+        if n_dropped_gp > 0:
+            log.info(f"[Rotation update] Dropping {n_dropped_gp}/{train_x_old_unit.shape[0]} "
+                     f"GP training points outside new unit cube.")
+        train_x_new_unit = train_x_new_unit[in_bounds_gp]
+
+        if train_x_new_unit.shape[0] < self.ndim + 2:
+            log.warning(f"[Rotation update] Only {train_x_new_unit.shape[0]} GP points remain after "
+                        "filtering — too few; skipping rotation update.")
+            return False
+
+        # Recompute y_mean / y_std from the filtered subset (unstandardize → filter → re-standardize)
+        y_raw_all      = np.array(self.gp.train_y).flatten() * float(self.gp.y_std) + float(self.gp.y_mean)
+        y_raw_filtered = y_raw_all[in_bounds_gp]
+        new_y_mean = float(np.mean(y_raw_filtered))
+        new_y_std  = float(np.std(y_raw_filtered))
+        if new_y_std == 0.0:
+            new_y_std = 1.0
+        self.gp.y_mean  = jnp.array(new_y_mean)
+        self.gp.y_std   = jnp.array(new_y_std)
+        self.gp.train_y = jnp.array((y_raw_filtered - new_y_mean) / new_y_std).reshape(-1, 1)
+
+        if isinstance(self.gp, GPwithClassifier):
+            clf_x_old    = np.array(self.gp.train_x_clf)                       # (N_clf, r)
+            clf_x_phys   = self.transform.from_unit(clf_x_old)                 # (N_clf, D)
+            clf_x_new    = new_transform.to_unit(clf_x_phys, clip=False)       # (N_clf, r)
+            in_bounds_clf = np.all((clf_x_new >= 0.0) & (clf_x_new <= 1.0), axis=1)
+            n_dropped_clf = int((~in_bounds_clf).sum())
+            if n_dropped_clf > 0:
+                log.info(f"[Rotation update] Dropping {n_dropped_clf}/{clf_x_old.shape[0]} "
+                         "classifier training points outside new unit cube.")
+            clf_x_new = clf_x_new[in_bounds_clf]
+            # Filter clf y as well
+            self.gp.train_y_clf    = jnp.array(np.array(self.gp.train_y_clf)[in_bounds_clf])
+            self.gp.remap_inputs(train_x_new_unit, new_train_x_clf=clf_x_new)
+        else:
+            self.gp.remap_inputs(train_x_new_unit)
+
+        # 7. Commit new transform
+        self.transform = new_transform
+
+        # 8. Remap current MC samples; drop those outside new unit cube
+        mc_x_new_unit  = new_transform.to_unit(mc_x_phys, clip=False)
+        in_bounds_mc   = np.all((mc_x_new_unit >= 0.0) & (mc_x_new_unit <= 1.0), axis=1)
+        n_dropped_mc   = int((~in_bounds_mc).sum())
+        if n_dropped_mc > 0:
+            log.info(f"[Rotation update] Dropping {n_dropped_mc}/{N} MC samples outside new unit cube.")
+        mc_x_new_unit = mc_x_new_unit[in_bounds_mc]
+        new_mc = {'x': mc_x_new_unit, 'method': self.mc_samples.get('method', 'unknown')}
+        for key in ('weights', 'logl', 'logp'):
+            if key in self.mc_samples:
+                new_mc[key] = np.array(self.mc_samples[key])[in_bounds_mc]
+        if 'best' in self.mc_samples:
+            new_mc['best'] = self.mc_samples['best']
+        self.mc_samples = new_mc
+
+        # 9. Warm-start GP refit (pool.gp_fit always uses current hyperparams as first restart)
+        log.info(f"[Rotation update {self.rotation_update_count + 1}] Warm-start refitting GP "
+                 f"with {train_x_new_unit.shape[0]} points (4 restarts, 500 iters)")
+        self.results_manager.start_timing('GP Training')
+        self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
+        self.results_manager.end_timing('GP Training')
+
+        # 10. Persist updated transform and GP
+        self._save_transform()
+        self.gp.save(filename=f"{self.save_path}_gp")
+        self.rotation_update_count += 1
+        log.info(f"[Rotation update] Complete. Count={self.rotation_update_count}. "
+                 f"New transform: {self.transform}")
+
+        # Persist rotation state so it survives a resume
+        self.results_manager.gp_info.update({
+            'rotation_update_count': self.rotation_update_count,
+            'last_rotation_ii': self.last_rotation_ii,     # set by caller after this returns
+            'last_rotation_acq_val': self.last_rotation_acq_val,  # set by caller after this returns
+        })
+        return True
+
     def finalise_results(self):
         # here finalize results
         if not self.is_main:
@@ -878,6 +1069,7 @@ class BOBE:
         gp_info = {
             'gp_training_set_size': self.gp.train_x.shape[0],
             'gp_final_best_loglike': float(self.best_f),  # Best value in true physical space
+            'total_objective_evals': int(self.total_objective_evals),
         }
         
         # Add classifier info if using GPwithClassifier, this can be done at the start since there are no results here, only settings.
@@ -1075,7 +1267,11 @@ class BOBE:
             thinning: int = 4,
             num_chains: Optional[int] = None,
             mc_points_method: str = 'NUTS',
-            zeta_ei: float = 0.0):
+            zeta_ei: float = 0.0,
+            rotation_update_step: Optional[int] = None,
+            rotation_update_min_evals: Optional[int] = None,
+            max_rotation_updates: int = 10,
+            rotation_kl_threshold: float = 1.0):
         """
         Run the Bayesian Optimization loop.
         
@@ -1128,6 +1324,23 @@ class BOBE:
             Method for generating MC points: 'NUTS', 'NS', or 'uniform'. Default is 'NUTS'.
         zeta_ei : float, optional
             Exploration parameter for EI acquisition. Default is 0.0.
+        rotation_update_step : int, optional
+            If set, attempt to update the rotation matrix every this many BO iterations.
+            Works both when an initial ``rotation_matrix`` was provided at construction
+            time (incremental update) and when no initial rotation was given at all
+            (the first call establishes the rotation from scratch using the current
+            MC sample covariance, switching the transform from linear scaling to a
+            rotated eigenspace).  If None (default), no rotation updates are performed.
+        rotation_update_min_evals : int, optional
+            Minimum number of likelihood evaluations before the first rotation update.
+            Defaults to ``min_evals`` when not set.
+        max_rotation_updates : int, optional
+            Maximum number of rotation updates allowed during a run. Default is 10.
+        rotation_kl_threshold : float, optional
+            Minimum symmetric KL divergence between the old and new physical-space
+            Gaussians required to trigger a rotation update.  Updates are skipped
+            when the KL is below this value (i.e. the new estimate is not
+            meaningfully different from the current one). Default is 1.0.
             
         Returns
         -------
@@ -1227,7 +1440,21 @@ class BOBE:
         self.hmc_num_chains = num_chains
         self.mc_points_method = mc_points_method
         self.zeta_ei = zeta_ei
-        
+
+        # Rotation update settings (only active when transform uses rotation)
+        self.rotation_update_step      = rotation_update_step
+        self.rotation_update_min_evals = rotation_update_min_evals if rotation_update_min_evals is not None else min_evals
+        self.max_rotation_updates      = max_rotation_updates
+        self.rotation_kl_threshold     = rotation_kl_threshold
+        # Restore rotation state from a previous run if available, otherwise start fresh
+        _saved_rotation = self.results_manager.gp_info
+        self.rotation_update_count = int(_saved_rotation.get('rotation_update_count', 0))
+        self.last_rotation_ii      = _saved_rotation.get('last_rotation_ii', None)
+        self.last_rotation_acq_val = _saved_rotation.get('last_rotation_acq_val', None)
+        if self.rotation_update_count > 0:
+            log.info(f"Resuming with rotation state: count={self.rotation_update_count}, "
+                     f"last_ii={self.last_rotation_ii}, last_acq_val={self.last_rotation_acq_val}")
+
         # Adjust batch_size for MPI load balancing
         if self.is_mpi:
             n_processes = self.pool.size
@@ -1265,7 +1492,11 @@ class BOBE:
             'thinning': thinning,
             'num_chains': num_chains,
             'mc_points_method': mc_points_method,
-            'zeta_ei': zeta_ei
+            'zeta_ei': zeta_ei,
+            'rotation_update_step': rotation_update_step,
+            'rotation_update_min_evals': self.rotation_update_min_evals,
+            'max_rotation_updates': max_rotation_updates,
+            'rotation_kl_threshold': rotation_kl_threshold,
         })
         
         acqs_funcs_available = list(_acq_funcs.keys())
@@ -1461,6 +1692,36 @@ class BOBE:
             # Update results manager with iteration info, also save results and gp if save_step
             if ii % self.save_step == 0:
                 self.results_manager.save_intermediate(gp=self.gp)
+
+            # Periodic rotation update — fires with or without an initial rotation matrix.
+            # First update: no step-count check; fires as soon as the acq threshold is met.
+            # Subsequent updates: require acq_val to have improved since the last update
+            #   AND at least rotation_update_step iterations to have elapsed.
+            if (self.rotation_update_step is not None
+                    and self.rotation_update_count < self.max_rotation_updates
+                    and current_evals >= self.rotation_update_min_evals
+                    and acq_vals[-1] <= 2.):
+                if self.rotation_update_count == 0:
+                    # First rotation update — fire immediately upon reaching the threshold
+                    did_update = self._update_rotation(step=ii)
+                    if did_update:
+                        self.last_rotation_ii      = ii
+                        self.last_rotation_acq_val = float(acq_vals[-1])
+                        self.results_manager.gp_info.update({
+                            'last_rotation_ii': self.last_rotation_ii,
+                            'last_rotation_acq_val': self.last_rotation_acq_val,
+                        })
+                elif (acq_vals[-1] < self.last_rotation_acq_val
+                        and (ii - self.last_rotation_ii) >= self.rotation_update_step):
+                    # Subsequent rotation: acq must have improved and enough steps elapsed
+                    did_update = self._update_rotation(step=ii)
+                    if did_update:
+                        self.last_rotation_ii      = ii
+                        self.last_rotation_acq_val = float(acq_vals[-1])
+                        self.results_manager.gp_info.update({
+                            'last_rotation_ii': self.last_rotation_ii,
+                            'last_rotation_acq_val': self.last_rotation_acq_val,
+                        })
 
             if self.converged:
                 break

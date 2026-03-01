@@ -836,7 +836,9 @@ class BOBEResults:
             "diagnostics": {
                 "runtime_hours": float((self.end_time - self.start_time) / 3600) if self.end_time else 0,
                 "converged": bool(self.converged),
-                "termination_reason": str(self.termination_reason)
+                "termination_reason": str(self.termination_reason),
+                "total_objective_evals": int(self.gp_info.get('total_objective_evals', self.gp_info.get('total_true_evals', -1))),
+                "gp_training_set_size": int(self.gp_info.get('gp_training_set_size', -1)),
             },
             "gp_info": self.gp_info,
 
