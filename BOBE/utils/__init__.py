@@ -20,6 +20,7 @@ from .core import (
 from .log import get_logger, setup_logging
 from .seed import get_numpy_rng, get_jax_key, set_global_seed
 from .transforms import ParameterTransform
+from .flow import FlowTransform, FlowConfig
 
 __all__ = [
     # Results management
@@ -30,7 +31,7 @@ __all__ = [
     'suppress_stdout_stderr', 'split_vmap', 'scale_to_unit', 'scale_from_unit',
     'renormalise_log_weights', 'resample_equal', 'is_cluster_environment',
     # Transforms
-    'ParameterTransform',
+    'ParameterTransform', 'FlowTransform', 'FlowConfig',
     # Logging
     'get_logger', 'setup_logging',
     # Random number generation

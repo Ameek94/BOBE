@@ -10,6 +10,7 @@ from .clf_gp import GPwithClassifier
 from .likelihood import Likelihood, CobayaLikelihood
 from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
 from .utils.transforms import ParameterTransform
+from .utils.flow import FlowTransform, FlowConfig
 from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng, get_new_jax_key
 from .samplers import nested_sampling_Dy, sample_GP_NUTS
 from .utils.log import get_logger, update_verbosity
@@ -126,6 +127,8 @@ class BOBE:
                  rotation_matrix=None,
                  rotation_center=None,
                  rotation_is_fisher=False,
+                 use_flow: bool = False,
+                 flow_config: Optional[Dict[str, Any]] = None,
                  ):
         """
         Initialize the BOBE (Bayesian Optimization for Bayesian Evidence) sampler.
@@ -205,6 +208,19 @@ class BOBE:
         rotation_is_fisher : bool, optional
             If True, rotation_matrix is a Fisher matrix (will be inverted to get
             the covariance). Default is False.
+        use_flow : bool, optional
+            If True, use a normalizing-flow transform (FlowTransform) instead of the
+            linear ParameterTransform.  The flow maps the physical parameter space to
+            a near-Gaussian latent space and then squashes through Φ (normal CDF)
+            to produce [0,1]^D coordinates for the GP.  The flow is initially
+            untrained and falls back to a plain linear scaling; it is updated during
+            the BO loop via ``run(..., flow_update_step=N)``.  Default is False.
+        flow_config : dict, optional
+            Keyword arguments forwarded to ``FlowConfig`` to customise the neural
+            spline flow architecture and training hyper-parameters.  Accepted keys: 
+            ``n_layers``, ``hidden_features``, ``n_bins``, ``tail_bound``,
+            ``learning_rate``, ``n_epochs``, ``batch_size``, ``clip_grad_norm``,
+            ``min_samples_to_train``.  Ignored when ``use_flow=False``.
             
         Notes
         -----
@@ -233,12 +249,19 @@ class BOBE:
         self.ndim = len(self.loglikelihood.param_list)
         
         # Create the parameter transform (handles unit-cube scaling and optional rotation)
-        self.transform = ParameterTransform(
-            param_bounds=self.loglikelihood.param_bounds,
-            rotation_matrix=rotation_matrix,
-            rotation_center=rotation_center,
-            rotation_is_fisher=rotation_is_fisher,
-        )
+        if use_flow:
+            _flow_cfg = FlowConfig(**(flow_config or {}))
+            self.transform = FlowTransform(
+                param_bounds=self.loglikelihood.param_bounds,
+                config=_flow_cfg,
+            )
+        else:
+            self.transform = ParameterTransform(
+                param_bounds=self.loglikelihood.param_bounds,
+                rotation_matrix=rotation_matrix,
+                rotation_center=rotation_center,
+                rotation_is_fisher=rotation_is_fisher,
+            )
         
         if not self.is_main:
             # Workers only need likelihood and seed - everything else is handled in worker_wait
@@ -467,7 +490,12 @@ class BOBE:
                         state[key] = value.item()
                     else:
                         state[key] = value
-                self.transform = ParameterTransform.from_state_dict(state)
+                # Dispatch to the correct class based on a 'transform_type' tag
+                transform_type = state.get('transform_type', 'ParameterTransform')
+                if transform_type == 'FlowTransform' or isinstance(self.transform, FlowTransform):
+                    self.transform = FlowTransform.from_state_dict(state)
+                else:
+                    self.transform = ParameterTransform.from_state_dict(state)
                 log.info(f"Restored transform state from {fname}")
             except Exception as e:
                 log.warning(f"Failed to load transform state from {transform_file}: {e}. Using current transform.")
@@ -876,6 +904,49 @@ class BOBE:
         
         return False
 
+    def _apply_flow_jacobian_weights(self,
+                                     samples_u: np.ndarray,
+                                     weights: np.ndarray) -> np.ndarray:
+        """
+        Correct importance weights for the non-constant Jacobian of a FlowTransform.
+
+        When sampling in *u*-space with a flat Uniform([0,1]^D) prior, the implied
+        distribution in physical θ-space is
+
+            p(θ) ∝ exp(GP(u(θ))) · |∂u/∂θ|
+
+        so the raw NS / MCMC weights already encode the GP value but carry an
+        implicit factor of |∂u/∂θ| that must be divided out to recover the true
+        physical-space posterior weights.  The correction is therefore
+
+            w_corrected ∝ w_raw / |∂u/∂θ|
+                        = w_raw · exp(-log|∂u/∂θ|)
+
+        If the transform is NOT a FlowTransform (rotation / linear) the Jacobian
+        is constant and this method returns the original weights unchanged.
+
+        Parameters
+        ----------
+        samples_u : (N, D) array — samples in unit-cube space
+        weights   : (N,) array  — raw sampling weights (need not sum to 1)
+
+        Returns
+        -------
+        weights_corrected : (N,) array — Jacobian-corrected, re-normalised weights
+        """
+        if not isinstance(self.transform, FlowTransform) or not self.transform.flow_trained:
+            return weights
+
+        theta = np.asarray(self.transform.from_unit(samples_u))
+        log_jac = self.transform.log_abs_det_jacobian(theta)   # (N,) — log|∂u/∂θ|
+
+        log_w = np.log(np.clip(weights, 1e-300, None)) - log_jac
+        # Numerical stability: subtract max before exp
+        log_w -= log_w.max()
+        w_corrected = np.exp(log_w)
+        w_corrected /= w_corrected.sum()
+        return w_corrected
+
     def _update_rotation(self, step: int) -> bool:
         """
         Re-estimate the covariance from current MC samples and rebuild the
@@ -1058,6 +1129,132 @@ class BOBE:
         })
         return True
 
+    def _update_flow(self, step: int) -> bool:
+        """
+        Retrain the FlowTransform on current MC samples and remap the GP training
+        data into the new latent unit-cube coordinates.
+
+        The flow maps θ → z ≈ N(0, I) and then applies Φ(z) to squash into
+        [0, 1]^D, giving the GP a quadratic bowl to emulate instead of a top-hat.
+
+        After a successful update:
+        - GP training points that fall outside [0, 1]^D in the new coords are
+          **dropped** to avoid corrupting the emulated function.
+        - A 4-restart warm-start refit is performed.
+
+        Parameters
+        ----------
+        step : int
+            Current BO iteration number (used for logging).
+
+        Returns
+        -------
+        bool
+            True if the flow was retrained and the GP remapped, False if skipped.
+        """
+        if not isinstance(self.transform, FlowTransform):
+            log.warning("[Flow update] self.transform is not a FlowTransform; skipping.")
+            return False
+
+        # 1. Convert current MC samples from unit space to physical space for training
+        mc_x_unit = np.array(self.mc_samples['x'])           # (N, D)
+        mc_x_phys = self.transform.from_unit(mc_x_unit)      # (N, D)
+        N = mc_x_phys.shape[0]
+
+        if N < self.transform.config.min_samples_to_train:
+            log.warning(f"[Flow update] Too few MC samples ({N} < "
+                        f"{self.transform.config.min_samples_to_train}); skipping.")
+            return False
+
+        # 2. Train the flow (warm-start by default; reinit=False)
+        log.info(f"[Flow update {self.flow_update_count + 1}] Training flow on {N} physical samples "
+                 f"at step {step}.")
+        try:
+            self.transform.train(mc_x_phys, verbose=True, reinit=False)
+        except Exception as e:
+            log.warning(f"[Flow update] Flow training failed: {e}; skipping.")
+            return False
+
+        # 3. Remap GP training data: old unit → physical → new unit, drop OOB
+        train_x_old_unit = np.array(self.gp.train_x)                        # (N_gp, D)
+        train_x_phys     = self.transform.from_unit(train_x_old_unit)       # (N_gp, D)
+        # Use the freshly trained flow to map to new unit coords
+        train_x_new_unit = self.transform.to_unit(train_x_phys, clip=False) # (N_gp, D)
+        in_bounds_gp = np.all((train_x_new_unit >= 0.0) & (train_x_new_unit <= 1.0), axis=1)
+        n_dropped_gp = int((~in_bounds_gp).sum())
+        if n_dropped_gp > 0:
+            log.info(f"[Flow update] Dropping {n_dropped_gp}/{train_x_old_unit.shape[0]} "
+                     "GP training points outside new unit cube.")
+        train_x_new_unit = train_x_new_unit[in_bounds_gp]
+
+        if train_x_new_unit.shape[0] < self.ndim + 2:
+            log.warning(f"[Flow update] Only {train_x_new_unit.shape[0]} GP points remain after "
+                        "filtering — too few; reverting flow to previous state is not possible, skipping remap.")
+            return False
+
+        # 4. Re-standardize y from the surviving subset
+        y_raw_all      = np.array(self.gp.train_y).flatten() * float(self.gp.y_std) + float(self.gp.y_mean)
+        y_raw_filtered = y_raw_all[in_bounds_gp]
+        new_y_mean = float(np.mean(y_raw_filtered))
+        new_y_std  = float(np.std(y_raw_filtered))
+        if new_y_std == 0.0:
+            new_y_std = 1.0
+        self.gp.y_mean  = jnp.array(new_y_mean)
+        self.gp.y_std   = jnp.array(new_y_std)
+        self.gp.train_y = jnp.array((y_raw_filtered - new_y_mean) / new_y_std).reshape(-1, 1)
+
+        # 5. Handle GPwithClassifier separately
+        if isinstance(self.gp, GPwithClassifier):
+            clf_x_old    = np.array(self.gp.train_x_clf)
+            clf_x_phys   = self.transform.from_unit(clf_x_old)
+            clf_x_new    = self.transform.to_unit(clf_x_phys, clip=False)
+            in_bounds_clf = np.all((clf_x_new >= 0.0) & (clf_x_new <= 1.0), axis=1)
+            n_dropped_clf = int((~in_bounds_clf).sum())
+            if n_dropped_clf > 0:
+                log.info(f"[Flow update] Dropping {n_dropped_clf}/{clf_x_old.shape[0]} "
+                         "classifier training points outside new unit cube.")
+            clf_x_new = clf_x_new[in_bounds_clf]
+            self.gp.train_y_clf = jnp.array(np.array(self.gp.train_y_clf)[in_bounds_clf])
+            self.gp.remap_inputs(train_x_new_unit, new_train_x_clf=clf_x_new)
+        else:
+            self.gp.remap_inputs(train_x_new_unit)
+
+        # 6. Remap current MC samples into new unit coords; drop OOB
+        mc_x_new_unit = self.transform.to_unit(mc_x_phys, clip=False)
+        in_bounds_mc  = np.all((mc_x_new_unit >= 0.0) & (mc_x_new_unit <= 1.0), axis=1)
+        n_dropped_mc  = int((~in_bounds_mc).sum())
+        if n_dropped_mc > 0:
+            log.info(f"[Flow update] Dropping {n_dropped_mc}/{N} MC samples outside new unit cube.")
+        mc_x_new_unit = mc_x_new_unit[in_bounds_mc]
+        new_mc = {'x': mc_x_new_unit, 'method': self.mc_samples.get('method', 'unknown')}
+        for key in ('weights', 'logl', 'logp'):
+            if key in self.mc_samples:
+                new_mc[key] = np.array(self.mc_samples[key])[in_bounds_mc]
+        if 'best' in self.mc_samples:
+            new_mc['best'] = self.mc_samples['best']
+        self.mc_samples = new_mc
+
+        # 7. Warm-start GP refit
+        log.info(f"[Flow update {self.flow_update_count + 1}] Warm-start refitting GP "
+                 f"with {train_x_new_unit.shape[0]} points (4 restarts, 500 iters)")
+        self.results_manager.start_timing('GP Training')
+        self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
+        self.results_manager.end_timing('GP Training')
+
+        # 8. Persist updated transform and GP
+        self._save_transform()
+        self.gp.save(filename=f"{self.save_path}_gp")
+        self.flow_update_count += 1
+        log.info(f"[Flow update] Complete. Count={self.flow_update_count}.")
+
+        # Persist flow state so it survives a resume
+        self.results_manager.gp_info.update({
+            'flow_update_count': self.flow_update_count,
+            'last_flow_ii': self.last_flow_ii,             # set by caller after this returns
+            'last_flow_acq_val': self.last_flow_acq_val,   # set by caller after this returns
+        })
+        return True
+
     def finalise_results(self):
         # here finalize results
         if not self.is_main:
@@ -1179,6 +1376,14 @@ class BOBE:
         # Compute KL divergences if we have nested sampling samples
         successive_kl = None
         
+        # For FlowTransform: correct weights for the non-constant Jacobian before
+        # converting to physical space (equal_weights are ~1/N so we pass uniform array).
+        if isinstance(self.transform, FlowTransform) and self.transform.flow_trained:
+            uniform_w = np.ones(equal_samples.shape[0]) / equal_samples.shape[0]
+            corrected_w = self._apply_flow_jacobian_weights(equal_samples, uniform_w)
+            # Resample with corrected weights so the KL estimate is unbiased
+            equal_samples, equal_logl = resample_equal(equal_samples, equal_logl, weights=corrected_w)
+
         equal_samples = np.asarray(self.transform.from_unit(equal_samples))
     
 
@@ -1271,7 +1476,10 @@ class BOBE:
             rotation_update_step: Optional[int] = None,
             rotation_update_min_evals: Optional[int] = None,
             max_rotation_updates: int = 10,
-            rotation_kl_threshold: float = 1.0):
+            rotation_kl_threshold: float = 1.0,
+            flow_update_step: Optional[int] = None,
+            flow_update_min_evals: Optional[int] = None,
+            max_flow_updates: int = 10):
         """
         Run the Bayesian Optimization loop.
         
@@ -1341,6 +1549,19 @@ class BOBE:
             Gaussians required to trigger a rotation update.  Updates are skipped
             when the KL is below this value (i.e. the new estimate is not
             meaningfully different from the current one). Default is 1.0.
+        flow_update_step : int, optional
+            If set, attempt to retrain the FlowTransform every this many BO iterations
+            once the acquisition threshold (acq_val <= 2) is met.  Only active when
+            the BOBE instance was created with ``use_flow=True``.  Follows the same
+            two-phase trigger as ``rotation_update_step``: the first update fires
+            immediately when the threshold is reached; subsequent updates require
+            both an improvement in acq_val and at least ``flow_update_step`` elapsed
+            iterations.  If None (default), no flow updates are performed.
+        flow_update_min_evals : int, optional
+            Minimum number of likelihood evaluations before the first flow update.
+            Defaults to ``min_evals`` when not set.
+        max_flow_updates : int, optional
+            Maximum number of flow retraining steps allowed during a run. Default is 10.
             
         Returns
         -------
@@ -1455,6 +1676,19 @@ class BOBE:
             log.info(f"Resuming with rotation state: count={self.rotation_update_count}, "
                      f"last_ii={self.last_rotation_ii}, last_acq_val={self.last_rotation_acq_val}")
 
+        # Flow update settings (only active when self.transform is a FlowTransform)
+        self.flow_update_step      = flow_update_step
+        self.flow_update_min_evals = flow_update_min_evals if flow_update_min_evals is not None else min_evals
+        self.max_flow_updates      = max_flow_updates
+        # Restore flow state from a previous run if available, otherwise start fresh
+        _saved_flow = self.results_manager.gp_info
+        self.flow_update_count = int(_saved_flow.get('flow_update_count', 0))
+        self.last_flow_ii      = _saved_flow.get('last_flow_ii', None)
+        self.last_flow_acq_val = _saved_flow.get('last_flow_acq_val', None)
+        if self.flow_update_count > 0:
+            log.info(f"Resuming with flow state: count={self.flow_update_count}, "
+                     f"last_ii={self.last_flow_ii}, last_acq_val={self.last_flow_acq_val}")
+
         # Adjust batch_size for MPI load balancing
         if self.is_mpi:
             n_processes = self.pool.size
@@ -1497,6 +1731,9 @@ class BOBE:
             'rotation_update_min_evals': self.rotation_update_min_evals,
             'max_rotation_updates': max_rotation_updates,
             'rotation_kl_threshold': rotation_kl_threshold,
+            'flow_update_step': flow_update_step,
+            'flow_update_min_evals': self.flow_update_min_evals,
+            'max_flow_updates': max_flow_updates,
         })
         
         acqs_funcs_available = list(_acq_funcs.keys())
@@ -1723,6 +1960,35 @@ class BOBE:
                             'last_rotation_acq_val': self.last_rotation_acq_val,
                         })
 
+            # Periodic flow update — same two-phase trigger as rotation update.
+            # Only active when self.transform is a FlowTransform and flow_update_step is set.
+            if (self.flow_update_step is not None
+                    and isinstance(self.transform, FlowTransform)
+                    and self.flow_update_count < self.max_flow_updates
+                    and current_evals >= self.flow_update_min_evals
+                    and acq_vals[-1] <= 2.):
+                if self.flow_update_count == 0:
+                    # First flow update — fire immediately upon reaching the threshold
+                    did_update = self._update_flow(step=ii)
+                    if did_update:
+                        self.last_flow_ii      = ii
+                        self.last_flow_acq_val = float(acq_vals[-1])
+                        self.results_manager.gp_info.update({
+                            'last_flow_ii': self.last_flow_ii,
+                            'last_flow_acq_val': self.last_flow_acq_val,
+                        })
+                elif (acq_vals[-1] < self.last_flow_acq_val
+                        and (ii - self.last_flow_ii) >= self.flow_update_step):
+                    # Subsequent flow update: acq must have improved and enough steps elapsed
+                    did_update = self._update_flow(step=ii)
+                    if did_update:
+                        self.last_flow_ii      = ii
+                        self.last_flow_acq_val = float(acq_vals[-1])
+                        self.results_manager.gp_info.update({
+                            'last_flow_ii': self.last_flow_ii,
+                            'last_flow_acq_val': self.last_flow_acq_val,
+                        })
+
             if self.converged:
                 break
             
@@ -1773,7 +2039,12 @@ class BOBE:
             samples = mc_samples['x']
             weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
             loglikes = mc_samples['logp']
-                
+
+        # For FlowTransform: the sampler uses a flat Uniform([0,1]^D) prior in
+        # u-space, which implicitly upweights regions where |∂u/∂θ| is large.
+        # Divide out the Jacobian to recover the true physical-space weights.
+        weights = self._apply_flow_jacobian_weights(samples, weights)
+
         samples = np.asarray(self.transform.from_unit(samples))
 
         self.samples_dict = {
