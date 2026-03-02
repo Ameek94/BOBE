@@ -90,9 +90,9 @@ def get_dimension_based_defaults(ndim: int):
         'mc_points_size': min(512, 32*ndim),  # more MC points for higher dimensions
         'num_chains': min(6, max(3,jax.device_count())),  # 3-6 chains depending on available devices
         'fit_n_points': min(50, 2*ndim),  # refit less often for higher dimensions
-        'logz_threshold': 0.01 + 0.01*(ndim/6) if ndim<=6 else min(1.,0.1 + 0.1*(ndim/6)**2)  # looser threshold for higher dimensions
+        'logz_threshold': 0.01 + 0.01*(ndim/6) if ndim<=6 else min(1.,0.1 + 0.1*(ndim/6)**2),  # looser threshold for higher dimensions
+        'rotation_logz_threshold': 4 * (ndim/15)
     }
-    
     return defaults
 
 class BOBE:
@@ -411,16 +411,14 @@ class BOBE:
                 if self.results_manager.converged:
                     self.prev_converged = True
                     self.convergence_counter = 1
-                    # Store last convergence info for threshold comparison
+                    # Store last convergence info for threshold comparison in run()
                     if self.results_manager.convergence_history:
                         last_conv = self.results_manager.convergence_history[-1]
                         self.prev_convergence_delta = last_conv.delta
                         self.prev_convergence_threshold = last_conv.threshold
-                        log.info(f"Previous run had converged with delta={self.prev_convergence_delta:.6f}, threshold={self.prev_convergence_threshold:.6f}")
                     else:
                         self.prev_convergence_delta = None
                         self.prev_convergence_threshold = None
-                        log.info("Previous run had converged.")
                 else:
                     # Not converged in previous run
                     self.prev_converged = False
@@ -447,7 +445,28 @@ class BOBE:
         state = self.transform.state_dict()
         np.savez(transform_file, **{k: v for k, v in state.items()})
         log.debug(f"Saved transform state to {transform_file}")
-    
+
+    def _save_dropped_pool(self):
+        """Persist the dropped-point pool to disk so it survives a resume."""
+        pool_file = self.save_path + '_dropped_pool.npz'
+        np.savez(pool_file,
+                 x_phys=self._dropped_pool_x_phys,
+                 y_raw=self._dropped_pool_y_raw)
+        log.debug(f"Saved dropped pool ({len(self._dropped_pool_x_phys)} pts) to {pool_file}")
+
+    def _load_dropped_pool(self):
+        """Restore the dropped-point pool from disk (empty arrays if file absent)."""
+        pool_file = self.save_path + '_dropped_pool.npz'
+        if os.path.exists(pool_file):
+            data = np.load(pool_file)
+            self._dropped_pool_x_phys = data['x_phys']
+            self._dropped_pool_y_raw  = data['y_raw']
+            if self._dropped_pool_x_phys.shape[0] > 0:
+                log.info(f"Restored dropped pool with {self._dropped_pool_x_phys.shape[0]} points.")
+        else:
+            self._dropped_pool_x_phys = np.zeros((0, self.ndim))
+            self._dropped_pool_y_raw  = np.zeros(0)
+
     def _load_transform(self, resume_file):
         """
         Load the parameter transform state from a previous run.
@@ -975,48 +994,45 @@ class BOBE:
             log.warning(f"[Rotation update] Failed to build new transform: {e}; skipping.")
             return False
 
-        # 6. Remap GP training data: old unit → physical → new unit, drop out-of-bounds
-        train_x_old_unit = np.array(self.gp.train_x)                       # (N_gp, r)
-        train_x_phys     = self.transform.from_unit(train_x_old_unit)      # (N_gp, D)
-        train_x_new_unit = new_transform.to_unit(train_x_phys, clip=False) # (N_gp, r)
-        in_bounds_gp = np.all((train_x_new_unit >= 0.0) & (train_x_new_unit <= 1.0), axis=1)
-        n_dropped_gp = int((~in_bounds_gp).sum())
-        if n_dropped_gp > 0:
-            log.info(f"[Rotation update] Dropping {n_dropped_gp}/{train_x_old_unit.shape[0]} "
-                     f"GP training points outside new unit cube.")
-        train_x_new_unit = train_x_new_unit[in_bounds_gp]
+        # 5b+6. Merge current GP data with the full dropped pool, remap to the new unit cube,
+        #       and split: in-bounds points go to the GP, out-of-bounds points become the new
+        #       pool (auto-recovering any pool points that now fall in-bounds).
+        if isinstance(self.gp, GPwithClassifier):
+            src_x_phys = self.transform.from_unit(np.array(self.gp.train_x_clf))
+            src_y_raw  = np.array(self.gp.train_y_clf).flatten()
+        else:
+            src_x_phys = self.transform.from_unit(np.array(self.gp.train_x))
+            src_y_raw  = np.array(self.gp.train_y).flatten() * float(self.gp.y_std) + float(self.gp.y_mean)
 
-        if train_x_new_unit.shape[0] < self.ndim + 2:
-            log.warning(f"[Rotation update] Only {train_x_new_unit.shape[0]} GP points remain after "
-                        "filtering — too few; skipping rotation update.")
+        all_x_phys = np.concatenate([src_x_phys, self._dropped_pool_x_phys], axis=0)
+        all_y_raw  = np.concatenate([src_y_raw,  self._dropped_pool_y_raw],  axis=0)
+
+        all_u     = new_transform.to_unit(all_x_phys, clip=False)
+        in_bounds = np.all((all_u >= 0.0) & (all_u <= 1.0), axis=1)
+        n_src     = src_x_phys.shape[0]
+        n_recovered = int(in_bounds[n_src:].sum())   # pool points now in-bounds
+        n_dropped   = int((~in_bounds).sum())        # total points going to pool
+        if n_recovered > 0:
+            log.info(f"[Rotation update] {n_recovered} point(s) recovered from dropped pool.")
+        if n_dropped > 0:
+            log.info(f"[Rotation update] {n_dropped}/{len(all_x_phys)} points outside new unit cube → pool.")
+
+        # Update the pool with OOB points
+        self._dropped_pool_x_phys = all_x_phys[~in_bounds]
+        self._dropped_pool_y_raw  = all_y_raw[~in_bounds]
+
+        x_ib = all_u[in_bounds]
+        y_ib = all_y_raw[in_bounds]
+
+        if x_ib.shape[0] < self.ndim + 2:
+            log.warning(f"[Rotation update] Only {x_ib.shape[0]} points remain after filtering — too few; skipping.")
             return False
 
-        # Recompute y_mean / y_std from the filtered subset (unstandardize → filter → re-standardize)
-        y_raw_all      = np.array(self.gp.train_y).flatten() * float(self.gp.y_std) + float(self.gp.y_mean)
-        y_raw_filtered = y_raw_all[in_bounds_gp]
-        new_y_mean = float(np.mean(y_raw_filtered))
-        new_y_std  = float(np.std(y_raw_filtered))
-        if new_y_std == 0.0:
-            new_y_std = 1.0
-        self.gp.y_mean  = jnp.array(new_y_mean)
-        self.gp.y_std   = jnp.array(new_y_std)
-        self.gp.train_y = jnp.array((y_raw_filtered - new_y_mean) / new_y_std).reshape(-1, 1)
-
+        # Hand off to GP — threshold / standardisation handled inside
         if isinstance(self.gp, GPwithClassifier):
-            clf_x_old    = np.array(self.gp.train_x_clf)                       # (N_clf, r)
-            clf_x_phys   = self.transform.from_unit(clf_x_old)                 # (N_clf, D)
-            clf_x_new    = new_transform.to_unit(clf_x_phys, clip=False)       # (N_clf, r)
-            in_bounds_clf = np.all((clf_x_new >= 0.0) & (clf_x_new <= 1.0), axis=1)
-            n_dropped_clf = int((~in_bounds_clf).sum())
-            if n_dropped_clf > 0:
-                log.info(f"[Rotation update] Dropping {n_dropped_clf}/{clf_x_old.shape[0]} "
-                         "classifier training points outside new unit cube.")
-            clf_x_new = clf_x_new[in_bounds_clf]
-            # Filter clf y as well
-            self.gp.train_y_clf    = jnp.array(np.array(self.gp.train_y_clf)[in_bounds_clf])
-            self.gp.remap_inputs(train_x_new_unit, new_train_x_clf=clf_x_new)
+            self.gp.remap_from_full_dataset(x_ib, y_ib)
         else:
-            self.gp.remap_inputs(train_x_new_unit)
+            self.gp.remap_from_raw(x_ib, y_ib)
 
         # 7. Commit new transform
         self.transform = new_transform
@@ -1038,13 +1054,14 @@ class BOBE:
 
         # 9. Warm-start GP refit (pool.gp_fit always uses current hyperparams as first restart)
         log.info(f"[Rotation update {self.rotation_update_count + 1}] Warm-start refitting GP "
-                 f"with {train_x_new_unit.shape[0]} points (4 restarts, 500 iters)")
+                 f"with {x_ib.shape[0]} points (4 restarts, 500 iters)")
         self.results_manager.start_timing('GP Training')
         self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
         self.results_manager.end_timing('GP Training')
 
-        # 10. Persist updated transform and GP
+        # 10. Persist updated transform, GP, and dropped pool
         self._save_transform()
+        self._save_dropped_pool()
         self.gp.save(filename=f"{self.save_path}_gp")
         self.rotation_update_count += 1
         log.info(f"[Rotation update] Complete. Count={self.rotation_update_count}. "
@@ -1201,12 +1218,14 @@ class BOBE:
         # Store current samples for next iteration
         self.prev_samples = {'x': equal_samples, 'logl': equal_logl}
 
-        # Update results manager with convergence info and KL divergences
+        # Update results manager with convergence info and KL divergences.
+        # Pass delta explicitly so the stored value matches what was used for the check.
         self.results_manager.update_convergence(
             iteration=step,
             logz_dict=logz_dict,
             converged=converged,
-            threshold=self.logz_threshold
+            threshold=self.logz_threshold,
+            delta=delta
         )
         
         log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
@@ -1271,6 +1290,7 @@ class BOBE:
             rotation_update_step: Optional[int] = None,
             rotation_update_min_evals: Optional[int] = None,
             max_rotation_updates: int = 10,
+            rotation_logz_threshold: float = 4.0,
             rotation_kl_threshold: float = 1.0):
         """
         Run the Bayesian Optimization loop.
@@ -1366,6 +1386,7 @@ class BOBE:
         mc_points_size = mc_points_size if mc_points_size is not None else dim_defaults['mc_points_size']
         num_chains = num_chains if num_chains is not None else dim_defaults['num_chains']
         logz_threshold = logz_threshold if logz_threshold is not None else dim_defaults['logz_threshold']
+        rotation_logz_threshold = rotation_logz_threshold if rotation_logz_threshold is not None else dim_defaults['rotation_logz_threshold']
         
         # Store convergence parameters
         self.min_evals = min_evals
@@ -1373,25 +1394,15 @@ class BOBE:
         self.max_gp_size = max_gp_size
         self.logz_threshold = logz_threshold
 
-        # Log run settings
-        log.info("Using run settings:")
-        log.info(f"min_evals = {min_evals}, max_evals = {max_evals}, max_gp_size = {max_gp_size}")
-        if acq.lower() in ['wipv', 'wipstd']:
-            acq_info = "logz_threshold = {:.4f}".format(logz_threshold)+f", mc_points_size = {mc_points_size}"
-        else:
-            acq_info = "ei_goal = {:.4e}".format(ei_goal)
-        log.info(f"convergence_n_iters = {convergence_n_iters}, acq = {acq}, {acq_info}")
-        log.info(f"fit_n_points = {fit_n_points}, batch_size = {batch_size}, ns_n_points = {ns_n_points}")
-        
-        # Initialize result containers
-        self.samples_dict = {}
-        self.results_dict = {}
-        
-        # Check if already converged with new threshold when resuming
-        if self.prev_converged and self.prev_convergence_delta is not None:
-            if self.prev_convergence_delta < logz_threshold:
-                log.info(f"Previous run already converged with delta={self.prev_convergence_delta:.6f} < new threshold={logz_threshold:.6f}")
-                log.info("Skipping BO loop and proceeding to finalization")
+        # Check if already converged with new threshold when resuming.
+        # Skip only if the new threshold is NOT stricter than the one used previously
+        # (i.e. the user hasn't tightened the criterion).  Comparing new vs old threshold
+        # is the correct guard; comparing delta vs new threshold would incorrectly skip
+        # even when the user explicitly lowers logz_threshold to force more iterations.
+        if self.prev_converged and self.prev_convergence_threshold is not None:
+            if logz_threshold >= self.prev_convergence_threshold:
+                log.info(f"Previous run converged with threshold={self.prev_convergence_threshold:.6f}; "
+                         f"new threshold={logz_threshold:.6f} is not stricter — skipping BO loop.")
                 self.converged = True
                 self.termination_reason = "Already converged in previous run"
                 
@@ -1416,10 +1427,24 @@ class BOBE:
                 self.pool.close()
                 return self.results_dict
             else:
-                log.info(f"Previous run converged with delta={self.prev_convergence_delta:.6f} >= new threshold={logz_threshold:.6f}")
-                log.info("Continuing optimization to meet new convergence threshold")
+                log.info(f"Previous run converged with threshold={self.prev_convergence_threshold:.6f}; "
+                         f"new threshold={logz_threshold:.6f} is stricter — continuing optimization.")
                 self.converged = False
                 self.convergence_counter = 0
+
+        # Log run settings
+        log.info("Using run settings:")
+        log.info(f"min_evals = {min_evals}, max_evals = {max_evals}, max_gp_size = {max_gp_size}")
+        if acq.lower() in ['wipv', 'wipstd']:
+            acq_info = "logz_threshold = {:.4f}".format(logz_threshold)+f", mc_points_size = {mc_points_size}"
+        else:
+            acq_info = "ei_goal = {:.4e}".format(ei_goal)
+        log.info(f"convergence_n_iters = {convergence_n_iters}, acq = {acq}, {acq_info}")
+        log.info(f"fit_n_points = {fit_n_points}, batch_size = {batch_size}, ns_n_points = {ns_n_points}")
+        
+        # Initialize result containers
+        self.samples_dict = {}
+        self.results_dict = {}
         
         self.convergence_n_iters = convergence_n_iters
         self.ei_goal_log = np.log(ei_goal)
@@ -1446,6 +1471,7 @@ class BOBE:
         self.rotation_update_min_evals = rotation_update_min_evals if rotation_update_min_evals is not None else min_evals
         self.max_rotation_updates      = max_rotation_updates
         self.rotation_kl_threshold     = rotation_kl_threshold
+        self.rotation_logz_threshold = rotation_logz_threshold
         # Restore rotation state from a previous run if available, otherwise start fresh
         _saved_rotation = self.results_manager.gp_info
         self.rotation_update_count = int(_saved_rotation.get('rotation_update_count', 0))
@@ -1454,6 +1480,11 @@ class BOBE:
         if self.rotation_update_count > 0:
             log.info(f"Resuming with rotation state: count={self.rotation_update_count}, "
                      f"last_ii={self.last_rotation_ii}, last_acq_val={self.last_rotation_acq_val}")
+
+        # Load (or initialise) the persistent pool of dropped training points.
+        # Points dropped from the GP/clf training set during a rotation update are stored
+        # here and reconsidered at the next rotation update.
+        self._load_dropped_pool()
 
         # Adjust batch_size for MPI load balancing
         if self.is_mpi:
@@ -1494,7 +1525,8 @@ class BOBE:
             'mc_points_method': mc_points_method,
             'zeta_ei': zeta_ei,
             'rotation_update_step': rotation_update_step,
-            'rotation_update_min_evals': self.rotation_update_min_evals,
+            'rotation_update_min_evals': rotation_update_min_evals,
+            'rotation_logz_threshold': rotation_logz_threshold,
             'max_rotation_updates': max_rotation_updates,
             'rotation_kl_threshold': rotation_kl_threshold,
         })
@@ -1509,13 +1541,13 @@ class BOBE:
 
         self.current_iteration = self.start_iteration
 
-        for acq in acqs:
-            if acq.lower() not in acqs_funcs_available:
-                raise ValueError(f"Invalid acquisition function '{acq}'. Valid options are: {acqs_funcs_available}")
-            self.acquisition = _acq_funcs[acq.lower()](optimizer=self.optimizer)  # Set acquisition function
-            if acq.lower() == 'wipv':
+        for x in acqs:
+            if x.lower() not in acqs_funcs_available:
+                raise ValueError(f"Invalid acquisition function '{x}'. Valid options are: {acqs_funcs_available}")
+            self.acquisition = _acq_funcs[x.lower()](optimizer=self.optimizer)  # Set acquisition function
+            if x.lower() == 'wipv':
                 self.run_WIPV(ii=self.current_iteration)
-            elif acq.lower() == 'wipstd':
+            elif x.lower() == 'wipstd':
                 self.run_WIPStd(ii=self.current_iteration)
             else:
                 self.run_EI(ii=self.current_iteration)
@@ -1541,7 +1573,7 @@ class BOBE:
         if not self.is_main:
             return
         
-        current_evals = self.gp.npoints
+        current_evals = self.total_objective_evals
         log.info(f"Starting iteration {ii}")
         converged=False
 
@@ -1558,7 +1590,7 @@ class BOBE:
             new_pts_u = jnp.atleast_2d(new_pts_u)
 
             new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
-            current_evals += n_batch
+            current_evals = self.total_objective_evals
 
             self.update_gp(new_pts_u, new_vals, step = ii, verbose=verbose)
 
@@ -1604,7 +1636,7 @@ class BOBE:
         self.acquisition = acq_func_class(optimizer=self.optimizer)
         acq_name = self.acquisition.name
         
-        current_evals = self.gp.npoints
+        current_evals = self.total_objective_evals
         self.results_manager.start_timing('MCMC Sampling')
         self.mc_samples = get_mc_samples(
             self.gp,
@@ -1637,7 +1669,7 @@ class BOBE:
             new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
             new_pts_u = jnp.atleast_2d(new_pts_u)
             new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
-            current_evals += self.batch_size
+            current_evals = self.total_objective_evals
 
             self.update_gp(new_pts_u, new_vals, step = ii)
             self.results_manager.update_best_loglike(ii, self.best_f)
@@ -1700,7 +1732,7 @@ class BOBE:
             if (self.rotation_update_step is not None
                     and self.rotation_update_count < self.max_rotation_updates
                     and current_evals >= self.rotation_update_min_evals
-                    and acq_vals[-1] <= 2.):
+                    and acq_vals[-1] <= self.rotation_logz_threshold):
                 if self.rotation_update_count == 0:
                     # First rotation update — fire immediately upon reaching the threshold
                     did_update = self._update_rotation(step=ii)

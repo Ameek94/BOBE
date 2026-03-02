@@ -499,6 +499,24 @@ class GP:
         self.ndim = self.train_x.shape[1]
         self.recompute_cholesky()
 
+    def remap_from_raw(self, new_train_x: np.ndarray, y_raw: np.ndarray):
+        """
+        Replace GP training data with new unit-cube inputs and raw (unstandardized)
+        log-likelihood values.  Recomputes y_mean / y_std internally.
+
+        Parameters
+        ----------
+        new_train_x : np.ndarray, shape (N, D) — unit-cube coordinates.
+        y_raw : np.ndarray, shape (N,) — raw log-likelihood values.
+        """
+        y_raw = np.asarray(y_raw).reshape(-1, 1)
+        self.y_mean = jnp.array(float(np.mean(y_raw)))
+        self.y_std  = jnp.array(float(np.std(y_raw))  if len(y_raw) > 1 else 1.0)
+        if self.y_std == 0.0:
+            self.y_std = jnp.array(1.0)
+        self.train_y = jnp.array((y_raw - float(self.y_mean)) / float(self.y_std))
+        self.remap_inputs(new_train_x)
+
     def fantasy_var(self,new_x,mc_points,k_train_mc):
         """
         Computes the variance of the GP at the mc_points assuming a single point new_x is added to the training set

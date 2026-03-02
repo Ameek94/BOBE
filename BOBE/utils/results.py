@@ -356,7 +356,8 @@ class BOBEResults:
                           iteration: int,
                           logz_dict: Dict[str, float],
                           converged: bool,
-                          threshold: float):
+                          threshold: float,
+                          delta: float = None):
         """
         Update convergence information from a nested sampling check.
         
@@ -365,8 +366,12 @@ class BOBEResults:
             logz_dict: Dictionary with logz information
             converged: Whether convergence was achieved
             threshold: Convergence threshold used
+            delta: The convergence metric value (must match what was used for the
+                   convergence check so that resume comparisons are correct).
+                   Defaults to logz_dict['std'] if not provided.
         """
-        delta = logz_dict['std'] #logz_dict.get('upper', 0) - logz_dict.get('lower', 0)
+        if delta is None:
+            delta = logz_dict.get('std', np.nan)
         
         conv_info = ConvergenceInfo(
             iteration=iteration,

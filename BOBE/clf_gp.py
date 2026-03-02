@@ -145,6 +145,28 @@ class GPwithClassifier(GP):
             if self.use_clf:
                 self.train_classifier()
 
+    def remap_from_full_dataset(self, x_clf_u: np.ndarray, y_raw_clf: np.ndarray):
+        """
+        Replace the full classifier dataset with new unit-cube inputs and raw
+        log-likelihood values, then re-derive the GP subset via gp_threshold.
+        Standardisation and Cholesky recomputation happen inside this method;
+        the classifier is retrained on the new coordinates.
+
+        Parameters
+        ----------
+        x_clf_u   : np.ndarray, shape (N_clf, D) — unit-cube coordinates.
+        y_raw_clf : np.ndarray, shape (N_clf,)   — raw log-likelihood values.
+        """
+        self.train_x_clf = jnp.array(x_clf_u)
+        self.train_y_clf = jnp.array(y_raw_clf).reshape(-1, 1)
+        # Re-derive GP subset (mirrors GPwithClassifier.update logic)
+        mask_gp = self.train_y_clf.flatten() > (self.train_y_clf.max() - self.gp_threshold)
+        y_gp = self.train_y_clf[mask_gp]
+        # Delegate all standardisation + Cholesky to the parent helper
+        super().remap_from_raw(self.train_x_clf[mask_gp], np.array(y_gp))
+        if self.use_clf:
+            self.train_classifier()
+
     def train_classifier(self):
         """Public method to train/retrain the classifier."""
         # Check if classifier data size has reached the threshold
