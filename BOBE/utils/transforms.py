@@ -21,12 +21,66 @@ Transforms:
 """
 
 import numpy as np
+from abc import ABC, abstractmethod
 from .log import get_logger
 
 log = get_logger("transforms")
 
 
-class ParameterTransform:
+class BaseParameterTransform(ABC):
+    """
+    Abstract base class for all parameter space transforms in BOBE.
+
+    Defines the interface that all transforms must implement so that the
+    Gaussian Process, acquisition functions, and nested sampler can use
+    any transform interchangeably.
+
+    Subclasses
+    ----------
+    ParameterTransform : linear scaling or covariance-rotation transform.
+    FlowTransform      : normalising-flow-based transform (BOBE/utils/flow.py).
+    """
+
+    # Subclasses must set these as instance attributes in __init__:
+    #   self.ndim           -- physical parameter dimensionality (int)
+    #   self._r             -- GP / unit-cube dimensionality (int)
+    #   self.original_bounds -- (2, D) array
+    #   self.effective_bounds -- (2, D) array
+
+    @abstractmethod
+    def to_unit(self, theta, clip=True):
+        """Map physical parameters θ → unit cube u ∈ [0,1]^r."""
+
+    @abstractmethod
+    def from_unit(self, u):
+        """Map unit cube u ∈ [0,1]^r → physical parameters θ."""
+
+    @abstractmethod
+    def state_dict(self):
+        """Serialise transform state to a dict of numpy-serialisable values."""
+
+    @classmethod
+    @abstractmethod
+    def from_state_dict(cls, state):
+        """Restore a transform from a serialised state dict."""
+
+    @property
+    def rank(self):
+        """Dimensionality of unit cube space."""
+        return self._r
+
+    @property
+    def uses_rotation(self):
+        """Whether a covariance rotation is active (False for FlowTransform)."""
+        return getattr(self, '_use_rotation', False)
+
+    @property
+    def is_flow(self):
+        """Whether this transform is a normalising flow (False for ParameterTransform)."""
+        return False
+
+
+class ParameterTransform(BaseParameterTransform):
     """
     Manage physical <-> unit-cube transformations.
 

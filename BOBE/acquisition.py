@@ -6,7 +6,6 @@ import numpy as np
 from scipy.stats import qmc
 from jax.scipy.stats import norm
 from jax import config
-import tensorflow_probability.substrates.jax as tfp
 from .optim import optimize_optax, optimize_optax_vmap, optimize_scipy
 from .utils.log import get_logger
 from .utils.seed import get_numpy_rng
@@ -14,6 +13,34 @@ from .samplers import nested_sampling_Dy, sample_GP_NUTS
 from .gp import GP
 config.update("jax_enable_x64", True)
 log = get_logger("acq")
+
+# ---------------------------------------------------------------------------
+# Optional TFP import — not compatible with all JAX versions (e.g. flowjax).
+# If unavailable we fall back to pure-JAX implementations of erfcx / log1mexp.
+# ---------------------------------------------------------------------------
+try:
+    import tensorflow_probability.substrates.jax as tfp
+    _TFP_AVAILABLE = True
+except Exception:
+    _TFP_AVAILABLE = False
+    log.warning(
+        "tensorflow_probability not available (may be incompatible with current JAX/flowjax version). "
+        "LogEI will use a pure-JAX fallback for erfcx / log1mexp."
+    )
+
+
+def _erfcx_jax(x):
+    """Pure-JAX numerically stable erfcx(x) = exp(x^2) * erfc(x)."""
+    return jnp.exp(x ** 2) * jax.scipy.special.erfc(x)
+
+
+def _log1mexp_jax(x):
+    """Pure-JAX log(1 - exp(x)) for x < 0, numerically stable."""
+    return jnp.where(
+        x > -jnp.log(2.0),
+        jnp.log(-jnp.expm1(x)),
+        jnp.log1p(-jnp.exp(x)),
+    )
 
 #------------------Helper functions-------------------------
 # These are jax versions of the BoTorch functions. 
@@ -38,7 +65,10 @@ def _log_abs_u_Phi_div_phi(u):
     neg_inv_sqrt2 = -1.0 / jnp.sqrt(2.0)
     log_sqrt_pi_div_2 = 0.5 * jnp.log(jnp.pi / 2.0)
 
-    erfcx_val = tfp.math.erfcx(neg_inv_sqrt2 * u)
+    if _TFP_AVAILABLE:
+        erfcx_val = tfp.math.erfcx(neg_inv_sqrt2 * u)
+    else:
+        erfcx_val = _erfcx_jax(neg_inv_sqrt2 * u)
     return jnp.log(jnp.abs(u) * erfcx_val) + log_sqrt_pi_div_2
 
 def _log_ei_helper(u):
@@ -65,9 +95,14 @@ def _log_ei_helper(u):
     w = _log_abs_u_Phi_div_phi(u_eps)
     log_phi_u = _log_phi(u)
 
+    if _TFP_AVAILABLE:
+        log1mexp_fn = tfp.math.log1mexp
+    else:
+        log1mexp_fn = _log1mexp_jax
+
     second_term = jnp.where(
         u > neg_inv_sqrt_eps,
-        tfp.math.log1mexp(w),
+        log1mexp_fn(w),
         -2.0 * jnp.log(jnp.abs(u_lower))
     )
     log_ei_lower = log_phi_u + second_term
