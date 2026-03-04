@@ -1183,8 +1183,13 @@ class BOBE:
         n_draw = max(N, 2000)
         try:
             jkey = jax.random.key(0)
-            flow_samples = np.asarray(
+            flow_samples_std = np.asarray(
                 self._diag_flow._flow.sample(jkey, (n_draw,))
+            )
+            # Unstandardise: flow was trained on (θ - μ) / σ
+            flow_samples = (
+                flow_samples_std * self._diag_flow._train_std
+                + self._diag_flow._train_mean
             )
         except Exception as e:
             log.warning(f"[Flow diag] Flow sampling failed: {e}")
@@ -1414,39 +1419,62 @@ class BOBE:
             best_iteration=self.best_pt_iteration
         )
 
-        # ---- Final diagnostic: train a flow on the converged HMC samples ----
+        # ---- Final flow samples ----
+        # If the run transform IS a trained FlowTransform, sample directly from it.
+        # Otherwise train a one-shot diagnostic flow on the converged HMC samples.
         flow_samples_phys = None
         try:
-            hmc = getattr(self, 'last_hmc_mc_samples', None)
-            if hmc and 'x' in hmc:
-                mc_x_unit = np.array(hmc['x'])
-                mc_x_phys = self.transform.from_unit(mc_x_unit)
-                N_mc = mc_x_phys.shape[0]
-                log.info(f"[Final flow] Training final diagnostic flow on {N_mc} HMC samples …")
-                final_flow = FlowTransform(param_bounds=self.loglikelihood.param_bounds)
-                final_flow.train_flow(
-                    mc_x_phys,
-                    flow_layers=8,
-                    nn_width=64,
-                    nn_depth=2,
-                    learning_rate=5e-4,
-                    max_epochs=500,
-                    batch_size=min(512, N_mc),
-                    max_patience=40,
-                )
+            if isinstance(self.transform, FlowTransform) and self.transform.is_flow_trained:
+                # Sample directly from the already-trained transform
                 n_draw = 10_000
                 jkey = jax.random.key(1)
-                flow_samples_std = np.asarray(final_flow._flow.sample(jkey, (n_draw,)))
-                # Unstandardise: the flow was trained on (θ - μ) / σ
-                flow_samples_phys = flow_samples_std * final_flow._train_std + final_flow._train_mean
+                flow_samples_std = np.asarray(self.transform._flow.sample(jkey, (n_draw,)))
+                # Unstandardise: flow was trained on (θ - μ) / σ
+                flow_samples_phys = (
+                    flow_samples_std * self.transform._train_std
+                    + self.transform._train_mean
+                )
                 flow_samples_phys = np.clip(
                     flow_samples_phys,
                     self.loglikelihood.param_bounds[0],
                     self.loglikelihood.param_bounds[1],
                 )
-                log.info(f"[Final flow] Drew {n_draw} samples from trained flow.")
+                log.info(f"[Final flow] Drew {n_draw} samples from trained FlowTransform.")
             else:
-                log.warning("[Final flow] No HMC samples available; skipping final flow training.")
+                # Diagnostic path: train a fresh flow on converged HMC samples
+                hmc = getattr(self, 'last_hmc_mc_samples', None)
+                if hmc and 'x' in hmc:
+                    mc_x_unit = np.array(hmc['x'])
+                    mc_x_phys = self.transform.from_unit(mc_x_unit)
+                    N_mc = mc_x_phys.shape[0]
+                    log.info(f"[Final flow] Training final diagnostic flow on {N_mc} HMC samples …")
+                    final_flow = FlowTransform(param_bounds=self.loglikelihood.param_bounds)
+                    final_flow.train_flow(
+                        mc_x_phys,
+                        flow_layers=8,
+                        nn_width=64,
+                        nn_depth=2,
+                        learning_rate=5e-4,
+                        max_epochs=500,
+                        batch_size=min(512, N_mc),
+                        max_patience=40,
+                    )
+                    n_draw = 10_000
+                    jkey = jax.random.key(1)
+                    flow_samples_std = np.asarray(final_flow._flow.sample(jkey, (n_draw,)))
+                    # Unstandardise: the flow was trained on (θ - μ) / σ
+                    flow_samples_phys = (
+                        flow_samples_std * final_flow._train_std
+                        + final_flow._train_mean
+                    )
+                    flow_samples_phys = np.clip(
+                        flow_samples_phys,
+                        self.loglikelihood.param_bounds[0],
+                        self.loglikelihood.param_bounds[1],
+                    )
+                    log.info(f"[Final flow] Drew {n_draw} samples from diagnostic flow.")
+                else:
+                    log.warning("[Final flow] No HMC samples available; skipping final flow training.")
         except Exception as e:
             log.warning(f"[Final flow] Final flow training/sampling failed: {e}")
 

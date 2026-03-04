@@ -20,13 +20,12 @@ def main():
     likelihood_name = f'Planck_DESI_LCDM_rotation_flowdiag_{seed}'
     
     start = time.time()
-    print("Starting BOBE run with rotation transform + flow diagnostic…")
+    print("Starting BOBE run with normalising-flow transform…")
 
-    # Use the rotation-based approach (covariance whitening).  Within BOBE, each
-    # time the rotation is updated, a diagnostic normalising flow is also trained
-    # on the same MC samples and the mean log-prob under both models is compared
-    # (see BOBE._compute_flow_rotation_kl_diag).  This helps diagnose whether the
-    # posterior is well approximated by a Gaussian or needs a full flow.
+    # Use the normalising-flow transform: the unit cube is defined via a
+    # flowjax coupling flow trained on MC posterior samples, retrained every
+    # flow_update_step iterations.  Until the first update the transform falls
+    # back to a plain linear scaling of the physical bounds.
     bobe = BOBE(
         loglikelihood=cobaya_input_file,
         likelihood_name=likelihood_name,
@@ -36,19 +35,19 @@ def main():
         save_dir='./results/LCDM/',
         save=True,
         verbosity='INFO',
-        n_cobaya_init=4,
+        n_cobaya_init=8,
         n_sobol_init=32,
         optimizer='scipy',
         gp_kwargs={'lengthscale_prior': None, 'lengthscale_bounds': [1e-2, 4.]},
         use_clf=True,
         clf_type='svm',
         seed=seed,
-        # No use_flow_transform — use the default rotation-based approach.
+        use_flow_transform=True,
     )
     
     results = bobe.run(
         acq='wipstd',
-        min_evals=400,
+        min_evals=500,
         max_evals=2500,
         max_gp_size=1500,
         convergence_n_iters=2,
@@ -62,12 +61,19 @@ def main():
         thinning=1,
         logz_threshold=1/3,
         do_final_ns=True,
-        # Rotation update settings: update every 20 iterations once we have
-        # >= min_evals samples.  Each update also trains a diagnostic flow and
-        # logs E[log q_flow] - E[log q_gauss] to compare both approximations.
-        rotation_update_step=20,
-        max_rotation_updates=5,
-        rotation_logz_threshold=4.0,
+        # Flow transform update settings: retrain the normalising flow every
+        # 20 iterations once we have >= min_evals samples (up to 5 times).
+        flow_update_step=20,
+        max_flow_updates=5,
+        flow_kwargs={
+            'flow_layers': 8,
+            'nn_width': 64,
+            'nn_depth': 2,
+            'learning_rate': 5e-4,
+            'max_epochs': 600,
+            'batch_size': 512,
+            'max_patience': 40,
+        },
     )
 
     end = time.time()
