@@ -289,9 +289,13 @@ def optimize_scipy(
         The best parameters found and the corresponding function value.
     """
 
-    optimizer_options.update({'maxiter': maxiter})
-
     method = optimizer_options.pop("method", "L-BFGS-B")
+
+    # Allow passing scipy.optimze.minimize kwargs via optimizer_options.
+    constraints = optimizer_options.pop("constraints", None)
+    tol = optimizer_options.pop("tol", None) # optional; trust-constr sometimes uses tol
+
+    optimizer_options.update({'maxiter': maxiter})
 
     log.debug(f"Starting scipy optimization with method: {method}, restarts: {n_restarts}, maxiter: {maxiter}")
 
@@ -332,10 +336,20 @@ def optimize_scipy(
         except Exception as e:
             log.warning(f"  Initial point {i+1}/{n_restarts}: Failed with an error: {e}")
 
+    minimize_kwargs = dict(
+        method=method,
+        jac=True,
+        bounds=scipy_bounds,
+        options=optimizer_options,
+    )
+    if constraints is not None:
+        minimize_kwargs['constraints'] = constraints
+    if tol is not None:
+        minimize_kwargs['tol'] = tol
+
     for i, x_init in enumerate(x0):
         try:
-            result = minimize(value_and_grad_func, x_init, method=method, jac=True, bounds=scipy_bounds, options=optimizer_options)
-
+            result = minimize(value_and_grad_func, x_init, **minimize_kwargs) #method=method, jac=True, bounds=scipy_bounds, options=optimizer_options)
             # Check if the result is acceptable and an improvement
             is_acceptable = result.success or "ITERATIONS REACHED LIMIT" in result.message.upper()
             is_valid = np.isfinite(result.fun)

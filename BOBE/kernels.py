@@ -10,9 +10,13 @@ from math import sqrt, pi
 import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import cho_solve, solve_triangular
-from .priors import build_prior_state
+from .priors import build_prior_state, DSLPPrior
 from dataclasses import dataclass
-from typing import Callable, Optional, Sequence, Tuple, Any, Dict
+from typing import Callable, List, Optional, Sequence, Tuple, Any, Dict
+
+from .utils.log import get_logger
+
+log = get_logger("kernels")
 
 jax.config.update("jax_enable_x64", True)
 
@@ -22,29 +26,6 @@ sqrt3 = sqrt(3.)
 sqrt5 = sqrt(5.)
 
 safe_noise_floor = 1e-12
-
-@dataclass(frozen=True)
-class ParamSpec:
-    """
-    Describes a learned/fixed hyperparameter block
-
-    name: attribute on self (e.g "lengthscale", "kernel_variance")
-    size: number of scalars in this block
-    bounds_key: key in self.bounds_spec used for bounds; if None -> no bounds required
-    transform: "log" or "identity" in optimiser space
-    enabled_fn: returns True if param participates in optimisation (e.g not fixed)
-    default_fn: supplies default value if attribute is None
-    """
-    name: str
-    size: int
-    bounds_key: Optional[str]
-    transform: str # "log" or "identity"
-    enabled_fn: Callable[[Any], bool]
-    default_fn: Callable[[Any], jnp.ndarray]
-    label_prefix: Optional[str] = None # for hyperparam_names
-
-    def _replace(self, **kwargs) -> "ParamSpec":
-        return replace(self, **kwargs)
 
 def _as_f64(x):
     return jnp.array(x, dtype=jnp.float64)
@@ -109,6 +90,109 @@ def _hp(hp_init: dict, key: str, default):
     v = hp_init.get(key, default)
     return default if v is None else v
 
+
+@dataclass(frozen=True)
+class HyperParam:
+    name: str
+    size: int
+    bounds_key: str
+    transform: str = "log" # "log" or "none"
+
+class HyperParamLayout:
+    """
+    Handles packing/unpacking optimiser vectors for a list of HyperParam fields.
+    Assumes optimser spacing is log-space if transform == "log"
+    """
+
+    def __init__(self, fields: List[HyperParam]):
+        self.fields = list(fields)
+
+    def names(self) -> Tuple[str, ...]:
+        names = []
+        for f in self.fields:
+            if f.size == 1:
+                names.append(f.name)
+            else:
+                names += [f"{f.name}_{i}" for i in range(f.size)]
+        return tuple(names)
+    
+    def pack_from_kernel(self, kernel) -> jnp.ndarray:
+        """
+        Returns optimiser-space vector (log-space for log params)
+        """
+        parts = []
+        for f in self.fields:
+            v = getattr(kernel, f.name, None)
+            if v is None:
+                raise ValueError(f"Kernel missing hyperparameter value for '{f.name}'")
+            v = jnp.ravel(v)
+            if v.shape[0] != f.size:
+                raise ValueError(f"Hyperparameter '{f.name}' expected size {f.size}, got {v.shape[0]}")
+            parts.append(v)
+        #Apply transforms
+        out = []
+        for f, block in zip(self.fields, parts):
+            if f.transform == "log":
+                out.append(jnp.log(block))
+            elif f.transform == "none":
+                out.append(block)
+            else:
+                raise ValueError(f"Unsupported transform '{f.transform}' for hyperparameter '{f.name}'")
+        
+        return jnp.concatenate(out, axis=0) if out else jnp.zeros((0,), dtype=jnp.float64)
+        
+    def unpack_to_dict(self, params_opt: jnp.ndarray) -> Dict[str, jnp.ndarray]:
+        """
+        Parses optimiser-space vector into dict {name: value_in_natural_space}
+        """
+        params_opt = params_opt.reshape(-1,)
+        out: Dict[str, jnp.ndarray] = {}
+        idx = 0
+        for f in self.fields:
+            block = params_opt[idx:idx + f.size]
+            if f.transform == "log":
+                block = jnp.exp(block)
+            elif f.transform == "none":
+                pass
+            else:
+                raise ValueError(f"Unsupported transform '{f.transform}' for hyperparameter '{f.name}'")
+            out[f.name] = block[0] if f.size == 1 else block
+            idx += f.size
+        return out
+    
+    def bounds_opt(self, kernel) -> jnp.ndarray:
+        """
+        Return optimiser-space bounds array shaped (2, P)
+        Supports bounds as:
+        - (2,) global -> replicated to size
+        - (size, 2) per-dim
+        """
+        blocks = []
+        for f in self.fields:
+            b = kernel.bounds_spec.get(f.bounds_key, None) #kernel-level hook for transforms
+            if b is None:
+                raise ValueError(f"Kernel requires bounds for '{f.bounds_key}' (for param '{f.name}')")
+            b = jnp.array(b)
+            if b.shape == (2,):
+                block = jnp.repeat(b.reshape(2, 1), f.size, axis=1) #(2, size)
+            elif b.shape == (f.size, 2):
+                block = b.T #(2, size)
+            else:
+                raise ValueError(f"Bounds for '{f.bounds_key}' must be shape (2,) or ({f.size}, 2); got {b.shape}")
+            
+            if f.transform == "log":
+                block = jnp.log(block)
+            elif f.transform == "none":
+                pass
+            else:
+                raise ValueError(f"Unsupported transform '{f.transform}' for  '{f.name}'")
+
+            blocks.append(block)
+        
+        return jnp.concatenate(blocks, axis=1) if blocks else jnp.zeros((2, 0), dtype=jnp.float64)
+
+
+
 class Kernel(ABC):
     """
     Abstract base class for all kernels in BOBE.
@@ -134,34 +218,37 @@ class Kernel(ABC):
         noise : float, optional
             Noise level added to diagonal. Default is 1e-8.
         """
+        
+        # Get hyperparameter bounds and prior settings
         self.hp_init = hp_init or {}
 
         self.bounds_spec = self.hp_init.get("bounds", {}) or {}
         self.prior_spec = self.hp_init.get("priors", {}) or {}
 
-        #Save the base lengthscales as a source of truth in the case of transforms being applied to them
-        self._base_lengthscale_bounds = None
-        b = self.bounds_spec.get("lengthscales", None)
-        if b is not None:
-            self._base_lengthscale_bounds = jnp.asarray(b, dtype=jnp.float64)
-
+        # Get hyperparameter initial values or set to default
         self.lengthscales = _hp(hp_init, "lengthscales", None)
-        if self.lengthscales is not None:
-            self.lengthscales = jnp.array(self.lengthscales, dtype=jnp.float64)
-        
+        if self.lengthscales is None:
+            raise ValueError("Kernel requires 'lengthscales' initialisation")
+        self.lengthscales = jnp.array(self.lengthscales, dtype=jnp.float64)
         self.ndim = self.lengthscales.shape[0]
-        self.kernel_variance = _hp(hp_init, "kernel_variance", None)
-        if self.kernel_variance is not None:
-            self.kernel_variance = jnp.array(self.kernel_variance, dtype=jnp.float64)
-        self.noise = noise
 
+        self.kernel_variance = _hp(hp_init, "kernel_variance", None)
+        self.kernel_variance = jnp.array(self.kernel_variance, dtype=jnp.float64) if self.kernel_variance is not None else jnp.array(1.0, dtype=jnp.float64)
+        
         self.tausq = _hp(hp_init, "tausq", None)
         if self.tausq is not None:
             self.tausq = jnp.array(self.tausq, dtype=jnp.float64)
 
-        self.fixed_kernel_variance = False
-        #self.tausq_enabled = False
+        self.noise = noise
 
+        # Prior flags (set later by configure_priors)
+        self.fixed_kernel_variance = False
+        self.tausq_enabled = False
+
+        # Prior objects to be configured
+        self.prior = None
+
+        # GP Posterior State
         self._is_fit = False
         self.cholesky = None
         self.alphas = None
@@ -169,233 +256,58 @@ class Kernel(ABC):
         self.train_x = None
         self.train_y = None
 
-        self.num_hyperparams = None
+        # Hyperparameter optimisation metadata
+        self.hp_layout = None
+        self.hyperparam_names = None
         self.hyperparam_bounds = None
+        self.num_hyperparams = None 
 
-        self._to_gp_space = lambda x: x
-        self._from_gp_space = lambda x: x
-        self._input_transform_enabled = False
-        self._input_transform_mode = None
-        self._input_transform_x0 = None
-        self._input_transform_lam = None
-        self._input_transform_Q = None
-        self._ls_scale = None
+        # Input transform hooks (initialialised as identity)
+        self.input_transform = None
+
     
-    def set_input_transform(self, to_z_fn, from_z_fn):
-        """
-        Install an input transform for the kernel
+    def set_input_transform(self, tform):
+        self.input_transform = tform
 
-        Parameters
-        ----------
-        to_z_fn(x): regularised space -> GP space
-        from_z_fn(z): GP space -> regularised space
-        """
-        self._to_gp_space = to_z_fn
-        self._from_gp_space = from_z_fn
-        self._input_transform_enabled = True
     def clear_input_transform(self):
-        self._to_gp_space = lambda x: x
-        self._from_gp_space = lambda x: x
-        self._input_transform_enabled = False
-    def set_user_fisher(self, F, x0, mode="whiten"):
-        """
-        Same as set_fisher_transform but explicit name for user API
-        """
-        self.set_fisher_transform(F, x0, mode)
-
-    def configure_priors(self):
-        ls_bound_eff = self._effective_lengthcale_bounds()
-        if ls_bound_eff is None:
-            ls_bound_eff = self.bounds_spec.get("lengthscales", None)
-        ps = build_prior_state(
-            ndim=self.ndim,
-            kernel_variance_prior_spec=self.prior_spec.get("kernel_variance", None),
-            kernel_variance_bounds=self.bounds_spec.get("kernel_variance", None),
-            lengthscale_prior_spec=self.prior_spec.get("lengthscales", None),
-            lengthscale_bounds=ls_bound_eff #self.bounds_spec.get("lengthscales", None),
-        )
-        self.prior_state = ps
-        self.logprior = ps['logprior_fn']
-
-        self.fixed_kernel_variance = ps['fixed_kernel_variance']
-        self.lengthscale_prior = ps['lengthscale_prior']
-        self.tausq_enabled = ps['tausq_enabled']
-
-    def param_spec(self) -> Tuple[ParamSpec, ...]:
-        """
-        Default param spec for "dense" kernels:
-            lengthscales (D) [always enabled]
-            kernel_variance (1) [disabled if fixed_kernel_variance=True]
-            tausq (1) [enabled if tausq_enabled=True]
-        """
-        D = int(self.ndim)
-
-        def lengthscales_enabled(_self):
-            return True
-        def lengthscales_default(_self):
-            if _self.lengthscales is None:
-                return jnp.ones((D,), dtype=jnp.float64)
-            return _as_f64(_self.lengthscales)
-        def kv_enabled(_self):
-            return not getattr(_self, "fixed_kernel_variance", False)
-        def kv_default(_self):
-            if _self.kernel_variance is None:
-                return _as_f64(1.0)
-            return _as_f64(_self.kernel_variance)
-        def tausq_enabled(_self):
-            return bool(getattr(_self, "tausq_enabled", False))
-        def tausq_default(_self):
-            t = getattr(_self, "tausq", None)
-            if t is None:
-                return _as_f64(1.0)
-            return _as_f64(t)
-        return (
-            ParamSpec(
-                name="lengthscales",
-                size=D,
-                bounds_key="lengthscales",
-                transform="log",
-                enabled_fn=lengthscales_enabled,
-                default_fn=lengthscales_default,
-                label_prefix="log_lengthscales"
-            ),
-            ParamSpec(
-                name="kernel_variance",
-                size=1,
-                bounds_key="kernel_variance",
-                transform="log",
-                enabled_fn=kv_enabled,
-                default_fn=kv_default,
-                label_prefix="log_kernel_variance"
-            ),
-            ParamSpec(
-                name="tausq",
-                size=1,
-                bounds_key="tausq",
-                transform="log",
-                enabled_fn=tausq_enabled,
-                default_fn=tausq_default,
-                label_prefix="log_tausq"
-            ),
-            
-        )
+        self.input_transform = None
     
-    def _enabled_param_specs(self) -> Tuple[ParamSpec, ...]:
-        return tuple(ps for ps in self.param_spec() if ps.enabled_fn(self))
+    def _x(self, x):
+        return x if self.input_transform is None else self.input_transform.forward(x)
     
     def configure_hyperparam_optimisation(self):
-        specs = self._enabled_param_specs()
+        fields = self.base_hyperparams() + (self.prior.extra_hyperparams(self) if self.prior is not None else [])
+        self.hp_layout = HyperParamLayout(fields)
+        self.hyperparam_names = self.hp_layout.names()
+        self.hyperparam_bounds = self.hp_layout.bounds_opt(self)
+        self.num_hyperparams = self.hyperparam_bounds.shape[1]
+    
+    def configure_priors(self):
+        ps = self.prior_spec
+        name = ps.get("name", "dslp").lower()
 
-        names =[]
-        bounds_list = []
-
-        for ps in specs:
-            # Names
-            if ps.size == 1:
-                names.append(ps.label_prefix or ps.name)
-            else:
-                prefix = ps.label_prefix or ps.name
-                names += [f"{prefix}_{i}" for i in range(ps.size)]
-            # Bounds
-            if ps.bounds_key is None:
-                raise ValueError(f"ParamSpec {ps.name} requires nounds_key or override configure_hyperparam_optimisation")
-            
-            b = self.bounds_spec.get(ps.bounds_key, None)
-            # Apply whitening scaling only for lengthscales
-            if ps.bounds_key == "lengthscales":
-                b = self._effective_lengthcale_bounds()
-            if b is None:
-                raise ValueError(f" Kernel requires bounds for {ps.bounds_key} (for param {ps.name})")
-            b_arr = jnp.asarray(b, dtype=jnp.float64)
-            if b_arr.ndim == 2 and b_arr.shape == (ps.size, 2):
-                bounds_list += [tuple(map(float, row)) for row in b]
-            else:
-                if b_arr.ndim != 1 or b_arr.shape != (2,):
-                    raise ValueError(f"Bounds for {ps.bounds_key} must be shape (2,) or ({ps.size},2); got {b_arr.shape}")
-                b_tuple = (float(b_arr[0]), float(b_arr[1]))
-                bounds_list += [b_tuple] * ps.size
-        
-        self.hyperparam_names = tuple(names)
-
-        b = jnp.array(bounds_list, dtype=jnp.float64).T
-        if any(ps.transform == "log" for ps in specs):
-            self.hyperparam_bounds = jnp.log(b)
+        if name == "dslp":
+            self.prior = DSLPPrior().configure(self)
         else:
-            self.hyperparam_bounds = b
-        self.num_hyperparams = int(self.hyperparam_bounds.shape[1])
+            raise ValueError(f"Unkown Prior '{name}'")
 
-    def get_hyperparams(self) -> jnp.ndarray:
-        """
-        Returns hyperparams in non-log space
-        """
-        parts = []
-        for ps in self._enabled_param_specs():
-            val = getattr(self, ps.name, None)
-            if val is None:
-                val = ps.default_fn(self)
-                setattr(self, ps.name, val)
-            v = _to_1d(_as_f64(val))
-            if ps.size == 1 and v.shape[0] != 1:
-                v = v[1]
-            if v.shape[0] != ps.size:
-                raise ValueError(f"{ps.name} must have size {ps.size}, got {v.shape}")
-            parts.append(v)
-        
-        return jnp.concatenate(parts, axis=0) if parts else jnp.zeros((0,), dtype=jnp.float64)
     
-    def initial_log_params(self) -> jnp.ndarray:
-        """
-        Converts hyperparams to log space for optimiser
-        """
-        hyp = self.get_hyperparams()
-        return jnp.log(hyp)
-    
-    def parse_hyperparams(self, log_params: jnp.ndarray) -> Dict[str, jnp.ndarray]:
-        """
-        Parse optimiser-space log_params into a dict {name: value_in_natural_space}
-        """
-        specs = self._enabled_param_specs()
-        log_params = _to_1d(log_params)
-        hyp = jnp.exp(log_params)
-
-        out = {}
-        idx = 0
-        for ps in specs:
-            block = hyp[idx:idx + ps.size]
-            idx += ps.size
-            if ps.size == 1:
-                out[ps.name] = block[0]
-            else:
-                out[ps.name] = block
-        return out
-    
-    def update_hyperparams(self, parsed: Optional[Dict[str, jnp.ndarray]] = None, lengthscales=None, kernel_variance=None, tausq=None, noise=None):
+    def update_hyperparams(self, parsed=None, **kwargs):
         if parsed is not None:
-            if "lengthscales" in parsed and lengthscales is None:
-                lengthscales = parsed["lengthscales"]
-            if "kernel_variance" in parsed and kernel_variance is None:
-                kernel_variance = parsed["kernel_variance"]
-            if "tausq" in parsed and tausq is None:
-                tausq = parsed["tausq"]
-        
-        if lengthscales is not None:
-            self.lengthscales = _as_f64(lengthscales)
-        if kernel_variance is not None:
-            self.kernel_variance = _as_f64(kernel_variance)
-        if tausq is not None and getattr(self, "tausq_enabled", False):
-            self.tausq = _as_f64(tausq)
-        if noise is not None:
-            self.noise = noise
+            kwargs.update(parsed)
+
+        if "lengthscales" in kwargs:
+            self.lengthscales = kwargs["lengthscales"]
+        if "kernel_variance" in kwargs:
+            self.kernel_variance = kwargs["kernel_variance"]
+        if "tausq" in kwargs and self.tausq is not None:
+            self.tausq = kwargs["tausq"]
     
-    def logprior(self, lengthscales, kernel_variance, tausq) -> jnp.ndarray:
-        """
-        Default prior: DSLP
-        """
-        fn = getattr(self, "logprior_fn", None)
-        if fn is None:
-            return jnp.array(0.0, dtype=jnp.float64)
-        else:
-            return fn(lengthscales, kernel_variance, tausq)
+    def logprior(self, **parsed) -> jnp.ndarray:
+        if self.prior is None:
+            return 0.0
+        return self.prior.logprior(**parsed)
+        
     
     def build_posterior_cache(self, train_x: jnp.ndarray, train_y: jnp.ndarray) -> None:
         """
@@ -474,7 +386,7 @@ class Kernel(ABC):
         diag : jnp.ndarray
             Diagonal values, shape (n,)
         """
-        x = self._to_gp_space(x)
+        x = self._x(x)
         diag = self.kernel_variance * jnp.ones(x.shape[0])
         if include_noise:
             diag += self.noise
@@ -528,180 +440,27 @@ class Kernel(ABC):
         var = jnp.where(var<safe_noise_floor,safe_noise_floor,var)
         return var * y_std**2 
     
-    def mll(self, log_params: jnp.ndarray) -> jnp.ndarray:
+    def mll(self, params_opt: jnp.ndarray) -> jnp.ndarray:
         """
         Computes the negative log marginal likelihood for the GP with given hyperparameters.
         """
         if not self._is_fit:
             raise ValueError("Kernel posteror cache missing")
         
-        parsed = self.parse_hyperparams(log_params)
-        # Update kernel hyperparameters and compute kernel matrix
+        parsed = self.hp_layout.unpack_to_dict(params_opt)
         self.update_hyperparams(parsed=parsed)
         
         K = self.covariance(self.train_x, self.train_x, include_noise=True)
         mll = gp_mll(K, self.train_y, self.train_y.shape[0])
         
         # Add prior
-        mll += self.logprior(lengthscales=parsed.get("lengthscales", self.lengthscales), 
-                             kernel_variance=parsed.get("kernel_variance", self.kernel_variance), 
-                             tausq=parsed.get("tausq", getattr(self, "tausq", 1.0)))
+        mll += self.logprior(**parsed)
         
         return -mll
     
     def __call__(self, xa, xb, include_noise=True):
         """Convenience method - same as covariance()"""
         return self.covariance(xa, xb, include_noise=include_noise)
-    
-    def set_fisher_transform(self, F, x0, mode="whiten"):
-        """
-        Install rotation/whitening transform from Fisher matrix
-
-        Parameters
-        ----------
-        F: (D, D) Fisher matrix in regularised space
-        x0: (D,) centre point (MAP)
-        mode: "rotate" or "whiten"
-        """
-        rot = self.principal_axes_from_fisher(F, mode=mode)
-
-        to_z_base = rot["to_z"]
-        from_z_base = rot["from_z"]
-        self._input_transform_mode = mode
-        self._input_transform_Q = rot["Q"]
-        self._input_transform_lam = rot["lam"]
-        self._input_transform_x0 = jnp.asarray(x0)
-
-        if mode == "whiten":
-            self._ls_scale = jnp.sqrt(self._input_transform_lam)
-        else:
-            self._ls_scale = jnp.ones_like(self._input_transform_lam)
-
-        def to_gp(x):
-            x = jnp.asarray(x)
-            if x.ndim ==1:
-                return to_z_base(x, x0)
-            return jax.vmap(lambda v: to_z_base(v, x0))(x)
-        
-        def from_gp(z):
-            z = jnp.asarray(z)
-            if z.ndim ==1:
-                return from_z_base(z, x0)
-            return jax.vmap(lambda v: from_z_base(v, x0))(z)
-
-        self.set_input_transform(to_gp, from_gp)
-        if getattr(self, "prior_state", None) is not None:
-            print("Priors have already been configured, reconfiguring")
-            self.configure_priors()
-            
-        if getattr(self, "hyperparam_bounds", None) is not None:
-            print("Hyperparam optimisation has already been configured, reconfiguring")
-            self.configure_hyperparam_optimisation()
-
-     
-    def fisher_from_gp(self, x_star, y_mean, y_std, sign=-1.0, eig_floor=1e-10, return_raw: bool = False):
-        """
-        Compute a Fisher-like local metric from the GP predictive mean
-
-        H = d^2/dx^2 m(x) |_{x_star}           (Hessian of predictive mean)
-        F_raw = sign * H
-
-        Default sign=-1 corresponds to F ~ -H(m), which matches the observed Fisher convention when m is a surrogate for the log-likelihood (locally concave at the mode)
-
-        Then we clip eigenvalues to enforce SPD:
-        F = Q diag(max(lam, eig_floor)) Q^T
-
-        Returns
-        -------
-        F: (D, D) SPD matrix
-        Q: (D, D) eigenvectors (columns)
-        lam: (D,) clipped eigenvalues
-        (optional) H, F_raw
-        """
-        x_star = jnp.asarray(x_star)
-        if x_star.ndim != 1:
-            raise ValueError(f"x_star must be shape (D,) got shape: {x_star.shape}")
-        
-        def mean_fn(x):
-            return self.predict_mean_single(x, y_mean=y_mean, y_std=y_std)
-        
-        H = jax.hessian(mean_fn)(x_star)
-        H = 0.5 * (H + H.T)
-
-        F_raw = sign * H
-        F_raw = 0.5 * (F_raw + F_raw.T)
-
-        lam, Q = jnp.linalg.eigh(F_raw)
-        lam_clip = jnp.maximum(lam, eig_floor)
-
-        F = (Q * lam_clip) @ Q.T
-        F = 0.5*(F + F.T)
-
-        if return_raw:
-            return F, Q, lam_clip, H, F_raw
-        return F, Q, lam_clip
-        
-    def principal_axes_from_fisher(self, F, mode: str="rotate", eig_floor: float = 1e-10):
-        """
-        Build linear transform based on Fisher matrix F
-        If mod == "rotate":
-            z = Q^T (x - x0)
-            x = x0 + Q z
-        if mode=="whiten":
-            z = sqrt(Lambda) Q^T (x - x0)
-            x = x0 + Q (Lambda^{-1/2} z)
-        Returns a dict contained Q, lam (clipped) and callables:
-            to_z(x, x0)
-            from_z(z, x0)
-        """
-
-        F = 0.5*(F + F.T)
-        lam, Q = jnp.linalg.eigh(F)
-        lam = jnp.maximum(lam, eig_floor)
-
-        if mode not in ("rotate", "whiten"):
-            raise ValueError("Mode must be 'rotate' or 'whiten'")
-        if mode == "rotate":
-            def to_z(x, x0):
-                return Q.T @ (x - x0)
-            def from_z(z, x0):
-                return x0 + Q @ z
-        elif mode == "whiten":
-            sqrt_lam = jnp.sqrt(lam)
-            inv_sqrt_lam = 1.0 / sqrt_lam
-
-            def to_z(x, x0):
-                return sqrt_lam * (Q.T @ (x - x0))
-            def from_z(z, x0):
-                return x0 + Q @ (inv_sqrt_lam * z)
-        
-        return {"Q": Q, "lam": lam, "to_z": to_z, "from_z": from_z}
-    
-    def _effective_lengthcale_bounds(self):
-        """
-        Returns bounds for lengthscales as either unscaled or scaled depending on whether whitening is active
-        """
-        b0 = self._base_lengthscale_bounds
-        if b0 is None:
-            print("self._base_lengthscale_bounds is None!")
-            return None
-        if self._input_transform_mode != "whiten":
-            return b0
-        s = self._ls_scale
-        if s is None:
-            print("self._ls_scale is None!")
-            return b0
-        
-        if b0.ndim == 1 and b0.shape == (2,):
-            low, high = b0[0], b0[1]
-            low_d = low*s
-            high_d = high*s
-            return jnp.stack([low_d, high_d], axis=1)
-        if b0.ndim == 2 and b0.shape == (self.ndim, 2):
-            low_d = b0[:, 0]*s
-            high_d = b0[:, 1]*s
-            return jnp.stack([low_d, high_d], axis=1)
-        raise ValueError(f"Unsupported base lengthscale bounds shape: {b0.shape}")
 
 class RBFKernel(Kernel):
     """
@@ -711,6 +470,20 @@ class RBFKernel(Kernel):
     
     where σ² is kernel_variance and ℓ is lengthscale.
     """
+
+    def base_hyperparams(self) -> List[HyperParam]:
+        """
+        Returns list of required hyperparams for this kernel
+        """
+        fields = [
+            HyperParam(name="lengthscales", size=self.ndim, bounds_key="lengthscales", transform="log"),
+        ]
+        if not getattr(self, "fixed_kernel_variance", False):
+            fields.append(
+                HyperParam(name="kernel_variance", size=1, bounds_key="kernel_variance", transform="log")
+            )
+        return tuple(fields)
+
     
     def covariance(self, xa, xb, include_noise=True):
         """
@@ -730,8 +503,9 @@ class RBFKernel(Kernel):
         jnp.ndarray
             Kernel matrix of shape (n1, n2).
         """
-        xa = self._to_gp_space(xa)
-        xb = self._to_gp_space(xb)
+        xa = self._x(xa)
+        xb = self._x(xb)
+
         # Scale inputs by lengthscales
         xa_scaled = xa / self.lengthscales
         xb_scaled = xb / self.lengthscales
@@ -747,11 +521,7 @@ class RBFKernel(Kernel):
             K += self.noise * jnp.eye(K.shape[0])
         
         return K
-    def fisher_from_gp(self, x_star, y_mean, y_std, sign=-1, eig_floor=1e-10, return_raw = False):
-        return super().fisher_from_gp(x_star, y_mean, y_std, sign, eig_floor, return_raw)
-    
-    def principal_axes_from_fisher(self, F, mode = "rotate", eig_floor = 1e-10):
-        return super().principal_axes_from_fisher(F, mode, eig_floor)
+
 
 
 class MaternKernel(Kernel):
@@ -1115,7 +885,6 @@ class SphericalLinearKernel(Kernel):
 
         return var * (y_std**2)
     
-
 
 class AdditiveKernel(Kernel):
     """ 

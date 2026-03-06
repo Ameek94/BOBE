@@ -273,10 +273,10 @@ class MPI_Pool:
             n_restarts = min(n_restarts, 2 * self.size)
 
         rng = np.random.default_rng() if rng is None else rng
-        n_params = gp.kernel.hyperparam_bounds.shape[1]  # hp bounds are (2, n_params) shaped
+        n_params = gp.kernel.num_hyperparams  # hp bounds are (2, n_params) shaped
  
         
-        init_params = gp.kernel.initial_log_params()
+        init_params = gp.kernel.hp_layout.pack_from_kernel(gp.kernel)
 
         init_params = np.atleast_2d(np.array(init_params)) # (1, n_params)
 
@@ -329,7 +329,7 @@ class MPI_Pool:
         # Select best result and update GP
         best_result = max(all_results, key=lambda r: r['mll'])
         best_params_log = best_result['params']
-        parsed = gp.kernel.parse_hyperparams(best_params_log)
+        parsed = gp.kernel.hp_layout.unpack_to_dict(best_params_log)
         gp.kernel.update_hyperparams(parsed=parsed)
         gp.kernel.build_posterior_cache(gp.train_x, gp.train_y)
         #gp.update_hyperparams(best_params)

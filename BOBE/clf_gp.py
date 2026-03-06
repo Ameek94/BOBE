@@ -26,7 +26,7 @@ class GPwithClassifier(GP):
                  kernel_variance_prior=None, lengthscale_prior=None, 
                  lengthscales=None, kernel_variance=1.0,
                  groups=None, enable_group_outputscale=False,
-                 fisher_matrix=None, fisher_MAP=None,
+                 rotation_matrix=None, rotation_center=None,
                  param_names=None,
                  train_clf_on_init=True,  # Prevent retraining on copy
                  ):
@@ -112,8 +112,8 @@ class GPwithClassifier(GP):
             'param_names': param_names,
             'groups': groups,
             'enable_group_outputscale': enable_group_outputscale,
-            'fisher_matrix': fisher_matrix,
-            'fisher_MAP': fisher_MAP,
+            'rotation_matrix': rotation_matrix,
+            'rotation_center': rotation_center,
         }
                     
         super().__init__(**gp_init_kwargs)
@@ -365,10 +365,22 @@ class GPwithClassifier(GP):
             #lengthscales=state['lengthscales'],
             #kernel_variance=state['kernel_variance'], 
         )
-
+        # Update Hyperparameters
         lp = jnp.array(state["kernel_params_log"])
-        parsed = gp_clf.kernel.parse_hyperparams(lp)
+        parsed = gp_clf.kernel.hp_layout.unpack_to_dict(lp)
         gp_clf.kernel.update_hyperparams(parsed=parsed)
+
+        # Update input transform if present
+        tstate = state.get("input_transform_state", None)
+        if tstate is not None:
+            ttype = tstate.get("type", None)
+            if ttype == "FisherPrincipalAxesTransform":
+                from .transforms import FisherPrincipalAxesTransform
+                tform = FisherPrincipalAxesTransform.from_state_dict(tstate)
+            else:
+                raise ValueError(f"Unknown transform type in state dict: {ttype}")
+            gp_clf.kernel.set_input_transform(tform)
+
         gp_clf.kernel.build_posterior_cache(gp_clf.train_x, gp_clf.train_y)
         
         # # Restore computed state if available

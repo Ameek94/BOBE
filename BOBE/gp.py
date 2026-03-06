@@ -1,30 +1,26 @@
 
-#from math import sqrt,pi
 from typing import List
 import jax.numpy as jnp
 import numpy as np
 import jax
-#from jax.scipy.linalg import cho_solve, solve_triangular
 jax.config.update("jax_enable_x64", True)
-#from functools import partial
 from .utils.log import get_logger
 log = get_logger("gp")
 from .optim import optimize_optax, optimize_scipy
 from .utils.seed import get_numpy_rng
-#import numpyro.distributions as dist
 from .kernels import RBFKernel, MaternKernel, SphericalLinearKernel, AdditiveKernel
-
+from .transforms import FisherPrincipalAxesTransform
 
 safe_noise_floor = 1e-12
 
 class GP:
     
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
-                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01, 10],lengthscales=None, kernel_variance=None,
+                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01, 25],lengthscales=None, kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior="DSLP", tausq=None, tausq_bounds=[1e-4,1e4], 
                  raw_coeffs=None, raw_coeff_bounds=[-6, 6], raw_global_lengthscale=None, raw_global_lengthscale_bounds=[-1.5, 1.5], 
                  groups=None, enable_group_outputscale=False,
-                 fisher_matrix=None, fisher_MAP=None,
+                 rotation_matrix=None, rotation_center=None,
                  param_names: List[str] = None):
         """
         Initialize the Gaussian Process model.
@@ -129,15 +125,12 @@ class GP:
         # Instantiate kernel objects
         self.kernel = kernel_classes[self.kernel_name](kernel_init, self.noise)
 
-        if fisher_matrix is not None or fisher_MAP is not None:
-            if fisher_matrix is None or fisher_MAP is None:
-                raise ValueError("Must provide both fisher_matrix and fisher_MAP, or neither")
-            self.kernel.set_user_fisher(
-                F=jnp.asarray(fisher_matrix),
-                x0=jnp.asarray(fisher_MAP),
-                mode='rotate'
-            )
-
+        if rotation_center is not None or rotation_matrix is not None:
+            if rotation_matrix is None or rotation_center is None:
+                raise ValueError("Must provide both rotation_matrix and rotation_center, or neither")
+            tform = FisherPrincipalAxesTransform(rotation_matrix=rotation_matrix, rotation_center=rotation_center, mode='rotate')
+            self.kernel.set_input_transform(tform)
+            log.info(self.kernel.input_transform)
        
         # Setup optimizer
         self.optimizer_method = optimizer
@@ -201,7 +194,7 @@ class GP:
 
         if x0 is None: # set to current hyperparameters
             #x0 = jnp.log(self.kernel.get_hyperparams())[None, :]
-            x0 = self.kernel.initial_log_params()[None, :]
+            x0 = self.kernel.hp_layout.pack_from_kernel(self.kernel)[None, :]
 
         #log.info(f"Initial Params for restarts: {x0}")
 
@@ -217,11 +210,27 @@ class GP:
             optimizer_options=optimizer_options
         )
         
-        parsed = self.kernel.parse_hyperparams(best_params_log)
+        parsed = self.kernel.hp_layout.unpack_to_dict(best_params_log)
         self.kernel.update_hyperparams(parsed=parsed)
-        self.kernel.build_posterior_cache(self.train_x, self.train_y)
 
         log.info(f"Best MLL:  {-best_loss}")
+
+        # ---- DEBUG: probe variance diagnostic ----
+        if not hasattr(self, "_debug_X_probe"):
+            key = jax.random.PRNGKey(123)
+            self._debug_X_probe = jax.random.uniform(key, (256, self.ndim))
+
+        v = self.predict_var_batched(self._debug_X_probe)
+
+        log.info(
+            f"[probe] n_train={self.train_x.shape[0]} "
+            f"mean={float(jnp.mean(v)):.3e} "
+            f"median={float(jnp.median(v)):.3e} "
+            f"max={float(jnp.max(v)):.3e}"
+        )
+        if self.kernel.input_transform is not None and hasattr(self.kernel.input_transform, "rotation_matrix") and hasattr(self.kernel.input_transform, "rotation_center"):
+            self.kernel.input_transform.update(rotation_matrix=self.kernel.input_transform.rotation_matrix, rotation_center=self.kernel.input_transform.rotation_center, gp=self)
+        self.kernel.build_posterior_cache(self.train_x, self.train_y)
 
         # Return the result in the format the pool expects
         return {
@@ -363,31 +372,28 @@ class GP:
             'tausq_bounds': self.kernel.bounds_spec['tausq'],
             
             # Prior Specs
-            'lengthscale_prior_spec': self.kernel.prior_state['lengthscale_prior_spec'],
-            'kernel_variance_prior_spec': self.kernel.prior_state['kernel_variance_prior_spec'],
+            'lengthscale_prior_spec': self.kernel.prior_spec['lengthscales'],
+            'kernel_variance_prior_spec': self.kernel.prior_spec['kernel_variance'],
             
             # Kernel hyperparameters in optimiser space
-            "kernel_params_log": np.array(self.kernel.initial_log_params()),
-            
-            #Groups for additive GP
-            "groups": self.kernel.groups,
+            "kernel_params_log": np.array(self.kernel.hp_layout.pack_from_kernel(self.kernel)),
     
+            # Groups for additive GP
+            "groups": self.kernel.groups if hasattr(self.kernel, "groups") else None,
 
             # Meta
             'ndim': self.ndim,
             "param_names": list(self.param_names) if getattr(self, "param_names", None) is not None else None,
             # Class identifier
-            'gp_class': 'GP'
+            'gp_class': 'GP',
 
-            # Computed state
-            # 'cholesky': np.array(self.cholesky) if hasattr(self, 'cholesky') else None,
-            # 'alphas': np.array(self.alphas) if hasattr(self, 'alphas') else None,
-            #'fixed_kernel_variance': self.fixed_kernel_variance,
-            # Hyperparameters
-            # 'lengthscales': np.array(self.lengthscales),
-            # 'kernel_variance': float(self.kernel_variance),
-            
-            # 'tausq': float(self.tausq),
+            # Transform
+            "input_transform_state": (
+                self.kernel.input_transform.state_dict()
+                if getattr(self.kernel, "input_transform", None) is not None 
+                else None
+            ),
+
         }
         
         return state
@@ -415,20 +421,31 @@ class GP:
             kernel=state['kernel_name'],
             optimizer=state['optimizer_method'],
             optimizer_options=state['optimizer_options'],
-            #lengthscales=state['lengthscales'],
-            #kernel_variance=state['kernel_variance'],
             lengthscale_bounds=state['lengthscale_bounds'],
             kernel_variance_bounds=state['kernel_variance_bounds'],
             kernel_variance_prior=state.get('kernel_variance_prior_spec'),
             lengthscale_prior=state.get('lengthscale_prior_spec'),
             tausq=state.get('tausq_init', 1.0),
             tausq_bounds=state.get('tausq_bounds', [-4, 4]),
-            groups=state.get('groups', None)
+            groups=state.get('groups', None),
         )
-
+        # Update Hyperparameters
         lp = jnp.array(state["kernel_params_log"])
-        parsed = gp.kernel.parse_hyperparams(lp)
+        parsed = gp.kernel.hp_layout.unpack_to_dict(lp)
         gp.kernel.update_hyperparams(parsed=parsed)
+
+        # Update input transform if present
+        tstate = state.get("input_transform_state", None)
+        if tstate is not None:
+            ttype = tstate.get("type", None)
+            if ttype == "FisherPrincipalAxesTransform":
+                from .transforms import FisherPrincipalAxesTransform
+                tform = FisherPrincipalAxesTransform.from_state_dict(tstate)
+            else:
+                raise ValueError(f"Unknown transform type in state dict: {ttype}")
+            gp.kernel.set_input_transform(tform)
+
+
         gp.kernel.build_posterior_cache(gp.train_x, gp.train_y)
         
         # Restore computed state if available
@@ -515,28 +532,10 @@ class GP:
     @property
     def npoints(self):
         return self.train_x.shape[0]
-    
-    # def get_hyperparams(self):
-    #     hp = self.lengthscales
-    #     if not self.fixed_kernel_variance:
-    #         hp = jnp.hstack([hp, self.kernel_variance])
-    #     if self.lengthscale_prior_spec == 'SAAS':
-    #         hp = jnp.hstack([hp, self.tausq])
-    #     return hp
-    
-    # def hyperparams_dict(self):
-    #     ls_str = {name: f"{float(val):.4f}" for name, val in zip(self.param_names, self.lengthscales)}
-    #     param_dict = {
-    #         'lengthscales': ls_str,
-    #         'kernel_variance': f"{float(self.kernel_variance):.4f}",
-    #     }
-    #     if 'tausq' in self.hyperparam_names:
-    #         param_dict['tausq'] = f"{float(self.tausq):.4f}"
-    #     return param_dict
 
     def hyperparams_dict(self):
-        lp = self.kernel.initial_log_params()
-        parsed = self.kernel.parse_hyperparams(lp)
+        lp = self.kernel.hp_layout.pack_from_kernel(self.kernel)
+        parsed = self.kernel.hp_layout.unpack_to_dict(lp)
 
         if isinstance(self.kernel, (RBFKernel, MaternKernel, AdditiveKernel)):
             lengthscales = parsed.get("lengthscales")

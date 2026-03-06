@@ -138,3 +138,73 @@ def build_prior_state(ndim: int, kernel_variance_prior_spec, kernel_variance_bou
         "lengthscale_prior_spec": lengthscale_prior_spec,
         "logprior_fn": logprior_fn,
     }
+
+
+class Prior:
+    """
+    A prior that knows how to configure itself from kernel.prior_spec and kernel.bounds_spec, and how to score hyperparameters in natural space (NOT optimiser/log space)
+    """
+
+    def configure(self, kernel):
+        """
+        Reads kernel.prior_spec and kernel.bounds_spec and stores whatever it needss.
+        May also set kernel flags (e.g fixed_kernel_variance, tausq_enabled).
+        """
+        raise NotImplementedError
+    def extra_hyperparams(self, kernel):
+        #default: none
+        return ()
+    
+    def logprior(self,  **kwargs):
+        """
+        Returns log p(hyperparams). Inputs are natural-space values
+        """
+        raise NotImplementedError
+
+class DSLPPrior(Prior):
+    def __init__(self):
+        self.ndim = None
+        self.lengthscale_bounds = None
+        self.kernel_variance_bounds = None
+
+        self.kernel_variance_prior_spec = None
+        self.fixed_kernel_variance = False
+
+        self._lengthscale_dist = None
+        self._kernel_variance_dist = None
+
+        self._kernel_variance_logprior = None
+
+    def configure(self, kernel):
+        self.ndim = kernel.ndim
+        self.lengthscale_bounds = kernel.bounds_spec.get("lengthscales")
+        self.kernel_variance_bounds = kernel.bounds_spec.get("kernel_variance")
+
+        ps = kernel.prior_spec or {}
+        self.kernel_variance_prior_spec = ps.get("kernel_variance", None)
+        self.fixed_kernel_variance = bool(ps.get("fixed_kernel_variance", False))
+
+        # Push flags to kernel for layout decisions
+        kernel.fixed_kernel_variance = self.fixed_kernel_variance
+
+        # Build cached dists
+        self.lengthscale_dist = dist.LogNormal(loc=sqrt2 + 0.5 * jnp.log(self.ndim), scale=sqrt3)
+
+        if self.fixed_kernel_variance:
+            self.kernel_variance_dist = DummyDistribution()
+            self._kernel_variance_logprior = lambda kernel_variance: 0.0
+        else:
+            if self.kernel_variance_prior_spec is None:
+                if self.kernel_variance_bounds is None:
+                    raise ValueError("DSLP: Must specify either kernel_variance bounds or kernel_variance prior")
+                lo, hi = self.kernel_variance_bounds[0], self.kernel_variance_bounds[1]
+                self.kernel_variance_prior_spec = {"name": "Uniform", 'low': lo, 'high': hi}
+            self.kernel_variance_dist = make_distribution(self.kernel_variance_prior_spec)
+            self._kernel_variance_logprior = lambda kernel_variance: self.kernel_variance_dist.log_prob(kernel_variance)
+
+        return self
+
+    def logprior(self, *, lengthscales, kernel_variance = None, **kwargs):
+        lp = jnp.sum(self.lengthscale_dist.log_prob(lengthscales))
+        lp += self._kernel_variance_logprior(kernel_variance)
+        return lp
