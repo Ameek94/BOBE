@@ -175,14 +175,6 @@ class AcquisitionFunction:
             # Create dummy GP without classifier functionality, for now we do not use batching for EI/LogEI
             state = gp.state_dict()
             dummy_gp = GP.from_state_dict(state)
-            
-            # dummy_gp = GP(train_x=gp.train_x, 
-            #              train_y=gp.train_y*gp.y_std + gp.y_mean,
-            #              noise=gp.noise,
-            #              kernel=gp.kernel_name,
-            #              lengthscales=gp.kernel.lengthscales,
-            #              kernel_variance=gp.kernel.kernel_variance,)
-            
                         
             dummy_gp.update(x_next, dummy_gp.predict_mean_single(x_next))
             for i in range(1,n_batch):
@@ -199,49 +191,6 @@ class AcquisitionFunction:
                 dummy_gp.update(x_next, mu)
 
         return np.array(x_batch), np.array(acq_vals)
-    
-    def _use_rotated_acq(self, gp: GP) -> bool:
-        return (self.optimizer == 'scipy' and getattr(gp.kernel, '_input_transform_mode', None) is not None)
-    
-    def _x_to_opt(self, gp: GP, x):
-        """
-        Map original GP input-space point x -> optimiser-space point.
-        With rotated acquisition, optimiser-space is z-space
-        """
-        tform = getattr(gp.kernel, "input_transform", None)
-        if tform is None:
-            return np.asarray(x, dtype=float)
-        return np.asarray(tform.forward(jnp.asarray(x)), dtype=float)
-    
-    def _opt_to_x(self, gp: GP, z):
-        """
-        Map optimiser-space point z -> original GP input-space point x.
-        With rotated acquisition, optimiser-space is z-space
-        """
-        tform = getattr(gp.kernel, "input_transform", None)
-        if tform is None:
-            return np.asarray(z, dtype=float)
-        return np.asarray(tform.inverse(jnp.asarray(z)), dtype=float)
-    
-    def _rotated_linear_constraints(self, gp: GP):
-        """
-        Exact linear constraints in z-space corresponding to x in [0, 1]^D.
-
-        x = c + z @ Ainv
-        so: 0 <= x <= 1
-            -c <= z @ Ainv <= 1-c
-        
-        SciPy LinearConstrain uses M z between lb and ub, with M = Ainv.T
-        """
-        tform = gp.kernel.input_transform
-        c = np.asarray(tform.rotation_center, dtype=float)
-        Ainv = np.asarray(tform.Ainv, dtype=float)
-
-        M = Ainv.T
-        lb = -c
-        ub = 1.0 - c
-
-        return LinearConstraint(M, lb, ub)
 
 
 class EI(AcquisitionFunction):
@@ -447,59 +396,18 @@ class WeightedIntegratedPosteriorBase(AcquisitionFunction):
         if gp.train_x.shape[0] > 500:
             return x0_acq, float(acq_val_min)
         
-        # Standard optimisation in original x-space
-        if not self._use_rotated_acq(gp):
-            return self.acq_optimize(
-                fun=self.fun,
-                fun_args=(gp,),
-                fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
-                num_params=gp.ndim,
-                x0=x0_acq,
-                bounds = [0,1],
-                optimizer_options=self.optimizer_options,
-                maxiter=maxiter,
-                n_restarts=n_restarts,
-                verbose=verbose
-            )
-        # Rotated optimisation in z-space with exact linear constraints corresponding to x in [0,1]^D
-        z0_acq = self._x_to_opt(gp, x0_acq)
-        linear_constraint = self._rotated_linear_constraints(gp)
-
-        opt_options = dict(self.optimizer_options)
-        opt_options.setdefault('method', 'trust-constr')
-        opt_options["constraints"] = [linear_constraint]
-
-        def fun_rot(z, gp, mc_points=None, k_train_mc=None):
-            x = self._opt_to_x(gp, z)
-            return self.fun(x, gp, mc_points=mc_points, k_train_mc=k_train_mc)
-        
-        z_next, acq_val_next = self.acq_optimize(
-            fun=fun_rot,
+        return self.acq_optimize(
+            fun=self.fun,
             fun_args=(gp,),
             fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
             num_params=gp.ndim,
-            x0=z0_acq,
-            bounds = None, # constraints handle the bounds in z-space
-            optimizer_options=opt_options,
+            x0=x0_acq,
+            bounds = [0,1],
+            optimizer_options=self.optimizer_options,
             maxiter=maxiter,
             n_restarts=n_restarts,
             verbose=verbose
         )
-
-        x_next = self._opt_to_x(gp, z_next)
-        return x_next, acq_val_next
-
-        # else:
-        #     return self.acq_optimize(fun=self.fun,
-        #                           fun_args=(gp,),
-        #                           fun_kwargs={'mc_points': mc_points, 'k_train_mc': k_train_mc},
-        #                           num_params=gp.ndim,
-        #                           x0=x0_acq,
-        #                           bounds = [0,1],
-        #                           optimizer_options=self.optimizer_options,
-        #                           maxiter=maxiter,
-        #                           n_restarts=n_restarts,
-        #                           verbose=verbose)
 
 
 class WIPV(WeightedIntegratedPosteriorBase):
