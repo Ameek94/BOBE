@@ -9,7 +9,7 @@ from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import Likelihood, CobayaLikelihood
 from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
-from .utils.transforms import ParameterTransform
+from .transforms import ParameterTransform, BaseTransform, IdentityTransform, RotationTransform, NormalisingFlowTransform, load_transform
 from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng, get_new_jax_key
 from .samplers import nested_sampling_Dy, sample_GP_NUTS
 from .utils.log import get_logger, update_verbosity
@@ -126,6 +126,7 @@ class BOBE:
                  rotation_matrix=None,
                  rotation_center=None,
                  rotation_is_fisher=False,
+                 transform: Optional[BaseTransform] = None,
                  ):
         """
         Initialize the BOBE (Bayesian Optimization for Bayesian Evidence) sampler.
@@ -198,6 +199,7 @@ class BOBE:
             Covariance matrix (or Fisher matrix if rotation_is_fisher=True) for whitening
             the parameter space. Decorrelates parameters to improve GP performance for
             nearly-Gaussian likelihoods. Default is None (no rotation).
+            Ignored when `transform` is given explicitly.
         rotation_center : array-like, shape (ndim,), optional
             Center point for the rotation in physical parameter space (e.g., best-fit
             or fiducial parameter values). If None with rotation_matrix given,
@@ -205,6 +207,14 @@ class BOBE:
         rotation_is_fisher : bool, optional
             If True, rotation_matrix is a Fisher matrix (will be inverted to get
             the covariance). Default is False.
+        transform : BaseTransform instance or subclass, optional
+            Explicit parameter-space transform.  Accepts any ``BaseTransform``
+            subclass: ``IdentityTransform``, ``RotationTransform``, or
+            ``NormalisingFlowTransform``.  When a *class* (not an instance) is
+            passed the transform is instantiated with ``param_bounds`` from
+            the likelihood.  Takes precedence over ``rotation_matrix``.
+            Default is None (falls back to ``RotationTransform`` if
+            ``rotation_matrix`` is given, otherwise ``IdentityTransform``).
             
         Notes
         -----
@@ -232,13 +242,23 @@ class BOBE:
         )
         self.ndim = len(self.loglikelihood.param_list)
         
-        # Create the parameter transform (handles unit-cube scaling and optional rotation)
-        self.transform = ParameterTransform(
-            param_bounds=self.loglikelihood.param_bounds,
-            rotation_matrix=rotation_matrix,
-            rotation_center=rotation_center,
-            rotation_is_fisher=rotation_is_fisher,
-        )
+        # Create the parameter transform (handles unit-cube scaling and optional rotation).
+        # 'transform' may be an instance or a class (useful when param_bounds are not
+        # known at call-site, e.g. for Cobaya likelihoods).
+        if transform is not None:
+            if isinstance(transform, type):
+                self.transform = transform(self.loglikelihood.param_bounds)
+            else:
+                self.transform = transform
+        elif rotation_matrix is not None:
+            self.transform = RotationTransform(
+                param_bounds=self.loglikelihood.param_bounds,
+                covariance=rotation_matrix,
+                center=rotation_center,
+                is_fisher=rotation_is_fisher,
+            )
+        else:
+            self.transform = IdentityTransform(self.loglikelihood.param_bounds)
         
         if not self.is_main:
             # Workers only need likelihood and seed - everything else is handled in worker_wait
@@ -285,15 +305,13 @@ class BOBE:
             self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt)}
             log.info(f"Initial best point {self.best} with value = {self.best_f:.6f}")
         
-        # Save initial GP and transform state
-        self.gp.save(filename=f"{self.save_path}_gp")
-        self._save_transform()
-        log.info(f"Saving GP to file {self.save_path}_gp")
+        # Save initial checkpoint
+        self._save_checkpoint()
         
         # Initialize for KL divergence tracking
         self.prev_samples = None
 
-        # Objective evaluation counter - restored from saved state on resume, or seeded
+        # Objective evaluation counter - restored from checkpoint on resume, or seeded
         # from GP size on fresh start. gp_info is populated on resume by results_manager.
         self.total_objective_evals = self.results_manager.gp_info.get(
             'total_objective_evals',
@@ -358,8 +376,10 @@ class BOBE:
             raise ValueError("optimizer must be either 'optax' or 'scipy'")
         self.optimizer = optimizer
         self.minus_inf = minus_inf
-        
-        # Initialize results manager (settings will be updated when run() is called)
+
+        # Physical training points (always stored in BOBE, independent of GP transform)
+        self.all_train_x_phys = np.empty((0, self.ndim))
+        self.all_train_y_raw = np.empty(0)
         self.results_manager = BOBEResults(
             output_file=self.output_file,
             save_dir=self.save_dir,
@@ -377,122 +397,91 @@ class BOBE:
                 'transform_state': self.transform.state_dict(),
             },
             likelihood_name=self.loglikelihood.name,
-            resume_from_existing=resume
         )
         
         self.fresh_start = not resume
     
+    def _save_checkpoint(self):
+        """Delegate checkpoint serialisation to the results manager."""
+        if not self.is_main or not self.save:
+            return
+        self.results_manager.save_checkpoint({
+            'gp_state':              self.gp.state_dict(),
+            'use_clf':               isinstance(self.gp, GPwithClassifier),
+            'transform_state':       self.transform.state_dict(),
+            'all_train_x_phys':      self.all_train_x_phys,
+            'all_train_y_raw':       self.all_train_y_raw,
+            'total_objective_evals': getattr(self, 'total_objective_evals', 0),
+            'start_iteration':       getattr(self, 'current_iteration', getattr(self, 'start_iteration', 0)),
+            'best_f':                getattr(self, 'best_f', float('-inf')),
+            'best_pt':               getattr(self, 'best_pt', None),
+            'best_pt_iteration':     getattr(self, 'best_pt_iteration', 0),
+            'convergence_counter':   getattr(self, 'convergence_counter', 0),
+            'converged':             getattr(self, 'converged', False),
+            'termination_reason':    getattr(self, 'termination_reason', ''),
+            'prev_samples':          getattr(self, 'prev_samples', None),
+        })
+        # Persist flow weights separately (not serialisable in the pkl dict)
+        if isinstance(self.transform, NormalisingFlowTransform) and self.transform._use_flow:
+            self.transform.save(self.save_path)
+
     def _handle_resume(self, resume_file, use_clf):
-        """Handle resume from existing run (main process only)."""
-        try:
-            log.info(f"Attempting to resume from file {resume_file}")
-            gp_file = resume_file + '_gp'
-            self.gp = load_gp_file(gp_file, use_clf)
-            
-            # Test GP functionality
-            _ = self.gp.predict_mean_single(self.gp.train_x[0])
-            log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
-            
-            # Restore iteration and best point info
-            if self.results_manager.is_resuming():
-                self.start_iteration = self.results_manager.get_last_iteration()
-                log.info(f"Resuming from iteration {self.start_iteration}")
-                log.info(f"Previous data: {len(self.results_manager.acquisition_values)} acquisition evaluations")
-                
-                if self.results_manager.best_loglike_values:
-                    self.best_f = max(self.results_manager.best_loglike_values)
-                    best_idx = self.results_manager.best_loglike_values.index(self.best_f)
-                    self.best_pt_iteration = self.results_manager.best_loglike_iterations[best_idx]
-                    log.info(f"Restored best loglikelihood: {self.best_f:.4f} at iteration {self.best_pt_iteration}")
-                else:
-                    self.start_iteration = 0
-                    self.best_pt_iteration = 0
-                
-                if self.results_manager.converged:
-                    self.prev_converged = True
-                    self.convergence_counter = 1
-                    # Store last convergence info for threshold comparison in run()
-                    if self.results_manager.convergence_history:
-                        last_conv = self.results_manager.convergence_history[-1]
-                        self.prev_convergence_delta = last_conv.delta
-                        self.prev_convergence_threshold = last_conv.threshold
-                    else:
-                        self.prev_convergence_delta = None
-                        self.prev_convergence_threshold = None
-                else:
-                    # Not converged in previous run
-                    self.prev_converged = False
-                    self.prev_convergence_delta = None
-                    self.prev_convergence_threshold = None
-            else:
-                self.start_iteration = 0
-                self.best_pt_iteration = 0
-                log.info("Starting fresh optimization")
-            
-            # Restore the parameter transform from the saved state
-            self._load_transform(resume_file)
-            
-            self.fresh_start = False
-            
-        except Exception as e:
-            log.error(f"Failed to load GP from file {gp_file}: {e}")
-            log.info("Starting a fresh run instead.")
+        """Load a checkpoint via the results manager and restore all BO state."""
+        data = self.results_manager.load_checkpoint(resume_file)
+        if data is None:
             self.fresh_start = True
+            return
+
+        # Restore GP
+        self.gp = load_gp_statedict(data['gp_state'], data.get('use_clf', use_clf))
+        _ = self.gp.predict_mean_single(self.gp.train_x[0])
+        log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
+
+        # Restore transform
+        ts = data.get('transform_state', {})
+        type_key = ts.get('type', IdentityTransform._TYPE_KEY)
+        if type_key == RotationTransform._TYPE_KEY:
+            self.transform = RotationTransform.from_state_dict(ts)
+        elif type_key == NormalisingFlowTransform._TYPE_KEY:
+            self.transform = NormalisingFlowTransform.from_state_dict(ts)
+            # Reload trained flow weights if they were saved alongside the checkpoint
+            flow_pkl = resume_file + '_flow.pkl'
+            if self.transform._use_flow and os.path.exists(flow_pkl):
+                import pickle as _pickle
+                from .flow import NormalisingFlow
+                with open(flow_pkl, 'rb') as _f:
+                    _flow_state = _pickle.load(_f)
+                self.transform._flow = NormalisingFlow.from_state_dict(_flow_state)
+                log.info(f"Loaded flow weights from {flow_pkl}")
+        else:
+            self.transform = IdentityTransform.from_state_dict(ts)
+        log.info(f"Restored transform: {self.transform!r}")
+
+        # Restore physical training data
+        self.all_train_x_phys = np.array(data.get('all_train_x_phys', np.empty((0, self.ndim))))
+        self.all_train_y_raw  = np.array(data.get('all_train_y_raw',  np.empty(0)))
+        log.info(f"Restored {len(self.all_train_x_phys)} physical training points")
+
+        # Restore run counters
+        self.start_iteration       = int(data.get('start_iteration', 0))
+        self.best_f                = float(data.get('best_f', float('-inf')))
+        self.best_pt               = data.get('best_pt', None)
+        self.best_pt_iteration     = int(data.get('best_pt_iteration', 0))
+        self.convergence_counter   = int(data.get('convergence_counter', 0))
+        self.converged             = bool(data.get('converged', False))
+        self.termination_reason    = str(data.get('termination_reason', ''))
+        self.prev_samples          = data.get('prev_samples', None)
+        self.total_objective_evals = int(data.get('total_objective_evals', self.gp.npoints))
+
+        # Restore convergence state
+        cs = self.results_manager.get_last_convergence_state()
+        self.prev_converged             = cs['converged']
+        self.prev_convergence_delta     = cs['delta']
+        self.prev_convergence_threshold = cs['threshold']
+
+        log.info(f"Resuming from iteration {self.start_iteration}, best logL={self.best_f:.4f}")
+        self.fresh_start = False
     
-    def _save_transform(self):
-        """Save the parameter transform state to disk."""
-        transform_file = self.save_path + '_transform.npz'
-        state = self.transform.state_dict()
-        np.savez(transform_file, **{k: v for k, v in state.items()})
-        log.debug(f"Saved transform state to {transform_file}")
-
-    def _save_dropped_pool(self):
-        """Persist the dropped-point pool to disk so it survives a resume."""
-        pool_file = self.save_path + '_dropped_pool.npz'
-        np.savez(pool_file,
-                 x_phys=self._dropped_pool_x_phys,
-                 y_raw=self._dropped_pool_y_raw)
-        log.debug(f"Saved dropped pool ({len(self._dropped_pool_x_phys)} pts) to {pool_file}")
-
-    def _load_dropped_pool(self):
-        """Restore the dropped-point pool from disk (empty arrays if file absent)."""
-        pool_file = self.save_path + '_dropped_pool.npz'
-        if os.path.exists(pool_file):
-            data = np.load(pool_file)
-            self._dropped_pool_x_phys = data['x_phys']
-            self._dropped_pool_y_raw  = data['y_raw']
-            if self._dropped_pool_x_phys.shape[0] > 0:
-                log.info(f"Restored dropped pool with {self._dropped_pool_x_phys.shape[0]} points.")
-        else:
-            self._dropped_pool_x_phys = np.zeros((0, self.ndim))
-            self._dropped_pool_y_raw  = np.zeros(0)
-
-    def _load_transform(self, resume_file):
-        """
-        Load the parameter transform state from a previous run.
-        
-        Falls back to the current transform if no saved state exists
-        (e.g. resuming from a run that did not use rotation).
-        """
-        transform_file = resume_file + '_transform.npz'
-        if os.path.exists(transform_file) or os.path.exists(transform_file + '.npz'):
-            try:
-                fname = transform_file if os.path.exists(transform_file) else transform_file + '.npz'
-                data = np.load(fname, allow_pickle=True)
-                state = {}
-                for key in data.files:
-                    value = data[key]
-                    if isinstance(value, np.ndarray) and value.shape == ():
-                        state[key] = value.item()
-                    else:
-                        state[key] = value
-                self.transform = ParameterTransform.from_state_dict(state)
-                log.info(f"Restored transform state from {fname}")
-            except Exception as e:
-                log.warning(f"Failed to load transform state from {transform_file}: {e}. Using current transform.")
-        else:
-            log.debug("No saved transform state found, using current transform.")
-
     def _handle_fresh_start(self, n_cobaya_init, n_sobol_init, init_train_x, init_train_y,
                            use_clf, clf_type, clf_use_size, clf_update_step,
                            clf_nsigma_threshold, minus_inf, optimizer, gp_kwargs):
@@ -608,7 +597,11 @@ class BOBE:
             init_vals = all_vals
         
         self.results_manager.end_timing('True Objective Evaluations')
-        
+
+        # Store all evaluated physical points and loglikelihood values
+        self.all_train_x_phys = init_points.copy()
+        self.all_train_y_raw = init_vals.flatten().copy()
+
         # Convert to unit space for GP
         train_x = jnp.array(self.transform.to_unit(init_points))
         train_y = jnp.array(init_vals)
@@ -863,6 +856,10 @@ class BOBE:
             self.best = {name: f"{float(val):.6f}" for name, val in zip(self.loglikelihood.param_list, self.best_pt.flatten())}
             self.best_pt_iteration = step
 
+        # Accumulate all evaluated physical training points
+        self.all_train_x_phys = np.vstack([self.all_train_x_phys, new_pts])
+        self.all_train_y_raw = np.concatenate([self.all_train_y_raw, np.array(new_vals).flatten()])
+
         # Increment dedicated objective-eval counter
         self.total_objective_evals += len(new_pts)
         log.info(f"Evaluated objective at {len(new_pts)} new points (total objective evals: {self.total_objective_evals})")
@@ -895,186 +892,6 @@ class BOBE:
         
         return False
 
-    def _update_rotation(self, step: int) -> bool:
-        """
-        Re-estimate the covariance from current MC samples and rebuild the
-        ParameterTransform + GP training set in the new rotated unit-cube space.
-
-        Can be called even when no initial rotation matrix was provided:
-        in that case the first call establishes the rotation from scratch using
-        the current MC sample covariance, and the transform switches from a
-        simple linear scaling to a rotated eigenspace transform.
-
-        The new rotation center is taken from ``self.best_pt`` (physical space).
-        A weighted sample covariance is computed from ``self.mc_samples`` in
-        physical space.  When an existing rotation is in use, the update is
-        skipped when the symmetric KL divergence between the old and new
-        Gaussians is below ``self.rotation_kl_threshold``.  For the very first
-        rotation (no prior rotation), the KL check is bypassed and the update
-        always proceeds.
-
-        After a successful update:
-        - GP training points outside [0, 1] in the new coords are **dropped**
-          (not clipped) to avoid corrupting the emulated function.
-        - A 4-restart warm-start refit is performed (first restart from current
-          hyperparameters, subsequent ones randomised).
-
-        Parameters
-        ----------
-        step : int
-            Current BO iteration number (used for logging).
-
-        Returns
-        -------
-        bool
-            True if the rotation was updated, False if skipped.
-        """
-        # 1. Convert MC samples from old unit space to physical space
-        mc_x_unit = np.array(self.mc_samples['x'])        # (N, r)
-        mc_x_phys = self.transform.from_unit(mc_x_unit)   # (N, D)
-        N = mc_x_phys.shape[0]
-
-        if N < self.ndim + 2:
-            log.warning(f"[Rotation update] Too few MC samples ({N}) to estimate covariance; skipping.")
-            return False
-
-        # 2. Weighted sample covariance in physical space
-        weights = self.mc_samples.get('weights', None)
-        if weights is not None:
-            w = np.array(weights, dtype=np.float64)
-            w = np.clip(w, 0.0, None)
-            w_sum = w.sum()
-            if w_sum <= 0.0:
-                w = np.ones(N)
-            w /= w.sum()
-            # Covariance centered on sample mean (independent of rotation center)
-            sample_mean = np.average(mc_x_phys, weights=w, axis=0)
-            diff = mc_x_phys - sample_mean
-            new_cov = (diff * w[:, None]).T @ diff
-        else:
-            new_cov = np.cov(mc_x_phys.T)
-        new_cov = 0.5 * (new_cov + new_cov.T)
-        new_cov += 1e-10 * np.eye(self.ndim)   # numerical guard
-
-        # 3. New rotation center: use stored best-fit point (physical space)
-        new_center = np.array(self.best_pt).flatten()
-
-        # 4. KL divergence check between old and new physical-space Gaussians.
-        #    Skipped when no rotation exists yet (first rotation is always applied).
-        if self.transform.uses_rotation:
-            old_cov    = self.transform._covariance_phys
-            old_center = self.transform._theta_center
-            try:
-                kl_dict = kl_divergence_gaussian(old_center, old_cov, new_center, new_cov)
-                kl_sym  = float(kl_dict['symmetric'])
-            except (np.linalg.LinAlgError, Exception) as e:
-                log.warning(f"[Rotation update] KL divergence computation failed: {e}; skipping.")
-                return False
-
-            log.info(f"[Rotation update {self.rotation_update_count + 1}] Symmetric KL = {kl_sym:.4f} "
-                     f"(threshold = {self.rotation_kl_threshold:.4f})")
-            if kl_sym < self.rotation_kl_threshold:
-                log.info("[Rotation update] KL below threshold; skipping rotation update.")
-                return False
-        else:
-            log.info(f"[Rotation update {self.rotation_update_count + 1}] No existing rotation; "
-                     "establishing first rotation from sample covariance (KL check bypassed).")
-
-        # 5. Build new ParameterTransform
-        n_sigma = getattr(self.transform, '_n_sigma', 5.0)
-        try:
-            new_transform = ParameterTransform(
-                param_bounds=self.loglikelihood.param_bounds,
-                rotation_matrix=new_cov,
-                rotation_center=new_center,
-                rotation_is_fisher=False,
-                n_sigma=n_sigma,
-            )
-        except (ValueError, np.linalg.LinAlgError) as e:
-            log.warning(f"[Rotation update] Failed to build new transform: {e}; skipping.")
-            return False
-
-        # 5b+6. Merge current GP data with the full dropped pool, remap to the new unit cube,
-        #       and split: in-bounds points go to the GP, out-of-bounds points become the new
-        #       pool (auto-recovering any pool points that now fall in-bounds).
-        if isinstance(self.gp, GPwithClassifier):
-            src_x_phys = self.transform.from_unit(np.array(self.gp.train_x_clf))
-            src_y_raw  = np.array(self.gp.train_y_clf).flatten()
-        else:
-            src_x_phys = self.transform.from_unit(np.array(self.gp.train_x))
-            src_y_raw  = np.array(self.gp.train_y).flatten() * float(self.gp.y_std) + float(self.gp.y_mean)
-
-        all_x_phys = np.concatenate([src_x_phys, self._dropped_pool_x_phys], axis=0)
-        all_y_raw  = np.concatenate([src_y_raw,  self._dropped_pool_y_raw],  axis=0)
-
-        all_u     = new_transform.to_unit(all_x_phys, clip=False)
-        in_bounds = np.all((all_u >= 0.0) & (all_u <= 1.0), axis=1)
-        n_src     = src_x_phys.shape[0]
-        n_recovered = int(in_bounds[n_src:].sum())   # pool points now in-bounds
-        n_dropped   = int((~in_bounds).sum())        # total points going to pool
-        if n_recovered > 0:
-            log.info(f"[Rotation update] {n_recovered} point(s) recovered from dropped pool.")
-        if n_dropped > 0:
-            log.info(f"[Rotation update] {n_dropped}/{len(all_x_phys)} points outside new unit cube → pool.")
-
-        # Update the pool with OOB points
-        self._dropped_pool_x_phys = all_x_phys[~in_bounds]
-        self._dropped_pool_y_raw  = all_y_raw[~in_bounds]
-
-        x_ib = all_u[in_bounds]
-        y_ib = all_y_raw[in_bounds]
-
-        if x_ib.shape[0] < self.ndim + 2:
-            log.warning(f"[Rotation update] Only {x_ib.shape[0]} points remain after filtering — too few; skipping.")
-            return False
-
-        # Hand off to GP — threshold / standardisation handled inside
-        if isinstance(self.gp, GPwithClassifier):
-            self.gp.remap_from_full_dataset(x_ib, y_ib)
-        else:
-            self.gp.remap_from_raw(x_ib, y_ib)
-
-        # 7. Commit new transform
-        self.transform = new_transform
-
-        # 8. Remap current MC samples; drop those outside new unit cube
-        mc_x_new_unit  = new_transform.to_unit(mc_x_phys, clip=False)
-        in_bounds_mc   = np.all((mc_x_new_unit >= 0.0) & (mc_x_new_unit <= 1.0), axis=1)
-        n_dropped_mc   = int((~in_bounds_mc).sum())
-        if n_dropped_mc > 0:
-            log.info(f"[Rotation update] Dropping {n_dropped_mc}/{N} MC samples outside new unit cube.")
-        mc_x_new_unit = mc_x_new_unit[in_bounds_mc]
-        new_mc = {'x': mc_x_new_unit, 'method': self.mc_samples.get('method', 'unknown')}
-        for key in ('weights', 'logl', 'logp'):
-            if key in self.mc_samples:
-                new_mc[key] = np.array(self.mc_samples[key])[in_bounds_mc]
-        if 'best' in self.mc_samples:
-            new_mc['best'] = self.mc_samples['best']
-        self.mc_samples = new_mc
-
-        # 9. Warm-start GP refit (pool.gp_fit always uses current hyperparams as first restart)
-        log.info(f"[Rotation update {self.rotation_update_count + 1}] Warm-start refitting GP "
-                 f"with {x_ib.shape[0]} points (4 restarts, 500 iters)")
-        self.results_manager.start_timing('GP Training')
-        self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
-        self.results_manager.end_timing('GP Training')
-
-        # 10. Persist updated transform, GP, and dropped pool
-        self._save_transform()
-        self._save_dropped_pool()
-        self.gp.save(filename=f"{self.save_path}_gp")
-        self.rotation_update_count += 1
-        log.info(f"[Rotation update] Complete. Count={self.rotation_update_count}. "
-                 f"New transform: {self.transform}")
-
-        # Persist rotation state so it survives a resume.
-        # rotation_update_count is updated here; last_rotation_ii and last_rotation_acq_val
-        # are set by the caller immediately after this returns, then the caller flushes.
-        self.results_manager.gp_info.update({
-            'rotation_update_count': self.rotation_update_count,
-        })
-        return True
-
     def finalise_results(self):
         # here finalize results
         if not self.is_main:
@@ -1105,12 +922,19 @@ class BOBE:
                 'classifier_training_set_size': 0
             })
 
-        # Add rotation state so it appears in the final save file
-        gp_info.update({
-            'rotation_update_count': getattr(self, 'rotation_update_count', 0),
-            'last_rotation_ii': getattr(self, 'last_rotation_ii', None),
-            'last_rotation_acq_val': getattr(self, 'last_rotation_acq_val', None),
-        })
+        # Add rotation state from the transform object
+        if hasattr(self.transform, 'update_count'):
+            gp_info.update({
+                'rotation_update_count': self.transform.update_count,
+                'last_rotation_ii': self.transform.last_update_ii,
+                'last_rotation_acq_val': self.transform.last_update_acq_val,
+            })
+        else:
+            gp_info.update({
+                'rotation_update_count': 0,
+                'last_rotation_ii': None,
+                'last_rotation_acq_val': None,
+            })
 
         # Add evidence info if available
         samples_dict = self.samples_dict or {}
@@ -1258,8 +1082,8 @@ class BOBE:
 
             if not converged:
 
-                # Save intermediate results checkpoint
-                self.results_manager.save_intermediate(gp=self.gp, filename=f"{checkpoint_filename}")
+                # Save checkpoint and getdist chains
+                self._save_checkpoint()
 
                 # Save getdist chains
                 self.results_manager.save_chain_files(samples_dict=self.ns_samples, filename=f"{checkpoint_filename}")
@@ -1267,11 +1091,81 @@ class BOBE:
                 if verbose:
                     log.info(f"New minimum delta achieved: {delta:.4f}")
                     log.info("Saving checkpoint results for new minimum delta")
-                    log.info(f"Saved GP checkpoint to {checkpoint_filename}_gp.npz")
+                    log.info(f"Saved checkpoint to {self.save_path}.pkl")
                     log.info(f"Saved intermediate results checkpoint to {checkpoint_filename}.json")
 
         return converged
-        
+
+    def _check_convergence(self, acq_val: float) -> bool:
+        """
+        Check convergence for WIPV/WIPStd based on acquisition value and
+        KL divergence between consecutive MC sample distributions.
+
+        Convergence requires BOTH:
+          1. acq_val <= self.logz_threshold
+          2. Symmetric KL between consecutive physical-space MCMC sample Gaussians
+             is below self.kl_convergence_threshold for convergence_n_iters iterations.
+
+        Returns True when both conditions are satisfied for enough consecutive steps.
+        """
+        if not self.is_main:
+            return False
+
+        # Map current mc_samples to physical space once
+        mc_x_phys = np.asarray(self.transform.from_unit(np.array(self.mc_samples['x'])))
+
+        if acq_val > self.logz_threshold:
+            self.convergence_counter = 0
+            self.prev_samples = {'x': mc_x_phys}
+            return False
+
+        # acq below threshold — compute KL between consecutive sample distributions
+        kl_sym = np.inf
+        if self.prev_samples is not None:
+            try:
+                prev_x_phys = np.asarray(self.prev_samples['x'])
+                mu1 = np.mean(prev_x_phys, axis=0)
+                cov1 = np.atleast_2d(np.cov(prev_x_phys, rowvar=False))
+                mu2 = np.mean(mc_x_phys, axis=0)
+                cov2 = np.atleast_2d(np.cov(mc_x_phys, rowvar=False))
+                kl = kl_divergence_gaussian(mu1, cov1, mu2, cov2)
+                kl_sym = float(kl.get('symmetric', np.inf))
+            except Exception as e:
+                log.warning(f"KL computation failed: {e}")
+
+        log.info(
+            f"Convergence check: acq={acq_val:.4e} < thresh={self.logz_threshold:.4e}, "
+            f"KL_sym={kl_sym:.4f} (thresh={self.kl_convergence_threshold:.4f})"
+        )
+
+        # Always update prev_samples so next iteration has a "previous"
+        self.prev_samples = {'x': mc_x_phys}
+
+        if kl_sym < self.kl_convergence_threshold:
+            self.convergence_counter += 1
+        else:
+            self.convergence_counter = 0
+
+        converged = self.convergence_counter >= self.convergence_n_iters
+
+        self.results_manager.update_convergence(
+            iteration=self.current_iteration,
+            logz_dict={'mean': acq_val},
+            converged=converged,
+            threshold=self.logz_threshold,
+            delta=acq_val,
+        )
+
+        if converged:
+            log.info(
+                f"Convergence achieved after {self.convergence_n_iters} successive "
+                f"iterations (KL={kl_sym:.4f})"
+            )
+        else:
+            log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
+
+        return converged
+
     # ============================================================================
     # MAIN RUN METHODS
     # ============================================================================
@@ -1298,7 +1192,8 @@ class BOBE:
             rotation_update_min_evals: Optional[int] = None,
             max_rotation_updates: int = 10,
             rotation_logz_threshold: Optional[float] = None,
-            rotation_kl_threshold: float = 1.0):
+            rotation_kl_threshold: float = 1.0,
+            kl_convergence_threshold: float = 0.1):
         """
         Run the Bayesian Optimization loop.
         
@@ -1479,19 +1374,19 @@ class BOBE:
         self.max_rotation_updates      = max_rotation_updates
         self.rotation_kl_threshold     = rotation_kl_threshold
         self.rotation_logz_threshold = rotation_logz_threshold
-        # Restore rotation state from a previous run if available, otherwise start fresh
-        _saved_rotation = self.results_manager.gp_info
-        self.rotation_update_count = int(_saved_rotation.get('rotation_update_count', 0))
-        self.last_rotation_ii      = _saved_rotation.get('last_rotation_ii', None)
-        self.last_rotation_acq_val = _saved_rotation.get('last_rotation_acq_val', None)
-        if self.rotation_update_count > 0:
-            log.info(f"Resuming with rotation state: count={self.rotation_update_count}, "
-                     f"last_ii={self.last_rotation_ii}, last_acq_val={self.last_rotation_acq_val}")
+        self.kl_convergence_threshold = kl_convergence_threshold
 
-        # Load (or initialise) the persistent pool of dropped training points.
-        # Points dropped from the GP/clf training set during a rotation update are stored
-        # here and reconsidered at the next rotation update.
-        self._load_dropped_pool()
+        # Configure transform update parameters (no-op for IdentityTransform)
+        if isinstance(self.transform, (RotationTransform, NormalisingFlowTransform)):
+            self.transform.kl_threshold = rotation_kl_threshold
+            self.transform.max_updates = max_rotation_updates
+            self.transform.update_step = rotation_update_step
+            if self.transform.update_count > 0:
+                log.info(
+                    f"Resuming with transform state: count={self.transform.update_count}, "
+                    f"last_ii={self.transform.last_update_ii}, "
+                    f"last_acq_val={self.transform.last_update_acq_val}"
+                )
 
         # Adjust batch_size for MPI load balancing
         if self.is_mpi:
@@ -1536,6 +1431,7 @@ class BOBE:
             'rotation_logz_threshold': rotation_logz_threshold,
             'max_rotation_updates': max_rotation_updates,
             'rotation_kl_threshold': rotation_kl_threshold,
+            'kl_convergence_threshold': kl_convergence_threshold,
         })
         
         acqs_funcs_available = list(_acq_funcs.keys())
@@ -1608,9 +1504,9 @@ class BOBE:
             # if current_evals >= self.min_evals:
             converged = self.check_convergence_ei(ii,acq_vals)
 
-            # Update results manager with iteration info, also save results and gp if save_step
+            # Periodic checkpoint save
             if ii % self.save_step == 0:
-                self.results_manager.save_intermediate(gp=self.gp)
+                self._save_checkpoint()
 
             if converged:
                 self.termination_reason = f"{self.acquisition.name.upper()} goal reached"
@@ -1657,16 +1553,11 @@ class BOBE:
         )
         self.results_manager.end_timing('MCMC Sampling')
         self.ns_samples = None
-        
-        #logz keys to print
-        logz_keys = ['mean', 'upper', 'lower', 'dlogz_sampler']
+        logz_keys = ['mean', 'upper', 'lower', 'dlogz_sampler']  # used in do_final_ns block
 
 
         while not self.converged:
             ii += 1
-            # Check if we should run nested sampling based on points added
-            self.n_points_since_last_ns += self.batch_size
-            ns_flag = (self.n_points_since_last_ns >= self.ns_n_points) and current_evals >= self.min_evals
             verbose = True
 
             if verbose:
@@ -1681,96 +1572,58 @@ class BOBE:
             self.update_gp(new_pts_u, new_vals, step = ii)
             self.results_manager.update_best_loglike(ii, self.best_f)
 
-            # Check convergence and update MCMC samples
-            if ns_flag and (acq_vals[-1] <= self.logz_threshold):
-                self.results_manager.start_timing('Nested Sampling')
-                ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
-                    gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=False, dlogz=0.01, equal_weights=False,
-                    rng=self.np_rng
-                )
-                self.results_manager.end_timing('Nested Sampling')
+            # MCMC sampling to update mc_samples every iteration
+            self.results_manager.start_timing('MCMC Sampling')
+            self.mc_samples = get_mc_samples(
+                self.gp,
+                warmup_steps=self.num_hmc_warmup,
+                num_samples=self.num_hmc_samples,
+                thinning=self.hmc_thinning,
+                num_chains=self.hmc_num_chains,
+                method=self.mc_points_method,
+                np_rng=self.np_rng,
+                rng_key=get_jax_key(),
+            )
+            self.results_manager.end_timing('MCMC Sampling')
 
-                logz_str = ", ".join([f"{k}={logz_dict[k]:.4f}" for k in logz_keys if k in logz_dict])
-                log.info(f"NS success = {ns_success}, LogZ info: {logz_str}")
-
-                self.ns_samples = ns_samples
-                if ns_success:
-                    equal_samples, equal_logl = resample_equal(ns_samples['x'], ns_samples['logl'], weights=ns_samples['weights'])
-                    self.mc_samples = {
-                        'x': equal_samples,
-                        'logl': equal_logl,
-                        'weights': np.ones(equal_samples.shape[0]),
-                        'method': 'NS',
-                        'best': ns_samples['best']
-                    }
-                    self.results_dict['logz'] = logz_dict
-                    self.converged = self.check_convergence_logz(ii, logz_dict, equal_samples, equal_logl)
-                    if self.converged:
-                        self.termination_reason = "LogZ converged"
-                        self.results_dict['termination_reason'] = self.termination_reason
-                
-                # Reset counter after running NS
-                self.n_points_since_last_ns = 0
-            else:
-                self.results_manager.start_timing('MCMC Sampling')
-                self.mc_samples = get_mc_samples(
-                        self.gp,
-                        warmup_steps=self.num_hmc_warmup,
-                        num_samples=self.num_hmc_samples,
-                        thinning=self.hmc_thinning,
-                        num_chains=self.hmc_num_chains,
-                        method=self.mc_points_method,
-                        np_rng=self.np_rng,
-                        rng_key=get_jax_key()
-                    )
-                self.results_manager.end_timing('MCMC Sampling')
-            
             if verbose:
                 log.info(f"Current best point {self.best} with value = {self.best_f:.6f}, found at iteration {self.best_pt_iteration}")
 
-            # Update results manager with iteration info, also save results and gp if save_step
+            # Periodic save
             if ii % self.save_step == 0:
-                self.results_manager.save_intermediate(gp=self.gp)
+                self._save_checkpoint()
 
-            # Periodic rotation update — fires with or without an initial rotation matrix.
-            # First update: no step-count check; fires as soon as the acq threshold is met.
-            # Subsequent updates: require acq_val to have improved since the last update
-            #   AND at least rotation_update_step iterations to have elapsed.
-            if (self.rotation_update_step is not None
-                    and self.rotation_update_count < self.max_rotation_updates
-                    and current_evals >= self.rotation_update_min_evals
-                    and acq_vals[-1] <= self.rotation_logz_threshold):
-                if self.rotation_update_count == 0:
-                    # First rotation update — fire immediately upon reaching the threshold
-                    did_update = self._update_rotation(step=ii)
-                    if did_update:
-                        self.last_rotation_ii      = ii
-                        self.last_rotation_acq_val = float(acq_vals[-1])
-                        self.results_manager.gp_info.update({
-                            'last_rotation_ii': self.last_rotation_ii,
-                            'last_rotation_acq_val': self.last_rotation_acq_val,
-                        })
-                        # Flush intermediate JSON immediately so rotation state survives a crash/resume.
-                        # The GP was already saved inside _update_rotation, so pass gp=None.
-                        self.results_manager.save_intermediate(gp=None)
-                elif (acq_vals[-1] < self.last_rotation_acq_val
-                        and (ii - self.last_rotation_ii) >= self.rotation_update_step):
-                    # Subsequent rotation: acq must have improved and enough steps elapsed
-                    did_update = self._update_rotation(step=ii)
-                    if did_update:
-                        self.last_rotation_ii      = ii
-                        self.last_rotation_acq_val = float(acq_vals[-1])
-                        self.results_manager.gp_info.update({
-                            'last_rotation_ii': self.last_rotation_ii,
-                            'last_rotation_acq_val': self.last_rotation_acq_val,
-                        })
-                        # Flush intermediate JSON immediately so rotation state survives a crash/resume.
-                        # The GP was already saved inside _update_rotation, so pass gp=None.
-                        self.results_manager.save_intermediate(gp=None)
+            # Attempt transform update (no-op for IdentityTransform; RotationTransform
+            # handles all trigger guard logic internally)
+            if current_evals >= self.rotation_update_min_evals:
+                did_update = self.transform.update(
+                    gp=self.gp,
+                    mc_samples=self.mc_samples,
+                    acq_val=float(acq_vals[-1]),
+                    acq_threshold=self.rotation_logz_threshold,
+                    best_pt=self.best_pt,
+                    all_x_phys=self.all_train_x_phys,
+                    all_y_raw=self.all_train_y_raw,
+                    step=ii,
+                )
+                if did_update:
+                    self.mc_samples = self.transform.updated_mc_samples
+                    # Warm-start refit GP in the new rotated space
+                    self.results_manager.start_timing('GP Training')
+                    self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500,
+                                     rng=self.np_rng, use_pool=True)
+                    self.results_manager.end_timing('GP Training')
+                    # Persist everything in the single checkpoint
+                    self._save_checkpoint()
 
+            # Check convergence via acquisition value + consecutive KL divergence
+            self.current_iteration = ii
+            self.converged = self._check_convergence(float(acq_vals[-1]))
             if self.converged:
+                self.termination_reason = "Converged (acq + KL)"
+                self.results_dict['termination_reason'] = self.termination_reason
                 break
-            
+
             self.pool.clear_jax_caches()
 
             max_evals_or_gpsize_reached = self.check_max_evals_and_gpsize(current_evals)
@@ -1779,6 +1632,7 @@ class BOBE:
 
         # End of main BO loop
         self.current_iteration = ii
+        ns_success = False
 
         # Final nested sampling if not yet converged and do_final_ns is True
         if self.do_final_ns and not self.converged:

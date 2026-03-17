@@ -91,8 +91,7 @@ class BOBEResults:
                  output_file: str = 'results',
                  save_dir: Optional[str] = './',
                  settings: Optional[Dict[str, Any]] = None,
-                 likelihood_name: str = "unknown",
-                 resume_from_existing: bool = False):
+                 likelihood_name: str = "unknown"):
         """
         Initialize the results manager.
         
@@ -103,7 +102,6 @@ class BOBEResults:
             param_bounds: Parameter bounds array [n_params, 2]
             settings: Dictionary of BOBE settings
             likelihood_name: Name of the likelihood function
-            resume_from_existing: If True, try to load existing results and continue from there
         """
         self.output_file = output_file or 'results'
         self.save_dir = save_dir or './'
@@ -117,18 +115,7 @@ class BOBEResults:
         # Store settings
         self.settings = settings or {}
         
-        # Try to resume from existing results if requested
-        if resume_from_existing:
-            existing_results = self._load_existing_results(self.save_path)
-            if existing_results:
-                self._merge_existing_results(existing_results)
-                log.info(f"Resumed from existing results with {len(self.convergence_history)} previous iterations")
-            else:
-                log.info("No existing results found, starting fresh")
-                self._initialize_fresh()
-        else:
-            self._initialize_fresh()
-        
+        self._initialize_fresh()
         log.info(f"Initialized BOBE results manager for {self.ndim}D problem")
     
     def _initialize_fresh(self):
@@ -191,129 +178,120 @@ class BOBEResults:
         self.best_loglike = None
         self.best_iteration = None
     
-    def _load_existing_results(self, output_file: str) -> Optional[Dict[str, Any]]:
-        """
-        Try to load existing results from previous runs.
-        
-        Args:
-            output_file: Base name of the output files
-            
-        Returns:
-            Dictionary of existing results if found, None otherwise
-        """
-        # First try to load from pickle (most complete)
-        pickle_file = f"{output_file}_results.pkl"
-        if Path(pickle_file).exists():
-            try:
-                with open(pickle_file, 'rb') as f:
-                    results_dict = pickle.load(f)
-                log.info(f"Found existing results in {pickle_file}")
-                return results_dict
-            except Exception as e:
-                log.warning(f"Could not load existing pickle results: {e}")
-        
-        # Try to load from intermediate JSON
-        intermediate_file = f"{output_file}_intermediate.json"
-        if Path(intermediate_file).exists():
-            try:
-                with open(intermediate_file, 'r') as f:
-                    intermediate_dict = json.load(f)
-                log.info(f"Found existing intermediate results in {intermediate_file}")
-                return intermediate_dict
-            except Exception as e:
-                log.warning(f"Could not load existing intermediate results: {e}")
-        
-        return None
-    
-    def _merge_existing_results(self, existing_results: Dict[str, Any]):
-        """
-        Merge existing results into this instance for resuming.
-        
-        Args:
-            existing_results: Dictionary of existing results to merge
-        """
-        # Initialize fresh first
+    def restore_from_checkpoint(self, data: Dict[str, Any]):
+        """Restore tracking state from a checkpoint dict (loaded from .pkl by bo._handle_resume)."""
         self._initialize_fresh()
-        
-        # Restore convergence history
-        if 'convergence_history' in existing_results:
+
+        if 'convergence_history' in data:
             self.convergence_history = []
-            for conv_dict in existing_results['convergence_history']:
-                conv_info = ConvergenceInfo(
+            for conv_dict in data['convergence_history']:
+                self.convergence_history.append(ConvergenceInfo(
                     iteration=conv_dict['iteration'],
                     logz_dict=conv_dict['logz_dict'],
                     converged=conv_dict['converged'],
                     delta=conv_dict['delta'],
                     threshold=conv_dict['threshold'],
-                    dlogz_sampler=conv_dict['dlogz_sampler']
-                )
-                self.convergence_history.append(conv_info)
-        
-        # Restore evidence evolution
-        if 'logz_evolution' in existing_results:
-            self.logz_evolution = existing_results['logz_evolution'].copy()
-        elif 'logz_history' in existing_results:
-            self.logz_evolution = existing_results['logz_history'].copy()
-        
-        # Restore acquisition function data if available
-        if 'acquisition_data' in existing_results:
-            acq_data = existing_results['acquisition_data']
-            self.acquisition_iterations = acq_data.get('iterations', []).copy()
-            self.acquisition_values = acq_data.get('values', []).copy()
-            self.acquisition_functions = acq_data.get('functions', []).copy()
-        
-        # Restore GP hyperparameter data if available (from comprehensive results)
-        if 'gp_hyperparams' in existing_results:
-            gp_data = existing_results['gp_hyperparams']
-            self.gp_iterations = gp_data.get('iterations', []).copy()
-            self.gp_lengthscales = gp_data.get('lengthscales', []).copy()
-            self.gp_kernel_variances = gp_data.get('kernel_variances', []).copy()
-            # Backward compatibility: check for old 'outputscales' key
-            if 'outputscales' in gp_data and not self.gp_kernel_variances:
-                self.gp_kernel_variances = gp_data.get('outputscales', []).copy()
-        
-        # Restore best loglikelihood data if available
-        if 'best_loglike_data' in existing_results:
-            loglike_data = existing_results['best_loglike_data']
-            self.best_loglike_iterations = loglike_data.get('iterations', []).copy()
-            self.best_loglike_values = loglike_data.get('best_loglike', []).copy()
-        
-        # Restore KL divergence data if available
-        if 'kl_data' in existing_results:
-            kl_data = existing_results['kl_data']
-            self.kl_iterations = kl_data.get('iterations', []).copy()
-            self.kl_divergences = kl_data.get('kl_divergences', []).copy()
-            self.successive_kl = kl_data.get('successive_kl', []).copy()
-        
-        # Restore timing information (accumulate previous times)
-        if 'timing' in existing_results and 'phase_times' in existing_results['timing']:
-            for phase, prev_time in existing_results['timing']['phase_times'].items():
-                if phase in self.phase_times:
-                    self.phase_times[phase] = prev_time
-            # Calculate previous total runtime for proper resume accounting
-            if 'total_runtime' in existing_results['timing']:
-                self.previous_runtime = existing_results['timing']['total_runtime']
-                log.info(f"Restored previous runtime: {self.previous_runtime:.2f} seconds")
-        
-        # Restore timing from phase_times if available (for backward compatibility)
-        if 'phase_times' in existing_results:
-            for phase, prev_time in existing_results['phase_times'].items():
-                if phase in self.phase_times:
-                    self.phase_times[phase] = prev_time
-        
-        # Restore GP info
-        if 'gp_info' in existing_results:
-            self.gp_info = existing_results['gp_info'].copy()
-        
-        # If this was a completed run, preserve final results
-        if 'samples' in existing_results and existing_results['samples'] is not None:
-            self.final_samples = np.array(existing_results['samples'])
-            self.final_weights = np.array(existing_results['weights'])
-            self.final_loglikes = np.array(existing_results['logl'])
-            # Try new naming first, fall back to old naming for backward compatibility
-            self.final_logz_dict = existing_results.get('final_logz_dict', existing_results.get('logz_bounds', {}))
-            self.converged = existing_results.get('converged', False)
-            self.termination_reason = existing_results.get('termination_reason', "Resumed run")
+                    dlogz_sampler=conv_dict['dlogz_sampler'],
+                ))
+
+        if 'logz_evolution' in data:
+            self.logz_evolution = list(data['logz_evolution'])
+
+        acq = data.get('acquisition_data', {})
+        self.acquisition_iterations = list(acq.get('iterations', []))
+        self.acquisition_values     = list(acq.get('values', []))
+        self.acquisition_functions  = list(acq.get('functions', []))
+
+        gph = data.get('gp_hyperparams', {})
+        self.gp_iterations      = list(gph.get('iterations', []))
+        self.gp_lengthscales    = list(gph.get('lengthscales', []))
+        self.gp_kernel_variances = list(gph.get('kernel_variances', []))
+
+        bll = data.get('best_loglike_data', {})
+        self.best_loglike_iterations = list(bll.get('iterations', []))
+        self.best_loglike_values     = list(bll.get('best_loglike', []))
+
+        kl = data.get('kl_data', {})
+        self.kl_iterations  = list(kl.get('iterations', []))
+        self.kl_divergences = list(kl.get('kl_divergences', []))
+        self.successive_kl  = list(kl.get('successive_kl', []))
+
+        pt = data.get('phase_times', {})
+        for phase, val in pt.items():
+            if phase in self.phase_times:
+                self.phase_times[phase] = float(val)
+
+        self.previous_runtime = float(data.get('previous_runtime', 0.0))
+        self.gp_info = dict(data.get('gp_info', {}))
+
+        log.info(f"Restored results state: {len(self.convergence_history)} convergence entries, "
+                 f"{len(self.acquisition_values)} acq values")
+
+    def save_checkpoint(self, run_state: Dict[str, Any]):
+        """Merge BO run state with results tracking state and write a single .pkl checkpoint."""
+        data = {'settings': self.settings, **run_state}
+        data.update(self.get_state_dict())
+        pkl_path = self.save_path + '.pkl'
+        with open(pkl_path, 'wb') as f:
+            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        log.debug(f"Checkpoint written to {pkl_path}")
+
+    def load_checkpoint(self, resume_file: str) -> Optional[Dict[str, Any]]:
+        """
+        Load a .pkl checkpoint, restore results tracking state, and return the raw dict
+        so that bo._handle_resume can unpack GP/transform/counter fields.
+        Returns None if the file is missing or unreadable (caller should start fresh).
+        """
+        pkl_path = resume_file + '.pkl'
+        try:
+            with open(pkl_path, 'rb') as f:
+                data = pickle.load(f)
+            self.restore_from_checkpoint(data)
+            log.info(f"Loaded checkpoint from {pkl_path}")
+            return data
+        except FileNotFoundError:
+            log.warning(f"{pkl_path} not found; starting fresh")
+            return None
+        except Exception as e:
+            log.error(f"Failed to load checkpoint {pkl_path}: {e}; starting fresh")
+            return None
+
+    def get_last_convergence_state(self) -> Dict[str, Any]:
+        """Return the converged/delta/threshold fields from the most recent convergence entry."""
+        if self.convergence_history:
+            last = self.convergence_history[-1]
+            return {'converged': last.converged, 'delta': last.delta, 'threshold': last.threshold}
+        return {'converged': False, 'delta': None, 'threshold': None}
+
+    def get_state_dict(self) -> Dict[str, Any]:
+        """Return all tracking lists/dicts as a serialisable dict for the checkpoint pkl."""
+        timing = self.get_timing_summary()
+        return {
+            'convergence_history': [c.to_dict() for c in self.convergence_history],
+            'logz_evolution':      self.logz_evolution,
+            'acquisition_data': {
+                'iterations': self.acquisition_iterations,
+                'values':     self.acquisition_values,
+                'functions':  self.acquisition_functions,
+            },
+            'gp_hyperparams': {
+                'iterations':      self.gp_iterations,
+                'lengthscales':    convert_jax_to_json_serializable(self.gp_lengthscales),
+                'kernel_variances': convert_jax_to_json_serializable(self.gp_kernel_variances),
+            },
+            'best_loglike_data': {
+                'iterations':  self.best_loglike_iterations,
+                'best_loglike': self.best_loglike_values,
+            },
+            'kl_data': {
+                'iterations':    self.kl_iterations,
+                'kl_divergences': convert_jax_to_json_serializable(self.kl_divergences),
+                'successive_kl':  convert_jax_to_json_serializable(self.successive_kl),
+            },
+            'phase_times':     timing['phase_times'],
+            'previous_runtime': timing['total_runtime'],
+            'gp_info':         self.gp_info,
+        }
 
     def update_acquisition(self, iteration: int, acquisition_value: float, acquisition_function: str):
         """
@@ -432,18 +410,6 @@ class BOBEResults:
         else:
             return 0
     
-    def is_resuming(self) -> bool:
-        """
-        Check if this is a resumed run (has existing data).
-        
-        Returns:
-            True if this appears to be a resumed run
-        """
-        return (len(self.convergence_history) > 0 or 
-                len(self.acquisition_iterations) > 0 or
-                len(self.gp_iterations) > 0 or 
-                len(self.best_loglike_iterations) > 0)
-    
     def start_timing(self, phase_name: str):
         """Start timing a specific phase."""
         if phase_name in self.phase_times:
@@ -474,16 +440,6 @@ class BOBEResults:
             'current_session_runtime': current_session_runtime,
             'previous_runtime': self.previous_runtime
         }
-    
-    def save_timing_data(self):
-        """Save timing data to JSON file."""
-        timing_data = self.get_timing_summary()
-        timing_file = f"{self.save_path}_timing.json"
-        
-        with open(timing_file, 'w') as f:
-            json.dump(timing_data, f, indent=2)
-        
-        log.info(f"Saved timing data to {timing_file}")
     
     def get_gp_data(self) -> Dict[str, list]:
         """
@@ -575,7 +531,9 @@ class BOBEResults:
             log.info(f"Best point: logL={best_loglike:.6f} at iteration {best_iteration}")
 
         # Save all results
-        self.save_all_formats()
+        self.save_chain_files()
+        self.save_summary_json()
+        self.save_minimum_files()
     
     def get_results_dict(self) -> Dict[str, Any]:
         """
@@ -672,37 +630,60 @@ class BOBEResults:
         
         return results
     
-    def save_all_formats(self):
-        """Save results in multiple formats for compatibility."""
-        if self.final_samples is None:
-            log.warning("No final samples to save")
+    def save_summary_json(self):
+        """Save a single human-readable summary JSON at the end of the run."""
+        if len(self.final_samples) == 0:
             return
-        
-        # Main results file (comprehensive)
-        self.save_main_results()
-        
-        # Chain files for compatibility
-        self.save_chain_files()
-        
-        # Summary statistics
-        self.save_summary_stats()
-        
-        # Timing data
-        self.save_timing_data()
-        
-        # GetDist minimum files (best point)
-        self.save_minimum_files()
-    
-    def save_main_results(self):
-        """Save main comprehensive results file."""
-        results = self.get_results_dict()
-        
-        # Save as pickle for full Python object preservation
-        pickle_file = f"{self.save_path}_results.pkl"
-        with open(pickle_file, 'wb') as f:
-            pickle.dump(results, f, protocol=pickle.HIGHEST_PROTOCOL)
-        log.info(f"Saved main results to {pickle_file}")
-    
+
+        timing = self.get_timing_summary()
+
+        # Parameter statistics
+        param_stats = {}
+        for i, name in enumerate(self.param_names):
+            values  = self.final_samples[:, i]
+            weights = self.final_weights
+            mean = np.average(values, weights=weights)
+            std  = np.sqrt(np.average((values - mean)**2, weights=weights))
+            sorted_idx = np.argsort(values)
+            cumsum = np.cumsum(weights[sorted_idx]) / weights.sum()
+            def wp(p, _ci=cumsum, _vs=values[sorted_idx]):
+                idx = min(np.searchsorted(_ci, p / 100.0), len(_vs) - 1)
+                return float(_vs[idx])
+            param_stats[name] = {
+                'mean': float(mean), 'std': float(std),
+                '16%': wp(16), '84%': wp(84), 'median': wp(50),
+            }
+
+        logz = self.final_logz_dict
+        summary = {
+            'run_info': {
+                'likelihood_name': self.likelihood_name,
+                'start_time': datetime.fromtimestamp(self.start_time).isoformat(),
+                'end_time': (datetime.fromtimestamp(self.end_time).isoformat()
+                             if self.end_time else None),
+                'runtime_hours': timing['total_runtime'] / 3600,
+            },
+            'convergence': {
+                'converged': bool(self.converged),
+                'termination_reason': str(self.termination_reason),
+                'n_iterations': len(self.acquisition_iterations),
+            },
+            'evidence': {
+                'logz':       float(logz.get('mean', float('nan'))),
+                'logz_err':   float(logz.get('std', float('nan'))),
+                'logz_lower': float(logz.get('lower', float('nan'))),
+                'logz_upper': float(logz.get('upper', float('nan'))),
+            },
+            'timing': timing['phase_times'],
+            'gp_info': self.gp_info,
+            'parameters': param_stats,
+        }
+
+        summary_file = f"{self.save_path}_summary.json"
+        with open(summary_file, 'w') as f:
+            json.dump(summary, f, indent=2)
+        log.info(f"Saved summary to {summary_file}")
+
     def save_chain_files(self, samples_dict: Optional[Dict[str, np.ndarray]] = None, filename: Optional[str] = None):
         """Save chain files in GetDist format using MCSamples.saveAsText method."""
         
@@ -788,136 +769,6 @@ class BOBEResults:
             log.warning(f"Failed to save .minimum file: {e}")
         
     
-    def save_summary_stats(self):
-        """Save summary statistics in JSON format."""
-        if len(self.final_samples) == 0:
-            return
-        
-        # Calculate parameter statistics
-        param_stats = {}
-        for i, name in enumerate(self.param_names):
-            values = self.final_samples[:, i]
-            weights = self.final_weights
-            
-            # Weighted statistics
-            mean = np.average(values, weights=weights)
-            var = np.average((values - mean)**2, weights=weights)
-            std = np.sqrt(var)
-            
-            # Percentiles (approximate for weighted samples)
-            sorted_idx = np.argsort(values)
-            sorted_weights = weights[sorted_idx]
-            cumsum = np.cumsum(sorted_weights) / np.sum(sorted_weights)
-            
-            def weighted_percentile(p):
-                idx = np.searchsorted(cumsum, p/100.0)
-                if idx >= len(values):
-                    idx = len(values) - 1
-                return values[sorted_idx[idx]]
-            
-            param_stats[name] = {
-                "mean": float(mean),
-                "std": float(std),
-                "2.5_percentile": float(weighted_percentile(2.5)),
-                "97.5_percentile": float(weighted_percentile(97.5)),
-                "16_percentile": float(weighted_percentile(16)),
-                "84_percentile": float(weighted_percentile(84)),
-                "median": float(weighted_percentile(50))
-            }
-        
-        # Overall statistics
-        logz = self.final_logz_dict.get('mean', np.nan)
-        logz_lower = self.final_logz_dict.get('lower', np.nan)
-        logz_upper = self.final_logz_dict.get('upper', np.nan)
-        logz_delta = (logz_upper - logz_lower)/2
-        stats = {
-            "evidence": {
-                "logz": float(logz),
-                "logz_err": float(logz_delta),
-                "logz_lower": float(logz_lower),
-                "logz_upper": float(logz_upper),
-                "dlogz_sampler": float(self.final_logz_dict.get('dlogz_sampler', np.nan))
-            },
-            "diagnostics": {
-                "runtime_hours": float((self.end_time - self.start_time) / 3600) if self.end_time else 0,
-                "converged": bool(self.converged),
-                "termination_reason": str(self.termination_reason),
-                "total_objective_evals": int(self.gp_info.get('total_objective_evals', self.gp_info.get('total_true_evals', -1))),
-                "gp_training_set_size": int(self.gp_info.get('gp_training_set_size', -1)),
-            },
-            "gp_info": self.gp_info,
-
-            "final_convergence": {
-                "iteration": int(self.convergence_history[-1].iteration),
-                "logz_value": float(self.convergence_history[-1].logz_dict.get('mean', np.nan)),
-                "logz_error": float(self.convergence_history[-1].delta),
-                "threshold": float(self.convergence_history[-1].threshold),
-                "converged": bool(self.convergence_history[-1].converged),
-                "dlogz_sampler": self.convergence_history[-1].logz_dict.get('dlogz_sampler', np.nan)
-
-            } if self.convergence_history else {},
-            "parameters": param_stats,
-
-        }
-        
-        stats_file = f"{self.save_path}_stats.json"
-        with open(stats_file, 'w') as f:
-            json.dump(stats, f, indent=2)
-        log.info(f"Saved summary statistics to {stats_file}")
-
-    def save_intermediate(self, gp, filename: Optional[str] = None):
-        """Save intermediate results for crash recovery and resuming."""
-        intermediate = {
-            'convergence_history': [conv.to_dict() for conv in self.convergence_history],
-            'logz_evolution': self.logz_evolution,
-            'acquisition_data': {
-                'iterations': self.acquisition_iterations,
-                'values': self.acquisition_values,
-                'functions': self.acquisition_functions
-            },
-            'gp_hyperparams': {
-                'iterations': self.gp_iterations,
-                'lengthscales': convert_jax_to_json_serializable(self.gp_lengthscales),
-                'kernel_variances': convert_jax_to_json_serializable(self.gp_kernel_variances)
-            },
-            'best_loglike_data': {
-                'iterations': self.best_loglike_iterations,
-                'best_loglike': self.best_loglike_values
-            },
-            'kl_data': {
-                'iterations': self.kl_iterations,
-                'kl_divergences': convert_jax_to_json_serializable(self.kl_divergences),
-                'successive_kl': convert_jax_to_json_serializable(self.successive_kl)
-            },
-            'timing': self.get_timing_summary(),
-            'gp_info': self.gp_info,
-            'start_time': self.start_time,
-            'param_names': self.param_names,
-            'param_labels': self.param_labels,
-            'param_bounds': self.param_bounds.tolist(),
-            'settings': self.settings,
-            'run_info': {
-                'start_time': datetime.fromtimestamp(self.start_time).isoformat(),
-                'likelihood_name': self.likelihood_name,
-                'output_file': self.output_file,
-                'save_dir': self.save_dir
-            }
-        }
-        
-        if filename is not None:
-            save_path = os.path.join(self.save_dir, filename)
-        else:
-            save_path = self.save_path
-        intermediate_file = save_path + "_intermediate.json"
-        with open(intermediate_file, 'w') as f:
-            # Convert the entire intermediate dictionary to ensure all JAX arrays are handled
-            json_safe_intermediate = convert_jax_to_json_serializable(intermediate)
-            json.dump(json_safe_intermediate, f, indent=2)
-        log.info(f"Saved intermediate results to {intermediate_file}")
-
-        if gp is not None:  # Only save GP if provided
-            gp.save(filename=f"{self.save_path}_gp")
-
     def get_getdist_samples(self, samples_dict = None) -> Optional['MCSamples']:
         """
         Convert results to GetDist MCSamples object.
@@ -1074,47 +925,3 @@ class BOBEResults:
         
         else:
             raise FileNotFoundError(f"Results file not found: {pickle_file}")
-
-
-def load_bobe_results(output_file: str) -> BOBEResults:
-    """
-    Convenience function to load BOBE results.
-    
-    Args:
-        output_file: Base name of the output files
-        
-    Returns:
-        BOBEResults object with loaded data
-    """
-    return BOBEResults.load_results(output_file)
-
-
-def create_resumable_results(output_file: str,
-                            param_names: List[str],
-                            param_labels: List[str],
-                            param_bounds: np.ndarray,
-                            settings: Optional[Dict[str, Any]] = None,
-                            likelihood_name: str = "unknown") -> BOBEResults:
-    """
-    Create a BOBEResults manager that automatically resumes from existing results if available.
-    
-    Args:
-        output_file: Base name for output files
-        param_names: List of parameter names
-        param_labels: List of parameter LaTeX labels
-        param_bounds: Parameter bounds array [n_params, 2]
-        settings: Dictionary of BOBE settings
-        likelihood_name: Name of the likelihood function
-        
-    Returns:
-        BOBEResults object, either fresh or resumed from existing data
-    """
-    return BOBEResults(
-        output_file=output_file,
-        param_names=param_names,
-        param_labels=param_labels,
-        param_bounds=param_bounds,
-        settings=settings,
-        likelihood_name=likelihood_name,
-        resume_from_existing=True
-    )

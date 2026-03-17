@@ -13,6 +13,7 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
 )
 
 from BOBE import BOBE
+from BOBE.transforms import RotationTransform
 from BOBE.utils.core import scale_from_unit
 import time
 import matplotlib.pyplot as plt
@@ -56,6 +57,10 @@ def main():
         clf_type='svm',
         minus_inf=-1e5,
         seed=seed,
+        # RotationTransform passed as a class: BOBE instantiates it with the
+        # resolved param_bounds. Supply an instance instead to use an initial
+        # covariance, e.g.: RotationTransform(param_bounds, covariance=cov, center=center)
+        transform=RotationTransform,
     )
 
     results = bobe.run(
@@ -67,12 +72,12 @@ def main():
         ns_n_points=25,
         batch_size=5,
         num_hmc_warmup=512,
-        num_hmc_samples=5000,
+        num_hmc_samples=8000,
         mc_points_size=512,
-        logz_threshold=0.25,
+        logz_threshold=0.2,
         num_chains=8,
-        do_final_ns=True,
-        max_rotation_updates=20,
+        do_final_ns=False,
+        max_rotation_updates=5,
         rotation_update_step=25,
         rotation_kl_threshold=0.5,
     )
@@ -96,9 +101,9 @@ def main():
         print("\n" + "="*80)
         print("RUN COMPLETED WITH ROTATION")
         print("="*80)
-        print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
-        if 'upper' in logz_dict and 'lower' in logz_dict:
-            print(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
+        # print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
+        # if 'upper' in logz_dict and 'lower' in logz_dict:
+        #     print(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
         print(f"Total runtime: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
         print(f"Number of GP training points: {gp.train_x.shape[0]}")
 

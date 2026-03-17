@@ -21,6 +21,7 @@ seed = int(sys.argv[1]) if len(sys.argv) > 1 else 42
 
 # --- Imports ---
 from BOBE import BOBE
+from BOBE.transforms import RotationTransform
 from BOBE.utils.log import get_logger
 from BOBE.utils.plot import plot_final_samples, BOBESummaryPlotter
 
@@ -81,8 +82,13 @@ def main():
     # covmat_file = './cosmo_input/chains/Hpop.covmat'
     # min_file = './cosmo_input/chains/Hpop.minimum'
     # paramnames = ['omch2', 'logA', 'ns', 'H0', 'ombh2', 'tau', 'A_planck', 'cal100A', 'cal100B', 'cal143B', 'cal217A', 'cal217B', 'Aradio', 'Adusty', 'AdustT', 'beta_dustT', 'Acib', 'beta_cib', 'Atsz', 'Aksz', 'xi', 'AdustP', 'beta_dustP']
-    
     # cov, center = load_covariance_and_center(covmat_file, min_file, paramnames)
+    #
+    # To use an initial covariance pass it via:
+    #   transform=RotationTransform(param_bounds, covariance=cov, center=center)
+    # param_bounds can be obtained from a CobayaLikelihood instance before constructing BOBE.
+    # Without an initial covariance, run() auto-promotes to RotationTransform
+    # (linear mode) when max_rotation_updates > 0.
 
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/Hpop.yaml'
@@ -109,6 +115,10 @@ def main():
         use_clf=True,
         clf_type=clf_type,
         seed=seed,
+        # RotationTransform passed as a class: BOBE instantiates it with the
+        # resolved param_bounds. Supply an instance instead to use an initial
+        # covariance, e.g.: RotationTransform(param_bounds, covariance=cov, center=center)
+        transform=RotationTransform,
     )
 
     # results = bobe.run(

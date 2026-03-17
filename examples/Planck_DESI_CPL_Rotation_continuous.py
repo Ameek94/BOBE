@@ -14,6 +14,7 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
 from BOBE import BOBE
+from BOBE.transforms import RotationTransform
 from BOBE.utils.core import scale_from_unit
 import time
 import matplotlib.pyplot as plt
@@ -39,12 +40,10 @@ def main():
         )
     
     # cov_matrix = np.loadtxt('./results/CPL/Planck_DESI_CPL_Fisher_100_cov_matrix.txt')
-    # # check if covariance is positive definite
-    # if np.all(np.linalg.eigvals(cov_matrix) > 0):
-    #     print("Covariance matrix is positive definite.")
-    # else:
-    #     print("Warning: Covariance matrix is not positive definite. Rotation may fail.")
     # center_point = np.loadtxt('./results/CPL/Planck_DESI_CPL_Fisher_100_cov_peak.txt')
+    # If an initial covariance is available, pass it via:
+    #   transform=RotationTransform(param_bounds, covariance=cov_matrix, center=center_point)
+    # param_bounds can be obtained from a CobayaLikelihood instance before constructing BOBE.
     
     start = time.time()
     print("\n" + "="*80)
@@ -61,15 +60,16 @@ def main():
         save_dir='./results/CPL/',
         save=True,
         verbosity='INFO',
-        n_cobaya_init=16, 
+        n_cobaya_init=16,
         n_sobol_init=32,
         use_clf=True,
         clf_type='svm',
         minus_inf=-1e5,
         seed=seed,
-        # # NEW: Pass covariance and center for parameter rotation
-        # rotation_matrix=cov_matrix,
-        # rotation_center=center_point,
+        # RotationTransform passed as a class: BOBE instantiates it with the
+        # resolved param_bounds. Supply an instance instead to use an initial
+        # covariance, e.g.: RotationTransform(param_bounds, covariance=cov_matrix, center=center_point)
+        transform=RotationTransform,
     )
 
     # results = bobe.run(
