@@ -17,6 +17,8 @@ from BOBE import BOBE
 from BOBE.utils.core import scale_from_unit
 import time
 import matplotlib.pyplot as plt
+plt.rcParams['text.usetex'] = True
+plt.rcParams['font.family'] = 'serif'
 import seaborn as sns
 from getdist import MCSamples, plots, loadMCSamples
 import numpy as np
@@ -59,7 +61,7 @@ def main():
         save_dir='./results/CPL/',
         save=True,
         verbosity='INFO',
-        n_cobaya_init=4, 
+        n_cobaya_init=16, 
         n_sobol_init=32,
         use_clf=True,
         clf_type='svm',
@@ -69,19 +71,30 @@ def main():
         # rotation_matrix=cov_matrix,
         # rotation_center=center_point,
     )
+
+    # results = bobe.run(
+    #     acq='logei',
+    #     min_evals=100, 
+    #     max_evals=200,
+    #     max_gp_size=1500,
+    #     fit_n_points=25, 
+    #     ns_n_points=25,
+    #     batch_size=5,
+    #     do_final_ns=False,
+    # )
     
     results = bobe.run(
         acq='wipstd',
-        min_evals=500, 
-        max_evals=1800,
+        min_evals=750, 
+        max_evals=3000,
         max_gp_size=1500,
         fit_n_points=25, 
         ns_n_points=25,
         batch_size=5,
         num_hmc_warmup=512,
-        num_hmc_samples=4096, 
+        num_hmc_samples=5000, 
         mc_points_size=512,
-        logz_threshold=0.4,
+        logz_threshold=0.33,
         num_chains=8,
         do_final_ns=False,
         max_rotation_updates=20,

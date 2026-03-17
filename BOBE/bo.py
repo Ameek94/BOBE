@@ -1067,11 +1067,11 @@ class BOBE:
         log.info(f"[Rotation update] Complete. Count={self.rotation_update_count}. "
                  f"New transform: {self.transform}")
 
-        # Persist rotation state so it survives a resume
+        # Persist rotation state so it survives a resume.
+        # rotation_update_count is updated here; last_rotation_ii and last_rotation_acq_val
+        # are set by the caller immediately after this returns, then the caller flushes.
         self.results_manager.gp_info.update({
             'rotation_update_count': self.rotation_update_count,
-            'last_rotation_ii': self.last_rotation_ii,     # set by caller after this returns
-            'last_rotation_acq_val': self.last_rotation_acq_val,  # set by caller after this returns
         })
         return True
 
@@ -1104,6 +1104,13 @@ class BOBE:
                 'classifier_type': None,
                 'classifier_training_set_size': 0
             })
+
+        # Add rotation state so it appears in the final save file
+        gp_info.update({
+            'rotation_update_count': getattr(self, 'rotation_update_count', 0),
+            'last_rotation_ii': getattr(self, 'last_rotation_ii', None),
+            'last_rotation_acq_val': getattr(self, 'last_rotation_acq_val', None),
+        })
 
         # Add evidence info if available
         samples_dict = self.samples_dict or {}
@@ -1290,7 +1297,7 @@ class BOBE:
             rotation_update_step: Optional[int] = None,
             rotation_update_min_evals: Optional[int] = None,
             max_rotation_updates: int = 10,
-            rotation_logz_threshold: float = 4.0,
+            rotation_logz_threshold: Optional[float] = None,
             rotation_kl_threshold: float = 1.0):
         """
         Run the Bayesian Optimization loop.
@@ -1743,6 +1750,9 @@ class BOBE:
                             'last_rotation_ii': self.last_rotation_ii,
                             'last_rotation_acq_val': self.last_rotation_acq_val,
                         })
+                        # Flush intermediate JSON immediately so rotation state survives a crash/resume.
+                        # The GP was already saved inside _update_rotation, so pass gp=None.
+                        self.results_manager.save_intermediate(gp=None)
                 elif (acq_vals[-1] < self.last_rotation_acq_val
                         and (ii - self.last_rotation_ii) >= self.rotation_update_step):
                     # Subsequent rotation: acq must have improved and enough steps elapsed
@@ -1754,6 +1764,9 @@ class BOBE:
                             'last_rotation_ii': self.last_rotation_ii,
                             'last_rotation_acq_val': self.last_rotation_acq_val,
                         })
+                        # Flush intermediate JSON immediately so rotation state survives a crash/resume.
+                        # The GP was already saved inside _update_rotation, so pass gp=None.
+                        self.results_manager.save_intermediate(gp=None)
 
             if self.converged:
                 break

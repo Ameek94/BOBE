@@ -2,20 +2,22 @@ import os
 import sys
 import time
 import matplotlib.pyplot as plt
-# import seaborn as sns
+plt.rcParams['text.usetex'] = True
+plt.rcParams['font.family'] = 'serif'
+import seaborn as sns
 import numpy as np
 from getdist import MCSamples, plots, loadMCSamples
 
 # --- Command line arguments ---
 # Arg 1: Number of devices for XLA
-num_devices = int(sys.argv[1]) if len(sys.argv) > 1 else 8
-os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={num_devices}"
+# num_devices = int(sys.argv[1]) if len(sys.argv) > 1 else 8
+os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={os.cpu_count()}"  # Use all available CPU cores for JAX computations
 
 # Arg 2: Classifier type ('svm' or 'gp')
 clf_type = str(sys.argv[2]) if len(sys.argv) > 2 else 'svm'
 
 # Arg 3: Random seed
-seed = int(sys.argv[3]) if len(sys.argv) > 3 else 42
+seed = int(sys.argv[1]) if len(sys.argv) > 1 else 42
 
 # --- Imports ---
 from BOBE import BOBE
@@ -103,20 +105,20 @@ def main():
         n_cobaya_init=32,
         n_sobol_init=64,
         optimizer='scipy',
-        gp_kwargs={'lengthscale_prior': None, 'lengthscale_bounds': [1e-2, 4.]},
+        gp_kwargs={'lengthscale_prior': None, 'lengthscale_bounds': [1e-2, 10.]},
         use_clf=True,
         clf_type=clf_type,
         seed=seed,
     )
 
-    results = bobe.run(
-        acq= 'logei',
-        min_evals=500,
-        max_evals=500,
-        max_gp_size=1600,
-        convergence_n_iters=2,
-        fit_n_points=25,
-    )
+    # results = bobe.run(
+    #     acq= 'logei',
+    #     min_evals=300,
+    #     max_evals=500,
+    #     max_gp_size=1600,
+    #     convergence_n_iters=2,
+    #     fit_n_points=25,
+    # )
     
     results = bobe.run(
         acq= 'wipstd',
@@ -124,16 +126,16 @@ def main():
         max_evals=3000,
         max_gp_size=1600,
         convergence_n_iters=2,
-        fit_n_points=25,
+        fit_n_points=30,
         batch_size=5,
-        ns_n_points=25,
+        ns_n_points=30,
         num_hmc_warmup=512,
-        num_hmc_samples=4096,
+        num_hmc_samples=6000,
         mc_points_size=512,
         num_chains=8,
-        logz_threshold=0.8,
-        do_final_ns=True,
-        max_rotation_updates=20,
+        logz_threshold=0.75,
+        do_final_ns=False,
+        max_rotation_updates=5,
         rotation_update_step=25,
         rotation_kl_threshold=0.5    
     )
@@ -156,9 +158,9 @@ def main():
 
         print("\n" + "="*60)
         print("RUN COMPLETED")
-        print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
-        if 'upper' in logz_dict and 'lower' in logz_dict:
-            print(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
+        # print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
+        # if 'upper' in logz_dict and 'lower' in logz_dict:
+        #     print(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
 
         print("="*60)
         print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
