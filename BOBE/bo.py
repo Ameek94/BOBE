@@ -91,7 +91,7 @@ def get_dimension_based_defaults(ndim: int):
         'num_chains': min(6, max(3,jax.device_count())),  # 3-6 chains depending on available devices
         'fit_n_points': min(50, 2*ndim),  # refit less often for higher dimensions
         'logz_threshold': 0.01 + 0.01*(ndim/6) if ndim<=6 else min(1.,0.1 + 0.1*(ndim/6)**2),  # looser threshold for higher dimensions
-        'rotation_logz_threshold': 4 * (ndim/15)
+        'transform_acq_threshold': 4 * (ndim/15)
     }
     return defaults
 
@@ -123,9 +123,6 @@ class BOBE:
                  minus_inf=-1e10,
                  seed: Optional[int] = None,
                  verbosity: str = 'INFO',
-                 rotation_matrix=None,
-                 rotation_center=None,
-                 rotation_is_fisher=False,
                  transform: Optional[BaseTransform] = None,
                  ):
         """
@@ -195,26 +192,13 @@ class BOBE:
             Random seed for reproducibility. Default is None.
         verbosity : str, optional
             Logging verbosity level: 'DEBUG', 'INFO', 'WARNING', 'ERROR'. Default is 'INFO'.
-        rotation_matrix : array-like, shape (ndim, ndim), optional
-            Covariance matrix (or Fisher matrix if rotation_is_fisher=True) for whitening
-            the parameter space. Decorrelates parameters to improve GP performance for
-            nearly-Gaussian likelihoods. Default is None (no rotation).
-            Ignored when `transform` is given explicitly.
-        rotation_center : array-like, shape (ndim,), optional
-            Center point for the rotation in physical parameter space (e.g., best-fit
-            or fiducial parameter values). If None with rotation_matrix given,
-            defaults to the midpoint of param_bounds. Default is None.
-        rotation_is_fisher : bool, optional
-            If True, rotation_matrix is a Fisher matrix (will be inverted to get
-            the covariance). Default is False.
-        transform : BaseTransform instance or subclass, optional
-            Explicit parameter-space transform.  Accepts any ``BaseTransform``
-            subclass: ``IdentityTransform``, ``RotationTransform``, or
-            ``NormalisingFlowTransform``.  When a *class* (not an instance) is
-            passed the transform is instantiated with ``param_bounds`` from
-            the likelihood.  Takes precedence over ``rotation_matrix``.
-            Default is None (falls back to ``RotationTransform`` if
-            ``rotation_matrix`` is given, otherwise ``IdentityTransform``).
+        transform : BaseTransform instance, subclass, or None, optional
+            Parameter-space transform.  Pass a pre-configured instance of
+            ``IdentityTransform``, ``RotationTransform``, or
+            ``NormalisingFlowTransform`` (with update settings already set on
+            the object).  When a *class* (not an instance) is passed it is
+            instantiated with ``param_bounds`` from the likelihood.
+            Default is None → ``IdentityTransform`` (no transform).
             
         Notes
         -----
@@ -250,13 +234,6 @@ class BOBE:
                 self.transform = transform(self.loglikelihood.param_bounds)
             else:
                 self.transform = transform
-        elif rotation_matrix is not None:
-            self.transform = RotationTransform(
-                param_bounds=self.loglikelihood.param_bounds,
-                covariance=rotation_matrix,
-                center=rotation_center,
-                is_fisher=rotation_is_fisher,
-            )
         else:
             self.transform = IdentityTransform(self.loglikelihood.param_bounds)
         
@@ -1188,11 +1165,8 @@ class BOBE:
             num_chains: Optional[int] = None,
             mc_points_method: str = 'NUTS',
             zeta_ei: float = 0.0,
-            rotation_update_step: Optional[int] = None,
-            rotation_update_min_evals: Optional[int] = None,
-            max_rotation_updates: int = 10,
-            rotation_logz_threshold: Optional[float] = None,
-            rotation_kl_threshold: float = 1.0,
+            transform_update_min_evals: Optional[int] = None,
+            transform_acq_threshold: Optional[float] = None,
             kl_convergence_threshold: float = 0.1):
         """
         Run the Bayesian Optimization loop.
@@ -1246,23 +1220,15 @@ class BOBE:
             Method for generating MC points: 'NUTS', 'NS', or 'uniform'. Default is 'NUTS'.
         zeta_ei : float, optional
             Exploration parameter for EI acquisition. Default is 0.0.
-        rotation_update_step : int, optional
-            If set, attempt to update the rotation matrix every this many BO iterations.
-            Works both when an initial ``rotation_matrix`` was provided at construction
-            time (incremental update) and when no initial rotation was given at all
-            (the first call establishes the rotation from scratch using the current
-            MC sample covariance, switching the transform from linear scaling to a
-            rotated eigenspace).  If None (default), no rotation updates are performed.
-        rotation_update_min_evals : int, optional
-            Minimum number of likelihood evaluations before the first rotation update.
-            Defaults to ``min_evals`` when not set.
-        max_rotation_updates : int, optional
-            Maximum number of rotation updates allowed during a run. Default is 10.
-        rotation_kl_threshold : float, optional
-            Minimum symmetric KL divergence between the old and new physical-space
-            Gaussians required to trigger a rotation update.  Updates are skipped
-            when the KL is below this value (i.e. the new estimate is not
-            meaningfully different from the current one). Default is 1.0.
+        transform_update_min_evals : int, optional
+            Minimum number of likelihood evaluations before the first transform update
+            is attempted. Defaults to ``min_evals`` when not set.
+        transform_acq_threshold : float, optional
+            Acquisition value below which transform updates are triggered.  Reads from
+            ``self.transform.acq_threshold`` when that attribute exists, otherwise falls
+            back to the dimension-based default from
+            ``get_dimension_based_defaults()['transform_acq_threshold']``.
+            Pass explicitly to override both.
             
         Returns
         -------
@@ -1288,7 +1254,12 @@ class BOBE:
         mc_points_size = mc_points_size if mc_points_size is not None else dim_defaults['mc_points_size']
         num_chains = num_chains if num_chains is not None else dim_defaults['num_chains']
         logz_threshold = logz_threshold if logz_threshold is not None else dim_defaults['logz_threshold']
-        rotation_logz_threshold = rotation_logz_threshold if rotation_logz_threshold is not None else dim_defaults['rotation_logz_threshold']
+        # transform_acq_threshold: explicit arg > transform attribute > dimension default
+        if transform_acq_threshold is None:
+            transform_acq_threshold = getattr(self.transform, 'acq_threshold', None)
+        if transform_acq_threshold is None:
+            transform_acq_threshold = dim_defaults['transform_acq_threshold']
+        transform_update_min_evals = transform_update_min_evals if transform_update_min_evals is not None else min_evals
         
         # Store convergence parameters
         self.min_evals = min_evals
@@ -1368,25 +1339,17 @@ class BOBE:
         self.mc_points_method = mc_points_method
         self.zeta_ei = zeta_ei
 
-        # Rotation update settings (only active when transform uses rotation)
-        self.rotation_update_step      = rotation_update_step
-        self.rotation_update_min_evals = rotation_update_min_evals if rotation_update_min_evals is not None else min_evals
-        self.max_rotation_updates      = max_rotation_updates
-        self.rotation_kl_threshold     = rotation_kl_threshold
-        self.rotation_logz_threshold = rotation_logz_threshold
-        self.kl_convergence_threshold = kl_convergence_threshold
+        # Transform update scheduling (BO-loop concerns; transform internals live on the object)
+        self.transform_update_min_evals = transform_update_min_evals
+        self.transform_acq_threshold    = transform_acq_threshold
+        self.kl_convergence_threshold   = kl_convergence_threshold
 
-        # Configure transform update parameters (no-op for IdentityTransform)
-        if isinstance(self.transform, (RotationTransform, NormalisingFlowTransform)):
-            self.transform.kl_threshold = rotation_kl_threshold
-            self.transform.max_updates = max_rotation_updates
-            self.transform.update_step = rotation_update_step
-            if self.transform.update_count > 0:
-                log.info(
-                    f"Resuming with transform state: count={self.transform.update_count}, "
-                    f"last_ii={self.transform.last_update_ii}, "
-                    f"last_acq_val={self.transform.last_update_acq_val}"
-                )
+        if hasattr(self.transform, 'update_count') and self.transform.update_count > 0:
+            log.info(
+                f"Resuming with transform state: count={self.transform.update_count}, "
+                f"last_ii={self.transform.last_update_ii}, "
+                f"last_acq_val={self.transform.last_update_acq_val}"
+            )
 
         # Adjust batch_size for MPI load balancing
         if self.is_mpi:
@@ -1426,11 +1389,8 @@ class BOBE:
             'num_chains': num_chains,
             'mc_points_method': mc_points_method,
             'zeta_ei': zeta_ei,
-            'rotation_update_step': rotation_update_step,
-            'rotation_update_min_evals': rotation_update_min_evals,
-            'rotation_logz_threshold': rotation_logz_threshold,
-            'max_rotation_updates': max_rotation_updates,
-            'rotation_kl_threshold': rotation_kl_threshold,
+            'transform_update_min_evals': transform_update_min_evals,
+            'transform_acq_threshold': transform_acq_threshold,
             'kl_convergence_threshold': kl_convergence_threshold,
         })
         
@@ -1594,13 +1554,13 @@ class BOBE:
                 self._save_checkpoint()
 
             # Attempt transform update (no-op for IdentityTransform; RotationTransform
-            # handles all trigger guard logic internally)
-            if current_evals >= self.rotation_update_min_evals:
+            # and NormalisingFlowTransform handle all trigger guard logic internally)
+            if current_evals >= self.transform_update_min_evals:
                 did_update = self.transform.update(
                     gp=self.gp,
                     mc_samples=self.mc_samples,
                     acq_val=float(acq_vals[-1]),
-                    acq_threshold=self.rotation_logz_threshold,
+                    acq_threshold=self.transform_acq_threshold,
                     best_pt=self.best_pt,
                     all_x_phys=self.all_train_x_phys,
                     all_y_raw=self.all_train_y_raw,
