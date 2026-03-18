@@ -13,7 +13,7 @@ The ParameterTransform factory is kept for backward compatibility.
 import os
 import numpy as np
 from abc import ABC, abstractmethod
-from scipy.special import ndtr, ndtri   # Φ (normal CDF) and its inverse
+
 from .utils.log import get_logger
 
 log = get_logger("transforms")
@@ -831,12 +831,13 @@ class NormalisingFlowTransform(BaseTransform):
     def to_unit(self, theta, clip=False):
         theta, single = self._prep_input(theta, self._ndim)
         if self._use_flow:
-            # Φ(z): z ~ N(0,I) → u ~ U[0,1]^D exactly (probit transform).
-            # Replaces the old linear u = (z + n_sigma) / (2*n_sigma) which
-            # concentrated posterior samples in a narrow band around u=0.5,
-            # wasting most of the unit-cube budget on tails.
+            # Linear mapping: z in [-n_sigma, n_sigma] → u in [0, 1].
+            # Keeps the posterior concentrated around u=0.5, which is essential
+            # for WIPV/WIPStd: the acquisition ∫σ(u)p(u)du focuses on a compact
+            # region.  The Φ (probit) transform maps the posterior to Uniform
+            # over the entire cube, making the problem exponentially harder.
             z = self._flow.to_latent(theta)
-            u = ndtr(z)                        # element-wise Φ; maps ℝ → (0,1)
+            u = (z + self.n_sigma) / (2.0 * self.n_sigma)
         else:
             u = (theta - self._theta_min) / self._theta_range
         if clip:
@@ -846,23 +847,19 @@ class NormalisingFlowTransform(BaseTransform):
     def from_unit(self, u):
         u, single = self._prep_input(u, self._ndim)
         if self._use_flow:
-            # Φ⁻¹(u): invert the probit transform, then invert the flow.
-            # Clamp away from exact 0/1 to avoid ±inf from ndtri.
-            u_safe = np.clip(u, 1e-7, 1.0 - 1e-7)
-            z = ndtri(u_safe)                  # element-wise Φ⁻¹; maps (0,1) → ℝ
+            z = u * 2.0 * self.n_sigma - self.n_sigma
             theta = self._flow.to_data(z)
         else:
             theta = self._theta_min + u * self._theta_range
         return theta[0] if single else theta
 
     def in_physical_bounds(self, theta):
-        """With the Φ transform every u in (0,1) maps to a finite z and hence
-        some physical θ; no hard sigma cut-off is needed.  Return True for any
-        θ that the flow can round-trip without producing NaN."""
         theta = np.asarray(theta, dtype=np.float64)
         if self._use_flow:
+            # A point is in-bounds when its latent z lies within the n_sigma box.
             z = self._flow.to_latent(np.atleast_2d(theta))
-            return np.all(np.isfinite(z), axis=-1).squeeze()
+            u = (z + self.n_sigma) / (2.0 * self.n_sigma)
+            return np.all((u >= 0.0) & (u <= 1.0), axis=-1).squeeze()
         return np.all(
             (theta >= self._effective_bounds[0]) &
             (theta <= self._effective_bounds[1]),

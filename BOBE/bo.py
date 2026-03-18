@@ -192,13 +192,27 @@ class BOBE:
             Random seed for reproducibility. Default is None.
         verbosity : str, optional
             Logging verbosity level: 'DEBUG', 'INFO', 'WARNING', 'ERROR'. Default is 'INFO'.
-        transform : BaseTransform instance, subclass, or None, optional
-            Parameter-space transform.  Pass a pre-configured instance of
-            ``IdentityTransform``, ``RotationTransform``, or
-            ``NormalisingFlowTransform`` (with update settings already set on
-            the object).  When a *class* (not an instance) is passed it is
-            instantiated with ``param_bounds`` from the likelihood.
-            Default is None → ``IdentityTransform`` (no transform).
+        transform : BaseTransform instance, subclass, (subclass, kwargs), or None
+            Parameter-space transform.  Three forms accepted:
+
+            * ``None`` (default) — ``IdentityTransform`` (no transform).
+            * A ``BaseTransform`` *subclass* — instantiated with ``param_bounds``
+              from the likelihood; settings use the class defaults.
+            * A ``(subclass, kwargs_dict)`` *tuple* — instantiated with
+              ``param_bounds`` + ``**kwargs``.  This is the recommended form
+              because it keeps all transform settings in one place without
+              requiring ``param_bounds`` at call-site::
+
+                  transform=(RotationTransform, {'kl_threshold': 0.5,
+                                                 'max_updates': 5,
+                                                 'update_step': 25})
+
+                  transform=(NormalisingFlowTransform, {'kl_threshold': 1.0,
+                                                        'max_updates': 3,
+                                                        'update_step': 20})
+
+            * A pre-built ``BaseTransform`` *instance* — used as-is (bounds
+              must already be set).
             
         Notes
         -----
@@ -227,15 +241,22 @@ class BOBE:
         self.ndim = len(self.loglikelihood.param_list)
         
         # Create the parameter transform (handles unit-cube scaling and optional rotation).
-        # 'transform' may be an instance or a class (useful when param_bounds are not
-        # known at call-site, e.g. for Cobaya likelihoods).
-        if transform is not None:
-            if isinstance(transform, type):
-                self.transform = transform(self.loglikelihood.param_bounds)
-            else:
-                self.transform = transform
-        else:
+        # Accepted forms for `transform`:
+        #   - BaseTransform instance  → used as-is
+        #   - BaseTransform subclass  → instantiated with param_bounds only
+        #   - (subclass, kwargs_dict) → instantiated with param_bounds + **kwargs
+        #     e.g. (RotationTransform, {'kl_threshold': 0.5, 'update_step': 25})
+        # This lets users configure the transform in one place without needing to
+        # know param_bounds up front (they are resolved from the likelihood).
+        if transform is None:
             self.transform = IdentityTransform(self.loglikelihood.param_bounds)
+        elif isinstance(transform, tuple) and len(transform) == 2 and isinstance(transform[0], type):
+            cls, kwargs = transform
+            self.transform = cls(self.loglikelihood.param_bounds, **kwargs)
+        elif isinstance(transform, type):
+            self.transform = transform(self.loglikelihood.param_bounds)
+        else:
+            self.transform = transform
         
         if not self.is_main:
             # Workers only need likelihood and seed - everything else is handled in worker_wait
