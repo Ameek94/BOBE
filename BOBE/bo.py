@@ -562,13 +562,20 @@ class BOBE:
         best_logl = float(self.best_f)
         best_pt_phys = self.best_pt
         
-        self.flow.calibrate(best_pt_phys, best_logl)
-        log.info(f"[Flow] Calibrated at best fit: logL={best_logl:.4f}")
+        # Calibrate using flow log prob WITHOUT Jacobian correction for stable scaling
+        # The Jacobian from preprocessing normalization causes huge magnitude issues
+        x_norm = (best_pt_phys - self.flow._pre_mean) / self.flow._pre_std
+        flow_logp_no_jacobian = float(self.flow._flow.log_prob(x_norm))
+        calibration_offset = best_logl - flow_logp_no_jacobian
+        log.info(f"[Flow] Calibrated at best fit: logL={best_logl:.4f}, "
+                f"flow_logp(no_jacobian)={flow_logp_no_jacobian:.4f}, offset={calibration_offset:.4f}")
         
-        # Create mean function wrapper for GP
+        # Create mean function wrapper for GP (without Jacobian correction)
         def flow_mean_func(x_unit: np.ndarray) -> np.ndarray:
             x_phys = self.transform.from_unit(x_unit)
-            return self.flow.calibrated_log_prob(x_phys)
+            x_phys_jax = jnp.asarray(x_phys)
+            x_norm = (x_phys_jax - self.flow._pre_mean) / self.flow._pre_std
+            return self.flow._flow.log_prob(x_norm) + calibration_offset
         
         # Attach to GP and rebuild training data
         self.gp.set_mean_func(flow_mean_func)
