@@ -27,6 +27,7 @@ class GPwithClassifier(GP):
                  lengthscales=None, kernel_variance=1.0,
                  param_names=None,
                  train_clf_on_init=True,  # Prevent retraining on copy
+                 mean_func=None,  # Mean function for GP
                  ):
         """
         Generic Classifier-GP class combining a GP with a classifier. The GP is trained on the data points
@@ -109,6 +110,7 @@ class GPwithClassifier(GP):
             'tausq': tausq,
             'tausq_bounds': tausq_bounds,
             'param_names': param_names,
+            'mean_func': mean_func,
         }
                     
         super().__init__(**gp_init_kwargs)

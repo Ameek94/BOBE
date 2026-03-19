@@ -1,9 +1,10 @@
-"""
-Planck-lite LCDM run using a Normalising Flow transform.
+"""Planck-lite LCDM run using a flow-based GP mean function.
 
-The flow is trained on HMC samples once the acquisition value drops below
-``transform_acq_threshold`` and then every ``update_step`` iterations after
-that, remapping the GP's unit cube to track the posterior manifold.
+A normalizing flow is trained on likelihood-weighted samples once the
+acquisition value drops below ``flow_acq_threshold``. The flow's calibrated
+log-probability is used as the GP mean function so that the GP fits residuals.
+The flow is retrained when the KL divergence between flow and HMC samples
+exceeds ``flow_kl_threshold``.
 """
 
 import os
@@ -12,7 +13,6 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
 from BOBE import BOBE
-from BOBE.transforms import NormalisingFlowTransform
 from BOBE.utils.core import scale_from_unit
 import time
 import matplotlib.pyplot as plt
@@ -40,22 +40,23 @@ def main():
         save_dir='./results/LCDM_Lite/',
         save=True,
         verbosity='INFO',
-        n_cobaya_init=4,
-        n_sobol_init=8,
+        n_cobaya_init=18,
+        n_sobol_init=32,
         use_clf=True,
         clf_type='svm',
         minus_inf=-1e5,
         seed=seed,
-        # Pass transform as (class, kwargs): BOBE resolves param_bounds from the
-        # likelihood and calls NormalisingFlowTransform(param_bounds, **kwargs).
-        transform=(NormalisingFlowTransform, {
-            'kl_threshold': 0.5,   # min KL between old/new posteriors to trigger update
-            'max_updates': 3,       # stop after 3 flow re-fits
-            'update_step': 5,      # minimum BO iterations between re-fits
+        # Flow mean function settings: train flow when acquisition is low,
+        # retrain when KL divergence between flow and HMC samples is high
+        use_flow_mean=True,
+        flow_acq_threshold=2.0,   # acquisition value below which flow training triggers
+        flow_kl_threshold=1.,    # KL divergence threshold for retraining
+        flow_kwargs={
             'n_layers': 8,
             'hidden_dim': 64,
-            'flow_n_epochs': 2000,
-        }),
+            'n_epochs': 2000,
+        },
+        flow_retrain_step=3,
     )
 
     results = bobe.run(
@@ -63,16 +64,14 @@ def main():
         min_evals=25,
         max_evals=200,
         max_gp_size=150,
-        fit_n_points=8,
-        ns_n_points=4,
-        batch_size=2,
+        fit_n_points=12,
+        ns_n_points=8,
+        batch_size=4,
         num_hmc_warmup=256,
         num_hmc_samples=5000,
         mc_points_size=512,
-        logz_threshold=0.025,
+        logz_threshold=0.05,
         do_final_ns=False,
-        # acquisition value below which a flow update is attempted
-        transform_acq_threshold=4.,
     )
 
     end = time.time()
@@ -112,6 +111,35 @@ def main():
             ranges=dict(zip(param_list, param_bounds.T)),
         )
 
+        # Draw samples from the trained flow if available
+        sample_list = [BOBE_Samples, reference_samples]
+        legend_labels = ['BOBE (HMC)', 'Nested Sampling']
+        contour_colors = ['#006FED', 'black']
+        filled_list = [True, False]
+        contour_lws = [1, 1.5]
+        
+        if bobe.flow_trained and bobe.flow is not None:
+            print("Drawing samples from trained flow...")
+            # Draw samples from flow (in physical space)
+            flow_samples = bobe.flow.sample(5000)
+            
+            # Create MCSamples object for flow samples
+            Flow_Samples = MCSamples(
+                samples=flow_samples,
+                names=param_list,
+                labels=param_labels,
+                ranges=dict(zip(param_list, param_bounds.T)),
+            )
+            
+            # Insert flow samples before reference samples
+            sample_list.insert(1, Flow_Samples)
+            legend_labels.insert(1, 'Flow')
+            contour_colors.insert(1, '#FF6B35')  # Orange color for flow
+            filled_list.insert(1, False)
+            contour_lws.insert(1, 1.5)
+            
+            print(f"Drew {len(flow_samples)} samples from flow")
+
         print("Creating parameter samples plot...")
         sns.set_theme('notebook', 'ticks', palette='husl')
         plt.rcParams['text.usetex'] = True
@@ -122,12 +150,12 @@ def main():
         g.settings.axes_fontsize = 16
         g.settings.axes_labelsize = 16
         g.triangle_plot(
-            [BOBE_Samples, reference_samples],
+            sample_list,
             params=['ombh2', 'omch2', 'H0', 'ns', 'logA', 'tau'],
-            filled=[True, False],
-            contour_colors=['#006FED', 'black'],
-            contour_lws=[1, 1.5],
-            legend_labels=['BOBE (flow)', 'Nested Sampling'],
+            filled=filled_list,
+            contour_colors=contour_colors,
+            contour_lws=contour_lws,
+            legend_labels=legend_labels,
         )
         # scatter GP training points
         points = scale_from_unit(gp.train_x, param_bounds)

@@ -61,8 +61,8 @@ class NormalisingFlow:
     nn_depth : int
         Depth of each autoregressive network. Default 2.
     n_sigma : float
-        When used inside NormalisingFlowTransform, z is expected to lie in
-        [-n_sigma, n_sigma] per dimension.  Default 5.
+        Whitened coordinates are expected to lie in [-n_sigma, n_sigma] per 
+        dimension after pre-whitening transform. Default 5.
     seed : int
         JAX PRNG seed for parameter initialisation and training shuffle.
     """
@@ -84,9 +84,14 @@ class NormalisingFlow:
         self._seed = seed
 
         self._flow = None          # flowjax Transformed distribution
-        self._pre_mean = np.zeros(ndim, dtype=np.float64)
-        self._pre_std = np.ones(ndim, dtype=np.float64)
+        self._pre_mean = jnp.zeros(ndim, dtype=jnp.float64)
+        self._pre_std = jnp.ones(ndim, dtype=jnp.float64)
+        self._log_pre_std_sum = 0.0  # precomputed sum(log(std)) for efficiency
         self._trained = False
+        
+        # Calibration: offset to align flow log_prob with true log-likelihood
+        self._calibration_offset = 0.0
+        self._calibrated = False
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -168,13 +173,17 @@ class NormalisingFlow:
             w = np.asarray(weights, dtype=np.float64)
             w = np.clip(w, 0.0, None)
             w /= w.sum()
-            self._pre_mean = np.average(x, weights=w, axis=0)
-            diff = x - self._pre_mean
-            self._pre_std = np.sqrt(np.average(diff ** 2, weights=w, axis=0))
+            pre_mean = np.average(x, weights=w, axis=0)
+            diff = x - pre_mean
+            pre_std = np.sqrt(np.average(diff ** 2, weights=w, axis=0))
         else:
-            self._pre_mean = x.mean(axis=0)
-            self._pre_std = x.std(axis=0)
-        self._pre_std = np.maximum(self._pre_std, 1e-6)
+            pre_mean = x.mean(axis=0)
+            pre_std = x.std(axis=0)
+        pre_std = np.maximum(pre_std, 1e-6)
+        # Store as JAX arrays for JAX-compatible log_prob
+        self._pre_mean = jnp.asarray(pre_mean)
+        self._pre_std = jnp.asarray(pre_std)
+        self._log_pre_std_sum = float(jnp.sum(jnp.log(self._pre_std)))
 
         x_norm = self._preprocess(x)
 
@@ -265,29 +274,140 @@ class NormalisingFlow:
         x = self._unpreprocess(x_norm)
         return x[0] if single else x
 
-    def log_prob(self, x: np.ndarray) -> np.ndarray:
-        """Log probability density log p(x) under the flow model.
+    def sample(self, n_samples: int, key=None) -> np.ndarray:
+        """Draw samples from the flow distribution.
 
         Parameters
         ----------
-        x : (..., D) array_like
+        n_samples : int
+            Number of samples to draw.
+        key : JAX PRNGKey, optional
+            JAX random key. If None, uses the instance seed.
+
+        Returns
+        -------
+        samples : (n_samples, D) array
+            Samples in physical / data space.
+        """
+        self._check_trained()
+        if key is None:
+            key = jax.random.key(self._seed)
+            self._seed += 1  # Increment for next call
+        
+        # Sample from flowjax distribution (returns normalized samples)
+        samples_norm = self._flow.sample(key, (n_samples,))
+        
+        # Un-preprocess to get back to physical space
+        samples = self._unpreprocess(samples_norm)
+        return samples
+
+    def log_prob_single(self, x):
+        """Log probability density log p(x) for a single point.
+
+        JAX-compatible: can be called inside JIT-compiled functions.
+
+        Parameters
+        ----------
+        x : (D,) array_like — single point
+
+        Returns
+        -------
+        log_p : scalar
+        """
+        self._check_trained()
+        x = jnp.atleast_1d(x)
+        x_norm = (x - self._pre_mean) / self._pre_std
+        return self._flow.log_prob(x_norm) - self._log_pre_std_sum
+
+    def log_prob(self, x):
+        """Log probability density log p(x) under the flow model.
+
+        JAX-compatible: can be called inside JIT-compiled functions.
+
+        Parameters
+        ----------
+        x : (D,) or (N, D) array_like
 
         Returns
         -------
         log_p : scalar (if single point) or (N,) array.
         """
         self._check_trained()
-        x = np.asarray(x, dtype=np.float64)
-        single = x.ndim == 1
-        if single:
-            x = x[np.newaxis]
-        x_norm = self._preprocess(x)
-        log_p = np.array(
-            jax.vmap(self._flow.log_prob)(x_norm)
-            - float(np.sum(np.log(self._pre_std))),
-            dtype=np.float64,
+        x = jnp.asarray(x)
+        if x.ndim == 1:
+            return self.log_prob_single(x)
+        return jax.vmap(self.log_prob_single)(x)
+
+    # ------------------------------------------------------------------
+    # Calibration
+    # ------------------------------------------------------------------
+
+    def calibrate(self, best_pt: np.ndarray, best_logl: float):
+        """Calibrate the flow so that calibrated_log_prob(best_pt) = best_logl.
+
+        Parameters
+        ----------
+        best_pt : (D,) array_like
+            The best-fit point in physical parameter space.
+        best_logl : float
+            The true log-likelihood value at the best-fit point.
+        """
+        self._check_trained()
+        flow_logp = float(self.log_prob(best_pt))
+        self._calibration_offset = best_logl - flow_logp
+        self._calibrated = True
+        log.info(
+            f"Flow calibrated: offset = {self._calibration_offset:.4f} "
+            f"(flow_logp={flow_logp:.4f}, target={best_logl:.4f})"
         )
-        return float(log_p[0]) if single else log_p
+
+    def calibrated_log_prob_single(self, x):
+        """Return log_prob_single(x) + calibration offset for a single point.
+
+        JAX-compatible: can be called inside JIT-compiled functions.
+
+        Parameters
+        ----------
+        x : (D,) array_like — single point
+
+        Returns
+        -------
+        log_p : scalar
+        """
+        if not self._calibrated:
+            raise RuntimeError(
+                "Flow has not been calibrated. Call .calibrate() first."
+            )
+        return self.log_prob_single(x) + self._calibration_offset
+
+    def calibrated_log_prob(self, x):
+        """Return log_prob(x) + calibration offset.
+
+        JAX-compatible: can be called inside JIT-compiled functions.
+        This aligns the flow's log probability density with the true
+        log-likelihood scale, enabling its use as a GP mean function.
+
+        Parameters
+        ----------
+        x : (D,) or (N, D) array_like
+
+        Returns
+        -------
+        log_p : scalar (if single point) or (N,) array.
+        """
+        if not self._calibrated:
+            raise RuntimeError(
+                "Flow has not been calibrated. Call .calibrate() first."
+            )
+        x = jnp.asarray(x)
+        if x.ndim == 1:
+            return self.calibrated_log_prob_single(x)
+        return jax.vmap(self.calibrated_log_prob_single)(x)
+
+    @property
+    def is_calibrated(self) -> bool:
+        """Return True if the flow has been calibrated."""
+        return self._calibrated
 
     # ------------------------------------------------------------------
     # Serialisation  (uses equinox for the flow pytree)
@@ -310,8 +430,11 @@ class NormalisingFlow:
             "n_sigma": self.n_sigma,
             "seed": self._seed,
             "trained": self._trained,
-            "pre_mean": self._pre_mean.copy(),
-            "pre_std": self._pre_std.copy(),
+            "pre_mean": np.asarray(self._pre_mean),
+            "pre_std": np.asarray(self._pre_std),
+            "log_pre_std_sum": self._log_pre_std_sum,
+            "calibration_offset": self._calibration_offset,
+            "calibrated": self._calibrated,
             "flow_bytes": None,
         }
         if self._trained and self._flow is not None:
@@ -339,8 +462,13 @@ class NormalisingFlow:
             seed=int(state["seed"]),
         )
         obj._trained = bool(state["trained"])
-        obj._pre_mean = np.array(state["pre_mean"], dtype=np.float64)
-        obj._pre_std = np.array(state["pre_std"], dtype=np.float64)
+        obj._pre_mean = jnp.asarray(state["pre_mean"], dtype=jnp.float64)
+        obj._pre_std = jnp.asarray(state["pre_std"], dtype=jnp.float64)
+        obj._log_pre_std_sum = float(state.get("log_pre_std_sum", jnp.sum(jnp.log(obj._pre_std))))
+        
+        # Restore calibration state
+        obj._calibration_offset = float(state.get("calibration_offset", 0.0))
+        obj._calibrated = bool(state.get("calibrated", False))
 
         flow_bytes = state.get("flow_bytes")
         if obj._trained and flow_bytes is not None:

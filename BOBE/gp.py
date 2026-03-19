@@ -111,7 +111,8 @@ class GP:
     
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
                  kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,5],lengthscales=None,kernel_variance=None,
-                 kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], param_names: List[str] = None):
+                 kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], param_names: List[str] = None,
+                 mean_func=None):
         """
         Initialize the Gaussian Process model.
 
@@ -153,7 +154,14 @@ class GP:
         tausq_bounds : list, optional
             Bounds for the tausq parameter (in log space). Only used when lengthscale_prior='SAAS'.
             Defaults to [-4, 4].
+        mean_func : callable, optional
+            If provided, called as mean_func(x) -> array of shape (N,) or scalar.
+            The GP will fit the residuals: y - mean_func(x).
+            Predictions return mean_func(x) + GP_residual(x). Default is None.
         """
+        # Store mean function before setting up training data
+        self.mean_func = mean_func
+        
         # Setup and validate training data
         self._setup_training_data(train_x, train_y)
         self.param_names = param_names if param_names is not None else ['x_'+str(i) for i in range(self.ndim)]
@@ -205,19 +213,31 @@ class GP:
             raise ValueError("train_x must be 2D")
 
         self.ndim = train_x.shape[1]
+        self.train_x = jnp.array(train_x)
+        
+        # If mean_func is provided, compute residuals
+        if self.mean_func is not None and train_y.size > 0:
+            # mean_func returns values in the same scale as train_y
+            mean_vals = self.mean_func(train_x)
+            if hasattr(mean_vals, 'shape') and mean_vals.ndim == 1:
+                mean_vals = mean_vals.reshape(-1, 1)
+            elif not hasattr(mean_vals, 'shape'):
+                mean_vals = jnp.array([[mean_vals]])
+            residuals = train_y - mean_vals
+        else:
+            residuals = train_y
         
         # Compute standardization parameters (and handle the case of 0 initialisation points)
-        self.y_mean = jnp.mean(train_y) if train_y.size > 0 else 0 
-        self.y_std = jnp.std(train_y) if train_y.size > 0 else 1.0
+        self.y_mean = jnp.mean(residuals) if residuals.size > 0 else 0 
+        self.y_std = jnp.std(residuals) if residuals.size > 0 else 1.0
         
         # Handle edge case where std is zero (all values identical or only 1 point)
         if self.y_std == 0:
             log.warning("Training targets have zero variance. Setting std to 1.0 to avoid division by zero.")
             self.y_std = 1.0
 
-        # Store standardized training data
-        self.train_x = jnp.array(train_x)
-        self.train_y = (train_y - self.y_mean) / self.y_std
+        # Store standardized training data (residuals if mean_func provided)
+        self.train_y = (residuals - self.y_mean) / self.y_std
         log.debug(f"GP training size = {self.train_x.shape[0]}")
 
     def _setup_kernel_variance_prior(self, kernel_variance_prior):
@@ -366,12 +386,18 @@ class GP:
     
     def predict_mean_single(self,x):
         """
-        Single point prediction of mean
+        Single point prediction of mean.
+        If mean_func is provided, returns mean_func(x) + GP_residual(x).
         """
         x = jnp.atleast_2d(x)
         k12 = self.kernel.covariance(self.train_x, x, include_noise=False) # shape (N,1)
-        mean = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean
-        return mean 
+        gp_residual = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean
+        
+        if self.mean_func is not None:
+            # mean_func takes a 1D point (D,) and returns a scalar
+            mean_contribution = self.mean_func(x.squeeze())
+            return gp_residual + mean_contribution
+        return gp_residual 
     
     def predict_var_single(self,x):
         x = jnp.atleast_2d(x)
@@ -383,8 +409,12 @@ class GP:
         return self.y_std**2 * var.squeeze()
     
     def predict_mean_batched(self,x):
+        """
+        Batched prediction of mean.
+        Uses vmap over predict_mean_single for consistency.
+        """
         x = jnp.atleast_2d(x)
-        return jax.vmap(self.predict_mean_single, in_axes=0)(x)
+        return jax.vmap(self.predict_mean_single)(x)
     
     def predict_var_batched(self,x):
         x = jnp.atleast_2d(x)
@@ -462,16 +492,32 @@ class GP:
             
             # Add to training data
             self.train_x = jnp.vstack([self.train_x, new_pts_to_add])
-            train_y_original = jnp.vstack([self.train_y * self.y_std + self.y_mean, new_vals_to_add])
             
-            self.y_mean = jnp.mean(train_y_original)
-            self.y_std = jnp.std(train_y_original)
+            # Reconstruct un-standardized residuals for old data
+            old_residuals = self.train_y * self.y_std + self.y_mean
+            
+            # For new data, compute residuals if mean_func is provided
+            if self.mean_func is not None:
+                mean_vals = self.mean_func(new_pts_to_add)
+                if hasattr(mean_vals, 'shape') and mean_vals.ndim == 1:
+                    mean_vals = mean_vals.reshape(-1, 1)
+                elif not hasattr(mean_vals, 'shape'):
+                    mean_vals = jnp.array([[mean_vals]])
+                new_residuals = new_vals_to_add - mean_vals
+            else:
+                new_residuals = new_vals_to_add
+            
+            # Combine old and new residuals
+            all_residuals = jnp.vstack([old_residuals, new_residuals])
+            
+            self.y_mean = jnp.mean(all_residuals)
+            self.y_std = jnp.std(all_residuals)
             
             if self.y_std == 0:
                 log.warning("Training targets have zero variance. Setting std to 1.0 to avoid division by zero.")
                 self.y_std = 1.0
             
-            self.train_y = (train_y_original - self.y_mean) / self.y_std
+            self.train_y = (all_residuals - self.y_mean) / self.y_std
 
             self.recompute_cholesky()
 
@@ -561,7 +607,7 @@ class GP:
         state = {
             # Training data (original, unstandardized)
             'train_x': np.array(self.train_x),
-            'train_y': np.array(self.train_y * self.y_std + self.y_mean),  # unstandardize
+            'train_y': np.array(self.train_y * self.y_std + self.y_mean),  # unstandardize (residuals if mean_func)
             
             # Hyperparameters
             'lengthscales': np.array(self.lengthscales),
@@ -592,6 +638,9 @@ class GP:
             
             # Dimensions
             'ndim': self.ndim,
+            
+            # Mean function flag
+            'has_mean_func': self.mean_func is not None,
             
             # Class identifier
             'gp_class': 'GP'
@@ -638,7 +687,26 @@ class GP:
         if state['alphas'] is not None:
             gp.alphas = jnp.array(state['alphas'])
         
+        # Note: has_mean_func flag indicates the GP was trained with a mean function.
+        # The mean_func itself must be re-attached via set_mean_func() after loading.
+        gp._had_mean_func = state.get('has_mean_func', False)
+        
         return gp
+    
+    def set_mean_func(self, mean_func):
+        """
+        Set or update the mean function for the GP.
+        
+        This is used to re-attach a mean function after loading a GP from disk,
+        since callables cannot be serialized.
+        
+        Parameters
+        ----------
+        mean_func : callable or None
+            Mean function that takes x (unit cube) and returns prior mean values.
+        """
+        self.mean_func = mean_func
+        log.info(f"Mean function {'set' if mean_func is not None else 'cleared'}")
     
     @classmethod
     def load(cls, filename, **kwargs):

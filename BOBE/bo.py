@@ -9,7 +9,7 @@ from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import Likelihood, CobayaLikelihood
 from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
-from .transforms import ParameterTransform, BaseTransform, IdentityTransform, RotationTransform, NormalisingFlowTransform, load_transform
+from .transforms import ParameterTransform, BaseTransform, BoxTransform, load_transform
 from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng, get_new_jax_key
 from .samplers import nested_sampling_Dy, sample_GP_NUTS
 from .utils.log import get_logger, update_verbosity
@@ -91,7 +91,7 @@ def get_dimension_based_defaults(ndim: int):
         'num_chains': min(6, max(3,jax.device_count())),  # 3-6 chains depending on available devices
         'fit_n_points': min(50, 2*ndim),  # refit less often for higher dimensions
         'logz_threshold': 0.01 + 0.01*(ndim/6) if ndim<=6 else min(1.,0.1 + 0.1*(ndim/6)**2),  # looser threshold for higher dimensions
-        'transform_acq_threshold': 4 * (ndim/15)
+        'flow_acq_threshold': 4 * (ndim/15)  # min acquisition value to trigger flow training
     }
     return defaults
 
@@ -123,7 +123,11 @@ class BOBE:
                  minus_inf=-1e10,
                  seed: Optional[int] = None,
                  verbosity: str = 'INFO',
-                 transform: Optional[BaseTransform] = None,
+                 use_flow_mean: bool = False,
+                 flow_acq_threshold: float = 0.1,
+                 flow_kl_threshold: float = 1.0,
+                 flow_retrain_step: Optional[int] = None,
+                 flow_kwargs: Dict[str, Any] = {},
                  ):
         """
         Initialize the BOBE (Bayesian Optimization for Bayesian Evidence) sampler.
@@ -192,27 +196,28 @@ class BOBE:
             Random seed for reproducibility. Default is None.
         verbosity : str, optional
             Logging verbosity level: 'DEBUG', 'INFO', 'WARNING', 'ERROR'. Default is 'INFO'.
-        transform : BaseTransform instance, subclass, (subclass, kwargs), or None
-            Parameter-space transform.  Three forms accepted:
-
-            * ``None`` (default) — ``IdentityTransform`` (no transform).
-            * A ``BaseTransform`` *subclass* — instantiated with ``param_bounds``
-              from the likelihood; settings use the class defaults.
-            * A ``(subclass, kwargs_dict)`` *tuple* — instantiated with
-              ``param_bounds`` + ``**kwargs``.  This is the recommended form
-              because it keeps all transform settings in one place without
-              requiring ``param_bounds`` at call-site::
-
-                  transform=(RotationTransform, {'kl_threshold': 0.5,
-                                                 'max_updates': 5,
-                                                 'update_step': 25})
-
-                  transform=(NormalisingFlowTransform, {'kl_threshold': 1.0,
-                                                        'max_updates': 3,
-                                                        'update_step': 20})
-
-            * A pre-built ``BaseTransform`` *instance* — used as-is (bounds
-              must already be set).
+        use_flow_mean : bool, optional
+            Whether to use a normalizing flow as the GP mean function. When enabled,
+            once acquisition value drops below `flow_acq_threshold`, a flow is trained
+            on current samples and used as a calibrated mean function for the GP.
+            The GP then fits residuals. Default is False.
+        flow_acq_threshold : float, optional
+            Acquisition value threshold below which flow training is triggered.
+            Default is 0.1.
+        flow_kl_threshold : float, optional
+            KL divergence threshold for flow updates. The flow is retrained when BOTH
+            the KL divergence exceeds this threshold AND sufficient iterations have passed
+            since the last training (see `flow_retrain_step`). Default is 1.0.
+        flow_retrain_step : int, optional
+            Number of iterations that must pass before considering flow retraining.
+            If None, KL divergence is checked every iteration. If specified, the flow
+            will only be retrained when BOTH conditions are met: (1) at least
+            `flow_retrain_step` iterations have passed since last training, AND
+            (2) KL divergence exceeds `flow_kl_threshold`. Default is None.
+        flow_kwargs : dict, optional
+            Keyword arguments for NormalisingFlow. Constructor params: `n_layers` (int),
+            `hidden_dim` (int), `nn_depth` (int). Training params: `n_epochs` (int),
+            `lr` (float), `batch_size` (int). Default is {}.
             
         Notes
         -----
@@ -240,23 +245,20 @@ class BOBE:
         )
         self.ndim = len(self.loglikelihood.param_list)
         
-        # Create the parameter transform (handles unit-cube scaling and optional rotation).
-        # Accepted forms for `transform`:
-        #   - BaseTransform instance  → used as-is
-        #   - BaseTransform subclass  → instantiated with param_bounds only
-        #   - (subclass, kwargs_dict) → instantiated with param_bounds + **kwargs
-        #     e.g. (RotationTransform, {'kl_threshold': 0.5, 'update_step': 25})
-        # This lets users configure the transform in one place without needing to
-        # know param_bounds up front (they are resolved from the likelihood).
-        if transform is None:
-            self.transform = IdentityTransform(self.loglikelihood.param_bounds)
-        elif isinstance(transform, tuple) and len(transform) == 2 and isinstance(transform[0], type):
-            cls, kwargs = transform
-            self.transform = cls(self.loglikelihood.param_bounds, **kwargs)
-        elif isinstance(transform, type):
-            self.transform = transform(self.loglikelihood.param_bounds)
-        else:
-            self.transform = transform
+        # Create the parameter transform (linear scaling to unit cube)
+        self.transform = BoxTransform(self.loglikelihood.param_bounds)
+        
+        # Flow mean function settings
+        self.use_flow_mean = use_flow_mean
+        self.flow_acq_threshold = flow_acq_threshold
+        self.flow_kl_threshold = flow_kl_threshold
+        self.flow_retrain_step = flow_retrain_step
+        self.flow_kwargs = flow_kwargs
+        self.flow = None  # Will be created when needed
+        self.flow_trained = False
+        self.flow_last_trained_iter = -1  # Tracks when flow was last trained
+        self.flow_prev_hmc_mean = None  # HMC mean when flow was last trained
+        self.flow_prev_hmc_cov = None   # HMC covariance when flow was last trained
         
         if not self.is_main:
             # Workers only need likelihood and seed - everything else is handled in worker_wait
@@ -403,7 +405,9 @@ class BOBE:
         """Delegate checkpoint serialisation to the results manager."""
         if not self.is_main or not self.save:
             return
-        self.results_manager.save_checkpoint({
+        
+        # Build checkpoint data
+        checkpoint_data = {
             'gp_state':              self.gp.state_dict(),
             'use_clf':               isinstance(self.gp, GPwithClassifier),
             'transform_state':       self.transform.state_dict(),
@@ -418,10 +422,23 @@ class BOBE:
             'converged':             getattr(self, 'converged', False),
             'termination_reason':    getattr(self, 'termination_reason', ''),
             'prev_samples':          getattr(self, 'prev_samples', None),
-        })
-        # Persist flow weights separately (not serialisable in the pkl dict)
-        if isinstance(self.transform, NormalisingFlowTransform) and self.transform._use_flow:
-            self.transform.save(self.save_path)
+            # Flow mean function state
+            'use_flow_mean':         self.use_flow_mean,
+            'flow_trained':          getattr(self, 'flow_trained', False),
+            'flow_acq_threshold':    self.flow_acq_threshold,
+            'flow_kl_threshold':     self.flow_kl_threshold,
+            'flow_retrain_step':     self.flow_retrain_step,
+            'flow_last_trained_iter': getattr(self, 'flow_last_trained_iter', -1),
+            'flow_prev_hmc_mean':    getattr(self, 'flow_prev_hmc_mean', None),
+            'flow_prev_hmc_cov':     getattr(self, 'flow_prev_hmc_cov', None),
+            'flow_kwargs':           self.flow_kwargs,
+        }
+        
+        # Save flow state separately if trained
+        if self.flow_trained and self.flow is not None:
+            checkpoint_data['flow_state'] = self.flow.state_dict()
+        
+        self.results_manager.save_checkpoint(checkpoint_data)
 
     def _handle_resume(self, resume_file, use_clf):
         """Load a checkpoint via the results manager and restore all BO state."""
@@ -435,25 +452,38 @@ class BOBE:
         _ = self.gp.predict_mean_single(self.gp.train_x[0])
         log.info(f"Loaded GP with {self.gp.train_x.shape[0]} training points")
 
-        # Restore transform
+        # Restore transform (always BoxTransform now)
         ts = data.get('transform_state', {})
-        type_key = ts.get('type', IdentityTransform._TYPE_KEY)
-        if type_key == RotationTransform._TYPE_KEY:
-            self.transform = RotationTransform.from_state_dict(ts)
-        elif type_key == NormalisingFlowTransform._TYPE_KEY:
-            self.transform = NormalisingFlowTransform.from_state_dict(ts)
-            # Reload trained flow weights if they were saved alongside the checkpoint
-            flow_pkl = resume_file + '_flow.pkl'
-            if self.transform._use_flow and os.path.exists(flow_pkl):
-                import pickle as _pickle
-                from .flow import NormalisingFlow
-                with open(flow_pkl, 'rb') as _f:
-                    _flow_state = _pickle.load(_f)
-                self.transform._flow = NormalisingFlow.from_state_dict(_flow_state)
-                log.info(f"Loaded flow weights from {flow_pkl}")
-        else:
-            self.transform = IdentityTransform.from_state_dict(ts)
+        self.transform = BoxTransform.from_state_dict(ts)
         log.info(f"Restored transform: {self.transform!r}")
+
+        # Restore flow mean function if it was trained
+        self.flow_trained = data.get('flow_trained', False)
+        self.flow_last_trained_iter = int(data.get('flow_last_trained_iter', -1))
+        
+        # Restore flow HMC statistics (ensure they're numpy arrays if not None)
+        flow_prev_hmc_mean = data.get('flow_prev_hmc_mean', None)
+        self.flow_prev_hmc_mean = np.array(flow_prev_hmc_mean) if flow_prev_hmc_mean is not None else None
+        flow_prev_hmc_cov = data.get('flow_prev_hmc_cov', None)
+        self.flow_prev_hmc_cov = np.array(flow_prev_hmc_cov) if flow_prev_hmc_cov is not None else None
+        
+        if self.flow_trained:
+            log.info(f"Flow was last trained at iteration {self.flow_last_trained_iter}")
+            if self.flow_prev_hmc_mean is not None:
+                log.info(f"Restored HMC statistics for flow KL divergence tracking")
+        
+        if self.flow_trained and 'flow_state' in data:
+            from .flow import NormalisingFlow
+            self.flow = NormalisingFlow.from_state_dict(data['flow_state'])
+            log.info(f"Restored flow mean function (calibrated={self.flow.is_calibrated})")
+            
+            # Re-attach mean function to GP
+            if self.flow.is_calibrated:
+                def flow_mean_func(x_unit):
+                    x_phys = np.atleast_2d(self.transform.from_unit(x_unit))
+                    return self.flow.calibrated_log_prob(x_phys)
+                self.gp.set_mean_func(flow_mean_func)
+                log.info("Re-attached flow mean function to GP")
 
         # Restore physical training data
         self.all_train_x_phys = np.array(data.get('all_train_x_phys', np.empty((0, self.ndim))))
@@ -479,6 +509,86 @@ class BOBE:
 
         log.info(f"Resuming from iteration {self.start_iteration}, best logL={self.best_f:.4f}")
         self.fresh_start = False
+    
+    def _train_and_attach_flow_mean(self):
+        """
+        Train (or retrain) the normalizing flow and attach it as GP mean function.
+        
+        Uses the current HMC samples (`mc_samples`) to train a flow that approximates
+        the posterior distribution. The flow is calibrated using the best fit point
+        from true likelihood evaluations, then attached to the GP as a mean function
+        so the GP fits residuals.
+        """
+        from .flow import NormalisingFlow
+        
+        # Get HMC samples in physical space (already posterior-weighted)
+        mc_x_unit = np.array(self.mc_samples['x'])
+        mc_x_phys = np.asarray(self.transform.from_unit(mc_x_unit))
+        n_samples = len(mc_x_phys)
+        
+        log.info(f"[Flow] Training flow on {n_samples} HMC posterior samples")
+        
+        # Default flow kwargs (use flow.py parameter names)
+        flow_kwargs = {
+            'n_layers': 8,
+            'hidden_dim': 64,
+            'n_epochs': 2000,
+            'lr': 1e-3,
+            'batch_size': min(256, max(32, n_samples // 4)),
+        }
+        if self.flow_kwargs:
+            flow_kwargs.update(self.flow_kwargs)
+        
+        # Extract constructor params and create flow
+        n_layers = flow_kwargs.pop('n_layers', 8)
+        hidden_dim = flow_kwargs.pop('hidden_dim', 64)
+        nn_depth = flow_kwargs.pop('nn_depth', 2)
+        
+        self.flow = NormalisingFlow(
+            ndim=self.ndim,
+            n_layers=n_layers,
+            hidden_dim=hidden_dim,
+            nn_depth=nn_depth,
+        )
+        
+        # Train flow on HMC samples (no weighting needed - already from posterior)
+        self.flow.fit(
+            mc_x_phys,
+            verbose=True,
+            **flow_kwargs
+        )
+        
+        # Calibrate flow using best fit point from true likelihood evaluations
+        best_logl = float(self.best_f)
+        best_pt_phys = self.best_pt
+        
+        self.flow.calibrate(best_pt_phys, best_logl)
+        log.info(f"[Flow] Calibrated at best fit: logL={best_logl:.4f}")
+        
+        # Create mean function wrapper for GP
+        def flow_mean_func(x_unit: np.ndarray) -> np.ndarray:
+            x_phys = self.transform.from_unit(x_unit)
+            return self.flow.calibrated_log_prob(x_phys)
+        
+        # Attach to GP and rebuild training data
+        self.gp.set_mean_func(flow_mean_func)
+        self.flow_trained = True
+        self.flow_last_trained_iter = self.current_iteration
+        
+        # Store current HMC statistics for future comparison
+        weights = self.mc_samples.get('weights', None)
+        if weights is not None:
+            w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
+            w /= w.sum()
+            self.flow_prev_hmc_mean = np.average(mc_x_phys, weights=w, axis=0)
+            diff = mc_x_phys - self.flow_prev_hmc_mean
+            self.flow_prev_hmc_cov = (diff * w[:, None]).T @ diff
+        else:
+            self.flow_prev_hmc_mean = mc_x_phys.mean(axis=0)
+            self.flow_prev_hmc_cov = np.cov(mc_x_phys.T)
+        self.flow_prev_hmc_cov = 0.5 * (self.flow_prev_hmc_cov + self.flow_prev_hmc_cov.T) + 1e-10 * np.eye(self.ndim)
+        
+        log.info(f"[Flow] Attached flow as GP mean function at iteration {self.current_iteration}")
     
     def _handle_fresh_start(self, n_cobaya_init, n_sobol_init, init_train_x, init_train_y,
                            use_clf, clf_type, clf_use_size, clf_update_step,
@@ -1186,8 +1296,6 @@ class BOBE:
             num_chains: Optional[int] = None,
             mc_points_method: str = 'NUTS',
             zeta_ei: float = 0.0,
-            transform_update_min_evals: Optional[int] = None,
-            transform_acq_threshold: Optional[float] = None,
             kl_convergence_threshold: float = 0.1):
         """
         Run the Bayesian Optimization loop.
@@ -1241,15 +1349,8 @@ class BOBE:
             Method for generating MC points: 'NUTS', 'NS', or 'uniform'. Default is 'NUTS'.
         zeta_ei : float, optional
             Exploration parameter for EI acquisition. Default is 0.0.
-        transform_update_min_evals : int, optional
-            Minimum number of likelihood evaluations before the first transform update
-            is attempted. Defaults to ``min_evals`` when not set.
-        transform_acq_threshold : float, optional
-            Acquisition value below which transform updates are triggered.  Reads from
-            ``self.transform.acq_threshold`` when that attribute exists, otherwise falls
-            back to the dimension-based default from
-            ``get_dimension_based_defaults()['transform_acq_threshold']``.
-            Pass explicitly to override both.
+        kl_convergence_threshold : float, optional
+            KL divergence threshold for convergence checking. Default is 0.1.
             
         Returns
         -------
@@ -1275,12 +1376,6 @@ class BOBE:
         mc_points_size = mc_points_size if mc_points_size is not None else dim_defaults['mc_points_size']
         num_chains = num_chains if num_chains is not None else dim_defaults['num_chains']
         logz_threshold = logz_threshold if logz_threshold is not None else dim_defaults['logz_threshold']
-        # transform_acq_threshold: explicit arg > transform attribute > dimension default
-        if transform_acq_threshold is None:
-            transform_acq_threshold = getattr(self.transform, 'acq_threshold', None)
-        if transform_acq_threshold is None:
-            transform_acq_threshold = dim_defaults['transform_acq_threshold']
-        transform_update_min_evals = transform_update_min_evals if transform_update_min_evals is not None else min_evals
         
         # Store convergence parameters
         self.min_evals = min_evals
@@ -1359,18 +1454,7 @@ class BOBE:
         self.hmc_num_chains = num_chains
         self.mc_points_method = mc_points_method
         self.zeta_ei = zeta_ei
-
-        # Transform update scheduling (BO-loop concerns; transform internals live on the object)
-        self.transform_update_min_evals = transform_update_min_evals
-        self.transform_acq_threshold    = transform_acq_threshold
         self.kl_convergence_threshold   = kl_convergence_threshold
-
-        if hasattr(self.transform, 'update_count') and self.transform.update_count > 0:
-            log.info(
-                f"Resuming with transform state: count={self.transform.update_count}, "
-                f"last_ii={self.transform.last_update_ii}, "
-                f"last_acq_val={self.transform.last_update_acq_val}"
-            )
 
         # Adjust batch_size for MPI load balancing
         if self.is_mpi:
@@ -1410,9 +1494,11 @@ class BOBE:
             'num_chains': num_chains,
             'mc_points_method': mc_points_method,
             'zeta_ei': zeta_ei,
-            'transform_update_min_evals': transform_update_min_evals,
-            'transform_acq_threshold': transform_acq_threshold,
             'kl_convergence_threshold': kl_convergence_threshold,
+            'use_flow_mean': self.use_flow_mean,
+            'flow_acq_threshold': self.flow_acq_threshold,
+            'flow_kl_threshold': self.flow_kl_threshold,
+            'flow_retrain_step': self.flow_retrain_step,
         })
         
         acqs_funcs_available = list(_acq_funcs.keys())
@@ -1574,27 +1660,74 @@ class BOBE:
             if ii % self.save_step == 0:
                 self._save_checkpoint()
 
-            # Attempt transform update (no-op for IdentityTransform; RotationTransform
-            # and NormalisingFlowTransform handle all trigger guard logic internally)
-            if current_evals >= self.transform_update_min_evals:
-                did_update = self.transform.update(
-                    gp=self.gp,
-                    mc_samples=self.mc_samples,
-                    acq_val=float(acq_vals[-1]),
-                    acq_threshold=self.transform_acq_threshold,
-                    best_pt=self.best_pt,
-                    all_x_phys=self.all_train_x_phys,
-                    all_y_raw=self.all_train_y_raw,
-                    step=ii,
-                )
-                if did_update:
-                    self.mc_samples = self.transform.updated_mc_samples
-                    # Warm-start refit GP in the new rotated space
+            # Flow mean function training/update
+            if self.use_flow_mean:
+                acq_val = float(acq_vals[-1])
+                should_train_flow = False
+                
+                if not self.flow_trained:
+                    # First time: train flow when acquisition is low enough
+                    if acq_val < self.flow_acq_threshold:
+                        should_train_flow = True
+                        log.info(f"[Flow] Triggering initial flow training (acq={acq_val:.4f} < {self.flow_acq_threshold})")
+                else:
+                    # Flow already trained: check if BOTH conditions are met for retraining
+                    # Condition 1: Enough iterations have passed
+                    # Condition 2: KL divergence exceeds threshold
+                    
+                    # Check if we should consider retraining (based on iterations)
+                    should_check_kl = False
+                    if self.flow_retrain_step is not None:
+                        steps_since_last_training = ii - self.flow_last_trained_iter
+                        if steps_since_last_training >= self.flow_retrain_step:
+                            should_check_kl = True
+                            log.info(f"[Flow] {steps_since_last_training} steps since last training (>= {self.flow_retrain_step})")
+                    else:
+                        # If no periodic retraining step specified, always check KL
+                        should_check_kl = True
+                    
+                    # Only check KL divergence if enough iterations have passed
+                    if should_check_kl and self.flow_prev_hmc_mean is not None:
+                        # Compute Gaussian approximation of current HMC samples in physical space
+                        mc_x_unit = np.array(self.mc_samples['x'])
+                        mc_x_phys = np.asarray(self.transform.from_unit(mc_x_unit))
+                        
+                        weights = self.mc_samples.get('weights', None)
+                        if weights is not None:
+                            w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
+                            w /= w.sum()
+                            current_hmc_mean = np.average(mc_x_phys, weights=w, axis=0)
+                            diff = mc_x_phys - current_hmc_mean
+                            current_hmc_cov = (diff * w[:, None]).T @ diff
+                        else:
+                            current_hmc_mean = mc_x_phys.mean(axis=0)
+                            current_hmc_cov = np.cov(mc_x_phys.T)
+                        current_hmc_cov = 0.5 * (current_hmc_cov + current_hmc_cov.T) + 1e-10 * np.eye(self.ndim)
+                        
+                        # Compare current HMC samples against previous HMC samples (when flow was last trained)
+                        try:
+                            kl_dict = kl_divergence_gaussian(
+                                self.flow_prev_hmc_mean, self.flow_prev_hmc_cov,
+                                current_hmc_mean, current_hmc_cov
+                            )
+                            kl_sym = float(kl_dict['symmetric'])
+                            log.info(f"[Flow] KL(prev_HMC||current_HMC) = {kl_sym:.4f} (threshold={self.flow_kl_threshold})")
+                            
+                            if kl_sym > self.flow_kl_threshold:
+                                should_train_flow = True
+                                log.info("[Flow] Retraining flow: sufficient iterations passed AND KL exceeds threshold")
+                            else:
+                                log.info(f"[Flow] KL below threshold, skipping retraining")
+                        except Exception as e:
+                            log.warning(f"[Flow] KL computation failed: {e}")
+                
+                if should_train_flow:
+                    self._train_and_attach_flow_mean()
+                    # Refit GP with new mean function
                     self.results_manager.start_timing('GP Training')
                     self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500,
                                      rng=self.np_rng, use_pool=True)
                     self.results_manager.end_timing('GP Training')
-                    # Persist everything in the single checkpoint
                     self._save_checkpoint()
 
             # Check convergence via acquisition value + consecutive KL divergence

@@ -1,9 +1,10 @@
-"""
-Planck + DESI LCDM run with continuous Normalising Flow transform.
+"""Planck + DESI LCDM run with flow-based GP mean function.
 
-A Real-NVP flow is trained on HMC samples once the acquisition value drops
-below ``transform_acq_threshold`` and then refreshed every ``update_step``
-iterations, progressively warping the GP's unit cube to match the posterior.
+A normalizing flow is trained on likelihood-weighted samples once the
+acquisition value drops below ``flow_acq_threshold``. The flow's calibrated
+log-probability is used as the GP mean function so that the GP fits residuals.
+The flow is retrained when the KL divergence between flow and HMC samples
+exceeds ``flow_kl_threshold``.
 """
 
 import os
@@ -14,7 +15,6 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
 )
 
 from BOBE import BOBE
-from BOBE.transforms import NormalisingFlowTransform
 from BOBE.utils.core import scale_from_unit
 import time
 import matplotlib.pyplot as plt
@@ -40,7 +40,7 @@ def main():
 
     start = time.time()
     print("\n" + "=" * 80)
-    print("Starting BOBE run WITH Normalising Flow transform...")
+    print("Starting BOBE run WITH flow-based GP mean function...")
     print("=" * 80)
 
     bobe = BOBE(
@@ -52,22 +52,23 @@ def main():
         save_dir='./results/LCDM_Flow/',
         save=True,
         verbosity='INFO',
-        n_cobaya_init=8,
-        n_sobol_init=32,
+        n_cobaya_init=16,
+        n_sobol_init=64,
         use_clf=True,
         clf_type='svm',
         minus_inf=-1e5,
         seed=seed,
-        # Pass transform as (class, kwargs): BOBE resolves param_bounds from the
-        # likelihood and calls NormalisingFlowTransform(param_bounds, **kwargs).
-        transform=(NormalisingFlowTransform, {
-            'kl_threshold': 0.5,   # min KL between old/new posteriors to trigger update
-            'max_updates': 5,       # stop after 5 flow re-fits
-            'update_step': 50,      # minimum BO iterations between consecutive re-fits
+        # Flow mean function settings: train flow when acquisition is low,
+        # retrain when KL divergence between flow and HMC samples is high
+        use_flow_mean=True,
+        flow_acq_threshold=1.0,   # acquisition value below which flow training triggers
+        flow_kl_threshold=0.5,    # KL divergence threshold for retraining
+        flow_kwargs={
             'n_layers': 8,
             'hidden_dim': 64,
-            'flow_n_epochs': 2000,
-        }),
+            'n_epochs': 2000,
+        },
+        flow_retrain_step=5,
     )
 
     results = bobe.run(
@@ -84,8 +85,6 @@ def main():
         logz_threshold=0.2,
         num_chains=8,
         do_final_ns=False,
-        # acquisition value below which a flow update is attempted
-        transform_acq_threshold=1.0,
     )
 
     end = time.time()
@@ -104,11 +103,11 @@ def main():
         manual_timing = end - start
 
         print("\n" + "=" * 80)
-        print("RUN COMPLETED WITH NORMALISING FLOW TRANSFORM")
+        print("RUN COMPLETED WITH FLOW-BASED GP MEAN FUNCTION")
         print("=" * 80)
         print(f"Total runtime: {manual_timing:.2f}s ({manual_timing / 60:.2f} min)")
         print(f"Number of GP training points: {gp.train_x.shape[0]}")
-        print(f"Flow update count: {bobe.transform.update_count}")
+        print(f"Flow trained: {bobe.flow_trained}")
 
         sample_array = samples['x']
         weights_array = samples['weights']
@@ -172,7 +171,7 @@ def main():
         ax.set_yscale('log')
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Acquisition Value')
-        ax.set_title('Acquisition Function Values (with flow transform)')
+        ax.set_title('Acquisition Function Values (with flow mean)')
         ax.grid(True, alpha=0.3)
         plt.savefig(f'./results/LCDM_Flow/{likelihood_name}_acquisition.pdf', bbox_inches='tight')
 
