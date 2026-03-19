@@ -72,7 +72,7 @@ def main():
         logz_threshold=0.025,
         do_final_ns=False,
         # acquisition value below which a flow update is attempted
-        transform_acq_threshold=0.5,
+        transform_acq_threshold=4.,
     )
 
     end = time.time()
@@ -99,7 +99,7 @@ def main():
         print(f"Runtime: {manual_timing:.2f}s ({manual_timing / 60:.2f} min)")
 
         reference_samples = loadMCSamples(
-            './cosmo_input/chains/Planck_lite_pchord',
+            './cosmo_input/chains/Planck_lite_LCDM',
         )
 
         sample_array = samples['x']

@@ -746,6 +746,7 @@ class NormalisingFlowTransform(BaseTransform):
         # flow architecture
         n_layers: int = 8,
         hidden_dim: int = 64,
+        nn_depth: int = 2,
         flow_n_epochs: int = 2000,
         flow_lr: float = 3e-4,
         flow_batch_size: int = 512,
@@ -766,11 +767,13 @@ class NormalisingFlowTransform(BaseTransform):
             Minimum BO iterations between consecutive updates. None disables
             secondary updates.
         n_layers : int
-            Number of Real NVP coupling layers.
+            Number of MAF flow layers.
         hidden_dim : int
-            Hidden layer width in each coupling network.
+            Hidden layer width in each autoregressive network.
+        nn_depth : int
+            Depth of each autoregressive network. Default 2.
         flow_n_epochs : int
-            Training epochs for each flow fit.
+            Maximum training epochs for each flow fit.
         flow_lr : float
             Peak Adam learning rate for flow training.
         flow_batch_size : int
@@ -782,7 +785,7 @@ class NormalisingFlowTransform(BaseTransform):
             from .flow import NormalisingFlow as _NF  # noqa: F401
         except ImportError as exc:
             raise ImportError(
-                "NormalisingFlowTransform requires flax and optax. "
+                "NormalisingFlowTransform requires flowjax and equinox. "
                 "Install with:  pip install BOBE[nn]"
             ) from exc
 
@@ -798,6 +801,7 @@ class NormalisingFlowTransform(BaseTransform):
         self.update_step = update_step
         self.n_layers = int(n_layers)
         self.hidden_dim = int(hidden_dim)
+        self.nn_depth = int(nn_depth)
         self.flow_n_epochs = int(flow_n_epochs)
         self.flow_lr = float(flow_lr)
         self.flow_batch_size = int(flow_batch_size)
@@ -948,6 +952,7 @@ class NormalisingFlowTransform(BaseTransform):
             ndim=self._ndim,
             n_layers=self.n_layers,
             hidden_dim=self.hidden_dim,
+            nn_depth=self.nn_depth,
             n_sigma=self.n_sigma,
             seed=self.seed + self.update_count,
         )
@@ -1060,6 +1065,7 @@ class NormalisingFlowTransform(BaseTransform):
             "update_step": (self.update_step if self.update_step is not None else -1),
             "n_layers": self.n_layers,
             "hidden_dim": self.hidden_dim,
+            "nn_depth": self.nn_depth,
             "flow_n_epochs": self.flow_n_epochs,
             "flow_lr": self.flow_lr,
             "flow_batch_size": self.flow_batch_size,
@@ -1123,6 +1129,7 @@ class NormalisingFlowTransform(BaseTransform):
         obj.update_step = None if int(_us) == -1 else int(_us)
         obj.n_layers = int(state.get("n_layers", 8))
         obj.hidden_dim = int(state.get("hidden_dim", 64))
+        obj.nn_depth = int(state.get("nn_depth", 2))
         obj.flow_n_epochs = int(state.get("flow_n_epochs", 2000))
         obj.flow_lr = float(state.get("flow_lr", 3e-4))
         obj.flow_batch_size = int(state.get("flow_batch_size", 512))
