@@ -521,9 +521,9 @@ class BOBE:
         """
         Fit a Gaussian approximation to the posterior and attach it as GP mean function.
         
-        Uses the current HMC samples to fit a multivariate Gaussian around the posterior mode.
-        The Gaussian is calibrated using the best fit point from true likelihood evaluations,
-        then attached to the GP as a mean function so the GP fits residuals.
+        Uses the best-fit point from the training set as the center, and computes the
+        covariance from HMC samples around their own mean (to get the shape). This avoids
+        inflating the covariance when HMC mean and best-fit point differ.
         """
         # Get HMC samples in physical space (already posterior-weighted)
         mc_x_unit = np.array(self.mc_samples['x'])
@@ -532,17 +532,26 @@ class BOBE:
         
         log.info(f"[Gaussian Mean] Fitting Gaussian to {n_samples} HMC posterior samples")
         
-        # Compute weighted mean and covariance from HMC samples
+        # Use best-fit point from training set as the Gaussian center
+        gaussian_mean = self.best_pt.copy()
+        log.info(f"[Gaussian Mean] Centering Gaussian at best-fit point (logL={self.best_f:.4f})")
+        
+        # Compute weighted covariance from HMC samples AROUND THE BEST-FIT POINT
+        # (covariance must be computed around the same center where Gaussian is placed)
         weights = self.mc_samples.get('weights', None)
         if weights is not None:
             w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
             w /= w.sum()
-            gaussian_mean = np.average(mc_x_phys, weights=w, axis=0)
-            diff = mc_x_phys - gaussian_mean
+            hmc_mean = np.average(mc_x_phys, weights=w, axis=0)
+            diff = mc_x_phys - gaussian_mean  # Deviations from best-fit point!
             gaussian_cov = (diff * w[:, None]).T @ diff
         else:
-            gaussian_mean = mc_x_phys.mean(axis=0)
-            gaussian_cov = np.cov(mc_x_phys.T)
+            hmc_mean = mc_x_phys.mean(axis=0)
+            diff = mc_x_phys - gaussian_mean
+            gaussian_cov = (diff.T @ diff) / len(mc_x_phys)
+        
+        log.info(f"[Gaussian Mean] HMC sample mean offset from best-fit: "
+                f"{np.linalg.norm(hmc_mean - gaussian_mean):.4e}")
         
         # Ensure covariance is symmetric and well-conditioned
         gaussian_cov = 0.5 * (gaussian_cov + gaussian_cov.T) + 1e-10 * np.eye(self.ndim)
@@ -554,17 +563,13 @@ class BOBE:
         # Compute normalization constant: -0.5 * (d*log(2π) + log|Σ|)
         log_norm_const = -0.5 * (self.ndim * np.log(2 * np.pi) + logdet)
         
-        # Compute Gaussian log-pdf at best fit point
-        best_pt_phys = self.best_pt
-        diff_best = best_pt_phys - gaussian_mean
-        gaussian_logp = log_norm_const - 0.5 * (diff_best @ gaussian_cov_inv @ diff_best)
-        
-        # Calibrate by computing offset to match true log-likelihood at best point
+        # Since Gaussian is centered at best-fit point, log-pdf at center is just log_norm_const
+        # Calibrate to match true log-likelihood at best point
         best_logl = float(self.best_f)
-        calibration_offset = best_logl - gaussian_logp
+        calibration_offset = best_logl - log_norm_const
         
-        log.info(f"[Gaussian Mean] Calibrated at best fit: logL={best_logl:.4f}, "
-                f"gaussian_logp={gaussian_logp:.4f}, offset={calibration_offset:.4f}")
+        log.info(f"[Gaussian Mean] Calibrated: logL={best_logl:.4f}, "
+                f"log_norm={log_norm_const:.4f}, offset={calibration_offset:.4f}")
         
         # Store Gaussian parameters for the mean function (convert to JAX arrays)
         self.gaussian_mean = jnp.array(gaussian_mean)
@@ -587,8 +592,8 @@ class BOBE:
         self.flow_trained = True  # Keep variable name for compatibility with checkpointing
         self.flow_last_trained_iter = self.current_iteration
         
-        # Store current HMC statistics for future comparison
-        self.flow_prev_hmc_mean = gaussian_mean.copy()
+        # Store current HMC statistics for future comparison (use HMC mean for KL tracking)
+        self.flow_prev_hmc_mean = hmc_mean.copy()
         self.flow_prev_hmc_cov = gaussian_cov.copy()
         
         log.info(f"[Gaussian Mean] Attached Gaussian mean function at iteration {self.current_iteration}")

@@ -50,7 +50,7 @@ def main():
         # retrain when KL divergence between consecutive HMC samples is high
         use_flow_mean=True,
         flow_acq_threshold=2.0,   # acquisition value below which mean training triggers
-        flow_kl_threshold=0.5,    # KL divergence threshold for retraining
+        flow_kl_threshold=1.,    # KL divergence threshold for retraining
         flow_retrain_step=3,
     )
 
@@ -65,8 +65,8 @@ def main():
         num_hmc_warmup=256,
         num_hmc_samples=5000,
         mc_points_size=512,
-        logz_threshold=0.01,
-        do_final_ns=True,
+        logz_threshold=0.05,
+        do_final_ns=False,
     )
 
     end = time.time()
