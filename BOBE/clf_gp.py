@@ -27,7 +27,8 @@ class GPwithClassifier(GP):
                  lengthscales=None, kernel_variance=1.0,
                  param_names=None,
                  train_clf_on_init=True,  # Prevent retraining on copy
-                 mean_func=None,  # Mean function for GP
+                 kernel_rotation_matrix=None,  # Quadratic mean function
+                 kernel_rotation_center=None,  # Quadratic mean function center
                  ):
         """
         Generic Classifier-GP class combining a GP with a classifier. The GP is trained on the data points
@@ -58,6 +59,10 @@ class GPwithClassifier(GP):
             Threshold for adding points to the GP training set. Default is 5000.
         noise, kernel, optimizer, kernel_variance_bounds, lengthscale_bounds, lengthscale_priors, lengthscales, kernel_variance:
             GP parameters (see DSLP_GP/SAAS_GP). Note: bounds are now in actual space, not log10.
+        kernel_rotation_matrix : array-like, shape (D, D), optional
+            Whitening matrix for quadratic mean function. Default is None.
+        kernel_rotation_center : array-like, shape (D,), optional
+            Center for quadratic mean function. Default is None.
 
         """
         # Store Data and Classifier Settings
@@ -110,7 +115,8 @@ class GPwithClassifier(GP):
             'tausq': tausq,
             'tausq_bounds': tausq_bounds,
             'param_names': param_names,
-            'mean_func': mean_func,
+            'kernel_rotation_matrix': kernel_rotation_matrix,
+            'kernel_rotation_center': kernel_rotation_center,
         }
                     
         super().__init__(**gp_init_kwargs)
@@ -403,6 +409,8 @@ class GPwithClassifier(GP):
             tausq=state.get('tausq', 1.0),
             tausq_bounds=state.get('tausq_bounds', [-4, 4]),
             train_clf_on_init=state.get('train_clf_on_init', True),
+            kernel_rotation_matrix=state.get('kernel_rotation_matrix'),
+            kernel_rotation_center=state.get('kernel_rotation_center'),
         )
         
         # # Restore computed state if available

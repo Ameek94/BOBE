@@ -50,8 +50,8 @@ def main():
         # retrain when KL divergence between consecutive HMC samples is high
         use_flow_mean=True,
         flow_acq_threshold=2.0,   # acquisition value below which mean training triggers
-        flow_kl_threshold=0.5,    # KL divergence threshold for retraining
-        flow_retrain_step=3,
+        flow_kl_threshold=0.25,    # KL divergence threshold for retraining
+        flow_retrain_step=2,
     )
 
     results = bobe.run(
@@ -113,12 +113,15 @@ def main():
         filled_list = [True, False]
         contour_lws = [1, 1.5]
         
-        if bobe.flow_trained and hasattr(bobe, 'gaussian_mean'):
-            print("Drawing samples from fitted Gaussian...")
-            # Draw samples from Gaussian (in physical space)
-            gaussian_cov = np.linalg.inv(np.array(bobe.gaussian_cov_inv))
-            gaussian_samples = np.random.multivariate_normal(
-                np.array(bobe.gaussian_mean), gaussian_cov, size=5000
+        # Generate samples from the Gaussian approximation used as GP mean function
+        if bobe.flow_trained and bobe._last_mean_cov_phys is not None:
+            print("Drawing samples from Gaussian mean function approximation...")
+            gaussian_cov = bobe._last_mean_cov_phys
+            gaussian_center = bobe._last_mean_center_phys
+            
+            # Generate samples from the Gaussian in physical space
+            gaussian_samples = np.random.default_rng(seed).multivariate_normal(
+                gaussian_center, gaussian_cov, size=5000
             )
             
             # Create MCSamples object for Gaussian samples
@@ -129,15 +132,15 @@ def main():
                 ranges=dict(zip(param_list, param_bounds.T)),
             )
             
-            # Insert Gaussian samples before reference samples
+            # Insert Gaussian samples between BOBE and reference
             sample_list.insert(1, Gaussian_Samples)
             legend_labels.insert(1, 'Gaussian')
-            contour_colors.insert(1, '#FF6B35')  # Orange color for Gaussian
+            contour_colors.insert(1, '#FF6B35')  # Orange color
             filled_list.insert(1, False)
             contour_lws.insert(1, 1.5)
             
-            print(f"Drew {len(gaussian_samples)} samples from Gaussian")
-
+            print(f"Drew {len(gaussian_samples)} samples from Gaussian approximation")
+        
         print("Creating parameter samples plot...")
         sns.set_theme('notebook', 'ticks', palette='husl')
         plt.rcParams['text.usetex'] = True

@@ -113,31 +113,9 @@ def main():
         filled_list = [True, False]
         contour_lws = [1, 1.5]
         
-        if bobe.flow_trained and hasattr(bobe, 'gaussian_mean'):
-            print("Drawing samples from fitted Gaussian...")
-            # Draw samples from Gaussian (in physical space)
-            gaussian_cov = np.linalg.inv(np.array(bobe.gaussian_cov_inv))
-            gaussian_samples = np.random.multivariate_normal(
-                np.array(bobe.gaussian_mean), gaussian_cov, size=5000
-            )
-            
-            # Create MCSamples object for Gaussian samples
-            Gaussian_Samples = MCSamples(
-                samples=gaussian_samples,
-                names=param_list,
-                labels=param_labels,
-                ranges=dict(zip(param_list, param_bounds.T)),
-            )
-            
-            # Insert Gaussian samples before reference samples
-            sample_list.insert(1, Gaussian_Samples)
-            legend_labels.insert(1, 'Gaussian')
-            contour_colors.insert(1, '#FF6B35')  # Orange color for Gaussian
-            filled_list.insert(1, False)
-            contour_lws.insert(1, 1.5)
-            
-            print(f"Drew {len(gaussian_samples)} samples from Gaussian")
-
+        # Note: Mean function is now internal to GP (quadratic form)
+        # No external Gaussian sampling needed
+        
         print("Creating parameter samples plot...")
         sns.set_theme('notebook', 'ticks', palette='husl')
         plt.rcParams['text.usetex'] = True

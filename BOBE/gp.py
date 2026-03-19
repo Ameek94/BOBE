@@ -112,7 +112,7 @@ class GP:
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
                  kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,5],lengthscales=None,kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], param_names: List[str] = None,
-                 mean_func=None):
+                 kernel_rotation_matrix=None, kernel_rotation_center=None):
         """
         Initialize the Gaussian Process model.
 
@@ -154,13 +154,17 @@ class GP:
         tausq_bounds : list, optional
             Bounds for the tausq parameter (in log space). Only used when lengthscale_prior='SAAS'.
             Defaults to [-4, 4].
-        mean_func : callable, optional
-            If provided, called as mean_func(x) -> array of shape (N,) or scalar.
-            The GP will fit the residuals: y - mean_func(x).
-            Predictions return mean_func(x) + GP_residual(x). Default is None.
+        kernel_rotation_matrix : array-like, shape (D, D), optional
+            Precision matrix (inverse covariance) in unit-cube space for quadratic mean function.
+            m(u) = -0.5 * (u - u_c)^T Σ_inv (u - u_c).
+            If None, mean function is zero everywhere. Default is None.
+        kernel_rotation_center : array-like, shape (D,), optional
+            Center u_c for quadratic mean function in unit-cube space.
+            Required if kernel_rotation_matrix is provided. Default is None.
         """
-        # Store mean function before setting up training data
-        self.mean_func = mean_func
+        # Store precision matrix BEFORE _setup_training_data (which calls _compute_mean)
+        self.kernel_rotation_matrix = jnp.array(kernel_rotation_matrix) if kernel_rotation_matrix is not None else None
+        self.kernel_rotation_center = jnp.array(kernel_rotation_center) if kernel_rotation_center is not None else None
         
         # Setup and validate training data
         self._setup_training_data(train_x, train_y)
@@ -202,6 +206,30 @@ class GP:
         self._setup_lengthscale_prior(lengthscale_prior)
         self._setup_optimization_parameters()
 
+    def _compute_mean(self, x):
+        """
+        Quadratic mean function: m(u) = -0.5 * (u - u_c)^T Σ_inv (u - u_c).
+        
+        Parameters
+        ----------
+        x : array-like, shape (N, D)
+            Input points in unit-cube space.
+            
+        Returns
+        -------
+        array, shape (N, 1)
+            Mean function values. Zero everywhere when no precision matrix is active.
+        """
+        x = jnp.atleast_2d(x)
+        if self.kernel_rotation_matrix is None:
+            return jnp.zeros((x.shape[0], 1))
+        
+        # Compute quadratic form: (u - u_c)^T Σ_inv (u - u_c)
+        # kernel_rotation_matrix is the precision matrix Σ_inv
+        diff = x - self.kernel_rotation_center  # (N, D)
+        quad_form = jnp.sum(diff * (diff @ self.kernel_rotation_matrix), axis=-1, keepdims=True)
+        return -0.5 * quad_form
+
     def _setup_training_data(self, train_x, train_y):
         """Setup and validate training data, compute standardization parameters."""
         # Check x and y sizes
@@ -213,30 +241,23 @@ class GP:
             raise ValueError("train_x must be 2D")
 
         self.ndim = train_x.shape[1]
-        self.train_x = jnp.array(train_x)
+        train_x_arr = jnp.array(train_x)
         
-        # If mean_func is provided, compute residuals
-        if self.mean_func is not None and train_y.size > 0:
-            # mean_func returns values in the same scale as train_y
-            mean_vals = self.mean_func(train_x)
-            if hasattr(mean_vals, 'shape') and mean_vals.ndim == 1:
-                mean_vals = mean_vals.reshape(-1, 1)
-            elif not hasattr(mean_vals, 'shape'):
-                mean_vals = jnp.array([[mean_vals]])
-            residuals = train_y - mean_vals
-        else:
-            residuals = train_y
+        # Subtract quadratic mean function to obtain residuals
+        # (no-op when kernel_rotation_matrix is None)
+        residuals = train_y - self._compute_mean(train_x_arr)
         
-        # Compute standardization parameters (and handle the case of 0 initialisation points)
-        self.y_mean = jnp.mean(residuals) if residuals.size > 0 else 0 
-        self.y_std = jnp.std(residuals) if residuals.size > 0 else 1.0
+        # Compute standardization parameters on residuals
+        self.y_mean = jnp.mean(residuals) if residuals.size > 0 else jnp.array(0.0)
+        self.y_std = jnp.std(residuals) if residuals.size > 0 else jnp.array(1.0)
         
         # Handle edge case where std is zero (all values identical or only 1 point)
-        if self.y_std == 0:
+        if float(self.y_std) == 0:
             log.warning("Training targets have zero variance. Setting std to 1.0 to avoid division by zero.")
-            self.y_std = 1.0
+            self.y_std = jnp.array(1.0)
 
-        # Store standardized training data (residuals if mean_func provided)
+        # Store standardized residuals as training targets
+        self.train_x = train_x_arr
         self.train_y = (residuals - self.y_mean) / self.y_std
         log.debug(f"GP training size = {self.train_x.shape[0]}")
 
@@ -387,17 +408,16 @@ class GP:
     def predict_mean_single(self,x):
         """
         Single point prediction of mean.
-        If mean_func is provided, returns mean_func(x) + GP_residual(x).
+        Returns quadratic mean function + GP residual prediction.
+        JAX-compatible: returns JAX array, no float conversions.
         """
         x = jnp.atleast_2d(x)
         k12 = self.kernel.covariance(self.train_x, x, include_noise=False) # shape (N,1)
-        gp_residual = jnp.einsum('ij,ji', k12.T, self.alphas)*self.y_std + self.y_mean
+        gp_residual = jnp.einsum('ij,ji', k12.T, self.alphas) * self.y_std + self.y_mean
         
-        if self.mean_func is not None:
-            # mean_func takes a 1D point (D,) and returns a scalar
-            mean_contribution = self.mean_func(x.squeeze())
-            return gp_residual + mean_contribution
-        return gp_residual 
+        # Add quadratic mean function (zero if no rotation)
+        mean_contribution = self._compute_mean(x)
+        return gp_residual + mean_contribution.squeeze() 
     
     def predict_var_single(self,x):
         x = jnp.atleast_2d(x)
@@ -496,14 +516,10 @@ class GP:
             # Reconstruct un-standardized residuals for old data
             old_residuals = self.train_y * self.y_std + self.y_mean
             
-            # For new data, compute residuals if mean_func is provided
-            if self.mean_func is not None:
-                mean_vals = self.mean_func(new_pts_to_add)
-                if hasattr(mean_vals, 'shape') and mean_vals.ndim == 1:
-                    mean_vals = mean_vals.reshape(-1, 1)
-                elif not hasattr(mean_vals, 'shape'):
-                    mean_vals = jnp.array([[mean_vals]])
-                new_residuals = new_vals_to_add - mean_vals
+            # For new data, compute residuals if quadratic mean is active
+            if self.kernel_rotation_matrix is not None:
+                mean_vals = self._compute_mean(new_pts_to_add)
+                new_residuals = new_vals_to_add - mean_vals.reshape(-1, 1)
             else:
                 new_residuals = new_vals_to_add
             
@@ -529,6 +545,43 @@ class GP:
         K = self.kernel.covariance(self.train_x, self.train_x, include_noise=True)
         self.cholesky = jnp.linalg.cholesky(K)
         self.alphas = cho_solve((self.cholesky, True), self.train_y)
+
+    def update_mean_function(self, new_precision_matrix, new_u_center):
+        """
+        Update the quadratic mean function and restandardize residuals.
+        
+        Recovers raw y from current standardized residuals, applies new mean function,
+        then restandardizes and recomputes Cholesky.
+        
+        Parameters
+        ----------
+        new_precision_matrix : array-like (D, D) or None
+            New precision matrix (inverse covariance) in unit-cube space.
+            Mean function: m(u) = -0.5 * (u - u_c)^T Σ_inv (u - u_c).
+        new_u_center : array-like (D,) or None
+            New center in unit-cube space.
+        """
+        # Recover raw y using OLD mean function
+        # train_y is standardized residuals: (y - old_mean - y_mean) / y_std
+        # So: y_raw = train_y * y_std + y_mean + old_mean
+        y_raw = (np.array(self.train_y) * float(self.y_std) + float(self.y_mean)
+                 + np.array(self._compute_mean(self.train_x)))
+        
+        # Update stored mean-function parameters
+        self.kernel_rotation_matrix = jnp.array(new_precision_matrix) if new_precision_matrix is not None else None
+        self.kernel_rotation_center = jnp.array(new_u_center) if new_u_center is not None else None
+        
+        # Recompute residuals and restandardize under NEW mean function
+        m_new = np.array(self._compute_mean(self.train_x))
+        residuals = y_raw - m_new
+        self.y_mean = jnp.array(float(np.mean(residuals)))
+        self.y_std = jnp.array(float(np.std(residuals)) if len(residuals) > 1 else 1.0)
+        if float(self.y_std) == 0.0:
+            self.y_std = jnp.array(1.0)
+        self.train_y = jnp.array((residuals - float(self.y_mean)) / float(self.y_std))
+        
+        # Recompute Cholesky with new standardization
+        self.recompute_cholesky()
 
     def remap_inputs(self, new_train_x: np.ndarray):
         """
@@ -607,7 +660,7 @@ class GP:
         state = {
             # Training data (original, unstandardized)
             'train_x': np.array(self.train_x),
-            'train_y': np.array(self.train_y * self.y_std + self.y_mean),  # unstandardize (residuals if mean_func)
+            'train_y': np.array(self.train_y * self.y_std + self.y_mean),  # unstandardize (residuals)
             
             # Hyperparameters
             'lengthscales': np.array(self.lengthscales),
@@ -639,8 +692,9 @@ class GP:
             # Dimensions
             'ndim': self.ndim,
             
-            # Mean function flag
-            'has_mean_func': self.mean_func is not None,
+            # Quadratic mean function parameters
+            'kernel_rotation_matrix': np.array(self.kernel_rotation_matrix) if self.kernel_rotation_matrix is not None else None,
+            'kernel_rotation_center': np.array(self.kernel_rotation_center) if self.kernel_rotation_center is not None else None,
             
             # Class identifier
             'gp_class': 'GP'
@@ -663,7 +717,7 @@ class GP:
         gp: GP
             The reconstructed GP object
         """
-        # Create GP instance
+        # Create GP instance with rotation parameters
         gp = cls(
             train_x=state['train_x'],
             train_y=state['train_y'],
@@ -678,7 +732,9 @@ class GP:
             kernel_variance_prior=state.get('kernel_variance_prior_spec'),
             lengthscale_prior=state.get('lengthscale_prior_spec'),
             tausq=state.get('tausq', 1.0),
-            tausq_bounds=state.get('tausq_bounds', [-4, 4])
+            tausq_bounds=state.get('tausq_bounds', [-4, 4]),
+            kernel_rotation_matrix=state.get('kernel_rotation_matrix'),
+            kernel_rotation_center=state.get('kernel_rotation_center'),
         )
         
         # Restore computed state if available
@@ -687,26 +743,24 @@ class GP:
         if state['alphas'] is not None:
             gp.alphas = jnp.array(state['alphas'])
         
-        # Note: has_mean_func flag indicates the GP was trained with a mean function.
-        # The mean_func itself must be re-attached via set_mean_func() after loading.
-        gp._had_mean_func = state.get('has_mean_func', False)
-        
         return gp
     
-    def set_mean_func(self, mean_func):
+    def set_mean_func(self, precision_matrix, u_center):
         """
-        Set or update the mean function for the GP.
+        Set or update the quadratic mean function for the GP.
         
-        This is used to re-attach a mean function after loading a GP from disk,
-        since callables cannot be serialized.
+        This is deprecated - use update_mean_function() instead which properly
+        handles restandardization.
         
         Parameters
         ----------
-        mean_func : callable or None
-            Mean function that takes x (unit cube) and returns prior mean values.
+        precision_matrix : array-like or None
+            Precision matrix (inverse covariance) in unit-cube space.
+        u_center : array-like or None
+           Center in unit-cube space.
         """
-        self.mean_func = mean_func
-        log.info(f"Mean function {'set' if mean_func is not None else 'cleared'}")
+        log.warning("set_mean_func() is deprecated. Use update_mean_function() instead.")
+        self.update_mean_function(precision_matrix, u_center)
     
     @classmethod
     def load(cls, filename, **kwargs):

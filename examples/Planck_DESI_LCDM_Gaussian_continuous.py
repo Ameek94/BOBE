@@ -61,7 +61,7 @@ def main():
         # Gaussian mean function settings: fit Gaussian when acquisition is low,
         # retrain when KL divergence between consecutive HMC samples is high
         use_flow_mean=True,
-        flow_acq_threshold=1.0,   # acquisition value below which mean training triggers
+        flow_acq_threshold=2.0,   # acquisition value below which mean training triggers
         flow_kl_threshold=0.5,    # KL divergence threshold for retraining
         flow_retrain_step=5,
     )

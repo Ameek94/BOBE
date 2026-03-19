@@ -127,30 +127,8 @@ def main():
         filled_list = [True, False]
         contour_lws = [1, 1.5]
         
-        if bobe.flow_trained and hasattr(bobe, 'gaussian_mean'):
-            print("Drawing samples from fitted Gaussian...")
-            # Draw samples from Gaussian (in physical space)
-            gaussian_cov = np.linalg.inv(np.array(bobe.gaussian_cov_inv))
-            gaussian_samples = np.random.multivariate_normal(
-                np.array(bobe.gaussian_mean), gaussian_cov, size=5000
-            )
-            
-            # Create MCSamples object for Gaussian samples
-            Gaussian_Samples = MCSamples(
-                samples=gaussian_samples,
-                names=param_list,
-                labels=param_labels,
-                ranges=dict(zip(param_list, param_bounds.T)),
-            )
-            
-            # Insert Gaussian samples before reference samples
-            sample_list.insert(1, Gaussian_Samples)
-            legend_labels.insert(1, 'Gaussian')
-            contour_colors.insert(1, '#FF6B35')  # Orange color for Gaussian
-            filled_list.insert(1, False)
-            contour_lws.insert(1, 1.5)
-            
-            print(f"Drew {len(gaussian_samples)} samples from Gaussian")
+        # Note: Mean function is now internal to GP (quadratic form)
+        # No external Gaussian sampling needed
         
         # Create parameter samples plot
         print("Creating parameter samples plot...")
@@ -172,7 +150,7 @@ def main():
             for j in range(i+1, ndim):
                 ax = g.subplots[j, i]
                 ax.scatter(points[:, i], points[:, j], alpha=0.75, color='red', s=4)
-        g.export(f'./results/{likelihood.name}_samples.pdf')
+        g.export(f'./results/Banana/{likelihood.name}_samples.pdf')
 
         # Print timing analysis
         print("DETAILED TIMING ANALYSIS")
@@ -197,7 +175,7 @@ def main():
         ax.set_yscale('log')
         ax.set_xlabel(r'Iteration')
         ax.set_ylabel(r'Acquisition Value')
-        plt.savefig(f"./results/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
+        plt.savefig(f"./results/Banana/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
 
 if __name__ == "__main__":
     main()

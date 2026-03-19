@@ -246,17 +246,17 @@ class BOBE:
         # Create the parameter transform (linear scaling to unit cube)
         self.transform = BoxTransform(self.loglikelihood.param_bounds)
         
-        # Flow mean function settings
+        # Flow mean function settings (keep variable names for backwards compatibility)
         self.use_flow_mean = use_flow_mean
         self.flow_acq_threshold = flow_acq_threshold
         self.flow_kl_threshold = flow_kl_threshold
         self.flow_retrain_step = flow_retrain_step
         self.flow_kwargs = flow_kwargs
-        self.flow = None  # Will be created when needed
-        self.flow_trained = False
-        self.flow_last_trained_iter = -1  # Tracks when flow was last trained
-        self.flow_prev_hmc_mean = None  # HMC mean when flow was last trained
-        self.flow_prev_hmc_cov = None   # HMC covariance when flow was last trained
+        self.flow_trained = False  # True when quadratic mean function is active
+        self.flow_last_trained_iter = -1  # Tracks when mean function was last trained
+        self._last_mean_cov_phys = None  # For KL divergence tracking
+        self._last_mean_center_phys = None  # For KL divergence tracking
+        self.mean_update_count = 0  # Number of mean function updates
         
         if not self.is_main:
             # Workers only need likelihood and seed - everything else is handled in worker_wait
@@ -420,24 +420,18 @@ class BOBE:
             'converged':             getattr(self, 'converged', False),
             'termination_reason':    getattr(self, 'termination_reason', ''),
             'prev_samples':          getattr(self, 'prev_samples', None),
-            # Flow mean function state
+            # Mean function state (quadratic mean function)
             'use_flow_mean':         self.use_flow_mean,
             'flow_trained':          getattr(self, 'flow_trained', False),
             'flow_acq_threshold':    self.flow_acq_threshold,
             'flow_kl_threshold':     self.flow_kl_threshold,
             'flow_retrain_step':     self.flow_retrain_step,
             'flow_last_trained_iter': getattr(self, 'flow_last_trained_iter', -1),
-            'flow_prev_hmc_mean':    getattr(self, 'flow_prev_hmc_mean', None),
-            'flow_prev_hmc_cov':     getattr(self, 'flow_prev_hmc_cov', None),
+            '_last_mean_cov_phys':   getattr(self, '_last_mean_cov_phys', None),
+            '_last_mean_center_phys': getattr(self, '_last_mean_center_phys', None),
+            'mean_update_count':     getattr(self, 'mean_update_count', 0),
             'flow_kwargs':           self.flow_kwargs,
         }
-        
-        # Save Gaussian mean function parameters if trained
-        if self.flow_trained:
-            checkpoint_data['gaussian_mean'] = getattr(self, 'gaussian_mean', None)
-            checkpoint_data['gaussian_cov_inv'] = getattr(self, 'gaussian_cov_inv', None)
-            checkpoint_data['gaussian_log_norm'] = getattr(self, 'gaussian_log_norm', None)
-            checkpoint_data['calibration_offset'] = getattr(self, 'calibration_offset', None)
         
         self.results_manager.save_checkpoint(checkpoint_data)
 
@@ -458,39 +452,21 @@ class BOBE:
         self.transform = BoxTransform.from_state_dict(ts)
         log.info(f"Restored transform: {self.transform!r}")
 
-        # Restore flow mean function if it was trained
+        # Restore mean function training state
         self.flow_trained = data.get('flow_trained', False)
         self.flow_last_trained_iter = int(data.get('flow_last_trained_iter', -1))
+        self.mean_update_count = int(data.get('mean_update_count', 0))
         
-        # Restore flow HMC statistics (ensure they're numpy arrays if not None)
-        flow_prev_hmc_mean = data.get('flow_prev_hmc_mean', None)
-        self.flow_prev_hmc_mean = np.array(flow_prev_hmc_mean) if flow_prev_hmc_mean is not None else None
-        flow_prev_hmc_cov = data.get('flow_prev_hmc_cov', None)
-        self.flow_prev_hmc_cov = np.array(flow_prev_hmc_cov) if flow_prev_hmc_cov is not None else None
+        # Restore mean function covariance tracking (for KL divergence computation)
+        last_mean_cov_phys = data.get('_last_mean_cov_phys', None)
+        self._last_mean_cov_phys = np.array(last_mean_cov_phys) if last_mean_cov_phys is not None else None
+        last_mean_center_phys = data.get('_last_mean_center_phys', None)
+        self._last_mean_center_phys = np.array(last_mean_center_phys) if last_mean_center_phys is not None else None
         
         if self.flow_trained:
-            log.info(f"Gaussian mean was last trained at iteration {self.flow_last_trained_iter}")
-            if self.flow_prev_hmc_mean is not None:
-                log.info(f"Restored HMC statistics for KL divergence tracking")
-        
-        # Restore Gaussian mean function parameters if available
-        if self.flow_trained and 'gaussian_mean' in data:
-            self.gaussian_mean = data['gaussian_mean']
-            self.gaussian_cov_inv = data['gaussian_cov_inv']
-            self.gaussian_log_norm = float(data['gaussian_log_norm'])
-            self.calibration_offset = float(data['calibration_offset'])
-            log.info(f"Restored Gaussian mean function parameters")
-            
-            # Re-attach mean function to GP
-            def gaussian_mean_func(x_unit):
-                x_phys = self.transform.from_unit(x_unit)
-                x_phys_jax = jnp.asarray(x_phys)
-                diff = x_phys_jax - self.gaussian_mean
-                mahalanobis = jnp.sum(diff * (self.gaussian_cov_inv @ diff.T).T, axis=-1)
-                log_pdf = self.gaussian_log_norm - 0.5 * mahalanobis
-                return log_pdf + self.calibration_offset
-            self.gp.set_mean_func(gaussian_mean_func)
-            log.info("Re-attached Gaussian mean function to GP")
+            log.info(f"Mean function was last trained at iteration {self.flow_last_trained_iter} (update #{self.mean_update_count})")
+            if self._last_mean_cov_phys is not None:
+                log.info(f"Restored covariance statistics for KL divergence tracking")
 
         # Restore physical training data
         self.all_train_x_phys = np.array(data.get('all_train_x_phys', np.empty((0, self.ndim))))
@@ -517,86 +493,149 @@ class BOBE:
         log.info(f"Resuming from iteration {self.start_iteration}, best logL={self.best_f:.4f}")
         self.fresh_start = False
     
-    def _train_and_attach_gaussian_mean(self):
+    def _compute_precision_from_cov(self, cov_matrix, center=None, is_fisher=False):
         """
-        Fit a Gaussian approximation to the posterior and attach it as GP mean function.
+        Transform covariance from physical to unit-cube space and compute precision matrix.
         
-        Uses the best-fit point from the training set as the center, and computes the
-        covariance from HMC samples around their own mean (to get the shape). This avoids
-        inflating the covariance when HMC mean and best-fit point differ.
+        Steps:
+        1. Rescale covariance from physical to unit-cube using parameter bounds
+        2. Invert to get precision matrix Σ_unit^{-1}
+        3. Transform center from physical to unit-cube coordinates
+        
+        The mean function is: m(u) = -0.5 * (u - u_c)^T Σ_unit^{-1} (u - u_c)
+        
+        Parameters
+        ----------
+        cov_matrix : array-like, shape (D, D)
+            Covariance matrix in physical parameter space (or Fisher if is_fisher=True).
+        center : array-like, shape (D,), optional
+            Center point in physical parameter space. If None, uses midpoint of bounds.
+        is_fisher : bool, optional
+            If True, cov_matrix is Fisher matrix and will be inverted. Default is False.
+        
+        Returns
+        -------
+        precision_matrix : np.ndarray, shape (D, D)
+            Precision matrix (inverse covariance) in unit-cube space
+        u_center : np.ndarray, shape (D,)
+            Center in unit-cube space
         """
-        # Get HMC samples in physical space (already posterior-weighted)
+        _cov_phys = np.asarray(cov_matrix, dtype=np.float64)
+        if is_fisher:
+            _cov_phys = np.linalg.inv(_cov_phys)
+        
+        # Parameter bounds
+        _bounds = np.asarray(self.loglikelihood.param_bounds, dtype=np.float64)
+        _theta_min = _bounds[0]
+        _theta_range = _bounds[1] - _bounds[0]
+        
+        # Transform covariance from physical to unit cube
+        # If u = (θ - θ_min) / θ_range, then:
+        # Cov[u_i, u_j] = Cov[θ_i, θ_j] / (θ_range[i] * θ_range[j])
+        scaling = 1.0 / _theta_range
+        _cov_unit = _cov_phys * np.outer(scaling, scaling)
+        
+        # Compute precision matrix (inverse of unit-cube covariance)
+        precision_matrix = np.linalg.inv(_cov_unit)
+        
+        # Transform center from physical to unit cube
+        if center is not None:
+            _theta_center = np.asarray(center, dtype=np.float64)
+        else:
+            _theta_center = 0.5 * (_bounds[0] + _bounds[1])
+        
+        u_center = (_theta_center - _theta_min) / _theta_range
+        
+        return precision_matrix, u_center
+    
+    def _update_mean_function(self):
+        """
+        Update the quadratic mean function from current HMC samples.
+        
+        Computes covariance in physical space, derives whitening matrix,
+        and updates GP mean function via gp.update_mean_function().
+        
+        Returns
+        -------
+        bool
+            True if mean function was updated, False if skipped.
+        """
+        # 1. Get HMC samples in physical space
         mc_x_unit = np.array(self.mc_samples['x'])
         mc_x_phys = np.asarray(self.transform.from_unit(mc_x_unit))
-        n_samples = len(mc_x_phys)
+        N = len(mc_x_phys)
         
-        log.info(f"[Gaussian Mean] Fitting Gaussian to {n_samples} HMC posterior samples")
+        if N < self.ndim + 2:
+            log.warning(f"[Mean function] Too few samples ({N}) to estimate covariance; skipping.")
+            return False
         
-        # Use best-fit point from training set as the Gaussian center
-        gaussian_mean = self.best_pt.copy()
-        log.info(f"[Gaussian Mean] Centering Gaussian at best-fit point (logL={self.best_f:.4f})")
+        log.info(f"[Mean function] Updating from {N} HMC samples")
         
-        # Compute weighted covariance from HMC samples AROUND THE BEST-FIT POINT
-        # (covariance must be computed around the same center where Gaussian is placed)
+        # 2. Compute weighted covariance in physical space
         weights = self.mc_samples.get('weights', None)
         if weights is not None:
-            w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
+            w = np.array(weights, dtype=np.float64)
+            w = np.clip(w, 0.0, None)
+            w_sum = w.sum()
+            if w_sum <= 0.0:
+                w = np.ones(N)
             w /= w.sum()
-            hmc_mean = np.average(mc_x_phys, weights=w, axis=0)
-            diff = mc_x_phys - gaussian_mean  # Deviations from best-fit point!
-            gaussian_cov = (diff * w[:, None]).T @ diff
+            sample_mean = np.average(mc_x_phys, weights=w, axis=0)
+            diff = mc_x_phys - sample_mean
+            new_cov = (diff * w[:, None]).T @ diff
         else:
-            hmc_mean = mc_x_phys.mean(axis=0)
-            diff = mc_x_phys - gaussian_mean
-            gaussian_cov = (diff.T @ diff) / len(mc_x_phys)
+            new_cov = np.cov(mc_x_phys.T)
         
-        log.info(f"[Gaussian Mean] HMC sample mean offset from best-fit: "
-                f"{np.linalg.norm(hmc_mean - gaussian_mean):.4e}")
+        # Symmetrize and regularize
+        new_cov = 0.5 * (new_cov + new_cov.T) + 1e-10 * np.eye(self.ndim)
         
-        # Ensure covariance is symmetric and well-conditioned
-        gaussian_cov = 0.5 * (gaussian_cov + gaussian_cov.T) + 1e-10 * np.eye(self.ndim)
+        # 3. Center at best-fit point
+        new_center = np.array(self.best_pt).flatten()
         
-        # Precompute inverse and log determinant for efficiency
-        gaussian_cov_inv = np.linalg.inv(gaussian_cov)
-        _, logdet = np.linalg.slogdet(gaussian_cov)
+        # 4. KL divergence check (skip first update)
+        if self._last_mean_cov_phys is not None:
+            old_cov = self._last_mean_cov_phys
+            old_center = self._last_mean_center_phys
+            try:
+                from .utils.core import kl_divergence_gaussian
+                kl_dict = kl_divergence_gaussian(old_center, old_cov, new_center, new_cov)
+                kl_sym = float(kl_dict['symmetric'])
+            except Exception as e:
+                log.warning(f"[Mean function] KL computation failed: {e}; skipping.")
+                return False
+            
+            log.info(f"[Mean function] Symmetric KL = {kl_sym:.4f} (threshold = {self.flow_kl_threshold:.4f})")
+            if kl_sym < self.flow_kl_threshold:
+                log.info("[Mean function] KL below threshold; skipping update.")
+                return False
+        else:
+            log.info("[Mean function] First update (no KL check).")
         
-        # Compute normalization constant: -0.5 * (d*log(2π) + log|Σ|)
-        log_norm_const = -0.5 * (self.ndim * np.log(2 * np.pi) + logdet)
+        # 5. Compute precision matrix in unit-cube space
+        try:
+            precision_matrix, u_center = self._compute_precision_from_cov(new_cov, new_center, is_fisher=False)
+        except np.linalg.LinAlgError as e:
+            log.warning(f"[Mean function] Matrix inversion failed: {e}; skipping.")
+            return False
         
-        # Since Gaussian is centered at best-fit point, log-pdf at center is just log_norm_const
-        # Calibrate to match true log-likelihood at best point
-        best_logl = float(self.best_f)
-        calibration_offset = best_logl - log_norm_const
+        # 6. Update GP mean function
+        self.gp.update_mean_function(precision_matrix, u_center)
         
-        log.info(f"[Gaussian Mean] Calibrated: logL={best_logl:.4f}, "
-                f"log_norm={log_norm_const:.4f}, offset={calibration_offset:.4f}")
-        
-        # Store Gaussian parameters for the mean function (convert to JAX arrays)
-        self.gaussian_mean = jnp.array(gaussian_mean)
-        self.gaussian_cov_inv = jnp.array(gaussian_cov_inv)
-        self.gaussian_log_norm = float(log_norm_const)
-        self.calibration_offset = float(calibration_offset)
-        
-        # Create mean function wrapper for GP
-        def gaussian_mean_func(x_unit: np.ndarray) -> np.ndarray:
-            x_phys = self.transform.from_unit(x_unit)
-            x_phys_jax = jnp.asarray(x_phys)
-            diff = x_phys_jax - self.gaussian_mean
-            # Compute: -0.5 * diff^T @ Σ^{-1} @ diff
-            mahalanobis = jnp.sum(diff * (self.gaussian_cov_inv @ diff.T).T, axis=-1)
-            log_pdf = self.gaussian_log_norm - 0.5 * mahalanobis
-            return log_pdf + self.calibration_offset
-        
-        # Attach to GP and rebuild training data
-        self.gp.set_mean_func(gaussian_mean_func)
-        self.flow_trained = True  # Keep variable name for compatibility with checkpointing
+        # 7. Store state for future KL checks
+        self._last_mean_cov_phys = new_cov
+        self._last_mean_center_phys = new_center
+        self.flow_trained = True
         self.flow_last_trained_iter = self.current_iteration
+        self.mean_update_count += 1
         
-        # Store current HMC statistics for future comparison (use HMC mean for KL tracking)
-        self.flow_prev_hmc_mean = hmc_mean.copy()
-        self.flow_prev_hmc_cov = gaussian_cov.copy()
+        # 8. Refit GP hyperparameters
+        log.info(f"[Mean function] Refitting GP with {self.gp.npoints} points")
+        self.results_manager.start_timing('GP Training')
+        self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
+        self.results_manager.end_timing('GP Training')
         
-        log.info(f"[Gaussian Mean] Attached Gaussian mean function at iteration {self.current_iteration}")
+        log.info(f"[Mean function] Update complete. Count={self.mean_update_count}")
+        return True
     
     def _handle_fresh_start(self, n_cobaya_init, n_sobol_init, init_train_x, init_train_y,
                            use_clf, clf_type, clf_use_size, clf_update_step,
@@ -1668,75 +1707,32 @@ class BOBE:
             if ii % self.save_step == 0:
                 self._save_checkpoint()
 
-            # Flow mean function training/update
+            # Mean function training/update
             if self.use_flow_mean:
                 acq_val = float(acq_vals[-1])
-                should_train_flow = False
+                should_check_update = False
                 
                 if not self.flow_trained:
-                    # First time: train Gaussian mean when acquisition is low enough
+                    # First time: train mean function when acquisition is low enough
                     if acq_val < self.flow_acq_threshold:
-                        should_train_flow = True
-                        log.info(f"[Gaussian Mean] Triggering initial mean training (acq={acq_val:.4f} < {self.flow_acq_threshold})")
+                        should_check_update = True
+                        log.info(f"[Mean function] Triggering initial training (acq={acq_val:.4f} < {self.flow_acq_threshold})")
                 else:
-                    # Gaussian mean already trained: check if BOTH conditions are met for retraining
-                    # Condition 1: Enough iterations have passed
-                    # Condition 2: KL divergence exceeds threshold
-                    
-                    # Check if we should consider retraining (based on iterations)
-                    should_check_kl = False
+                    # Mean function already trained: check if enough iterations have passed
                     if self.flow_retrain_step is not None:
                         steps_since_last_training = ii - self.flow_last_trained_iter
                         if steps_since_last_training >= self.flow_retrain_step:
-                            should_check_kl = True
-                            log.info(f"[Gaussian Mean] {steps_since_last_training} steps since last training (>= {self.flow_retrain_step})")
+                            should_check_update = True
+                            log.info(f"[Mean function] {steps_since_last_training} steps since last training (>= {self.flow_retrain_step})")
                     else:
-                        # If no periodic retraining step specified, always check KL
-                        should_check_kl = True
-                    
-                    # Only check KL divergence if enough iterations have passed
-                    if should_check_kl and self.flow_prev_hmc_mean is not None:
-                        # Compute Gaussian approximation of current HMC samples in physical space
-                        mc_x_unit = np.array(self.mc_samples['x'])
-                        mc_x_phys = np.asarray(self.transform.from_unit(mc_x_unit))
-                        
-                        weights = self.mc_samples.get('weights', None)
-                        if weights is not None:
-                            w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
-                            w /= w.sum()
-                            current_hmc_mean = np.average(mc_x_phys, weights=w, axis=0)
-                            diff = mc_x_phys - current_hmc_mean
-                            current_hmc_cov = (diff * w[:, None]).T @ diff
-                        else:
-                            current_hmc_mean = mc_x_phys.mean(axis=0)
-                            current_hmc_cov = np.cov(mc_x_phys.T)
-                        current_hmc_cov = 0.5 * (current_hmc_cov + current_hmc_cov.T) + 1e-10 * np.eye(self.ndim)
-                        
-                        # Compare current HMC samples against previous HMC samples (when mean was last trained)
-                        try:
-                            kl_dict = kl_divergence_gaussian(
-                                self.flow_prev_hmc_mean, self.flow_prev_hmc_cov,
-                                current_hmc_mean, current_hmc_cov
-                            )
-                            kl_sym = float(kl_dict['symmetric'])
-                            log.info(f"[Gaussian Mean] KL(prev_HMC||current_HMC) = {kl_sym:.4f} (threshold={self.flow_kl_threshold})")
-                            
-                            if kl_sym > self.flow_kl_threshold:
-                                should_train_flow = True
-                                log.info("[Gaussian Mean] Retraining: sufficient iterations passed AND KL exceeds threshold")
-                            else:
-                                log.info(f"[Gaussian Mean] KL below threshold, skipping retraining")
-                        except Exception as e:
-                            log.warning(f"[Gaussian Mean] KL computation failed: {e}")
+                        # If no periodic retraining step specified, always check
+                        should_check_update = True
                 
-                if should_train_flow:
-                    self._train_and_attach_gaussian_mean()
-                    # Refit GP with new mean function
-                    self.results_manager.start_timing('GP Training')
-                    self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500,
-                                     rng=self.np_rng, use_pool=True)
-                    self.results_manager.end_timing('GP Training')
-                    self._save_checkpoint()
+                if should_check_update:
+                    # _update_mean_function() handles KL checking and GP refitting internally
+                    updated = self._update_mean_function()
+                    if updated:
+                        self._save_checkpoint()
 
             # Check convergence via acquisition value + consecutive KL divergence
             self.current_iteration = ii
