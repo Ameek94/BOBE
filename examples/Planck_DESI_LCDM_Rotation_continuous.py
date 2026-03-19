@@ -52,7 +52,7 @@ def main():
         save=True,
         verbosity='INFO',
         n_cobaya_init=8,
-        n_sobol_init=32,
+        n_sobol_init=64,
         use_clf=True,
         clf_type='svm',
         minus_inf=-1e5,
@@ -77,7 +77,7 @@ def main():
         num_hmc_warmup=512,
         num_hmc_samples=8000,
         mc_points_size=512,
-        logz_threshold=0.2,
+        logz_threshold=0.25,
         num_chains=8,
         do_final_ns=False,
     )

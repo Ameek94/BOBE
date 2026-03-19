@@ -310,11 +310,16 @@ class BOBE:
         self.prev_samples = None
 
         # Objective evaluation counter - restored from checkpoint on resume, or seeded
-        # from GP size on fresh start. gp_info is populated on resume by results_manager.
-        self.total_objective_evals = self.results_manager.gp_info.get(
-            'total_objective_evals',
-            self.results_manager.gp_info.get('total_true_evals', self.gp.npoints)  # backward compat
-        )
+        # from GP size on fresh start.
+        # On resume, _handle_resume already set this from the checkpoint's top-level key.
+        # Only fall back to gp_info/gp.npoints for fresh starts to avoid overwriting the
+        # correctly restored value with the stale one stored inside gp_info (which reflects
+        # the last *completed* run, not the current run state).
+        if not hasattr(self, 'total_objective_evals'):
+            self.total_objective_evals = self.results_manager.gp_info.get(
+                'total_objective_evals',
+                self.results_manager.gp_info.get('total_true_evals', self.gp.npoints)  # backward compat
+            )
 
     # ============================================================================
     # INITIALIZATION HELPER METHODS
@@ -1531,6 +1536,8 @@ class BOBE:
             np_rng=self.np_rng,
             rng_key=get_jax_key(),
             method=self.mc_points_method,
+            param_bounds=self.transform._original_bounds,
+            transform=self.transform,
         )
         self.results_manager.end_timing('MCMC Sampling')
         self.ns_samples = None
@@ -1564,6 +1571,8 @@ class BOBE:
                 method=self.mc_points_method,
                 np_rng=self.np_rng,
                 rng_key=get_jax_key(),
+                param_bounds=self.transform._original_bounds,
+                transform=self.transform,
             )
             self.results_manager.end_timing('MCMC Sampling')
 
@@ -1625,7 +1634,8 @@ class BOBE:
             log.info("Final Nested Sampling")
             self.results_manager.start_timing('Nested Sampling')
             self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(mode='convergence',
-                gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01, rng=self.np_rng
+                gp=self.gp, ndim=self.ndim, maxcall=int(5e6), dynamic=True, dlogz=0.01, rng=self.np_rng,
+                param_bounds=self.transform._original_bounds, transform=self.transform,
             )
             self.results_manager.end_timing('Nested Sampling')
             logz_str = ", ".join([f"{k}={logz_dict[k]:.4f}" for k in logz_keys if k in logz_dict])

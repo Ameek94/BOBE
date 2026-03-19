@@ -503,14 +503,16 @@ class WIPStd(WeightedIntegratedPosteriorBase):
         return jnp.mean(std)
 
 
-def get_mc_samples(gp: GP,warmup_steps=512, num_samples=1024, thinning=4,method="NUTS",num_chains=4,np_rng=None,rng_key=None):
+def get_mc_samples(gp: GP, warmup_steps=512, num_samples=1024, thinning=4, method="NUTS", num_chains=4,
+                   np_rng=None, rng_key=None, param_bounds=None, transform=None):
     if method=='NUTS':
         mc_samples = sample_GP_NUTS(gp=gp, warmup_steps=warmup_steps,
             num_samples=num_samples, thinning=thinning, num_chains=num_chains,np_rng=np_rng,rng_key=rng_key
         )
     elif method=='NS':
-        mc_samples, logz, success = nested_sampling_Dy(gp=gp, ndim=gp.ndim, mode = 'acq', maxcall=int(2e6),
-                                            dynamic=False, dlogz=0.02,equal_weights=True)
+        mc_samples, logz, success = nested_sampling_Dy(gp=gp, ndim=gp.ndim, mode='acq', maxcall=int(2e6),
+                                            dynamic=False, dlogz=0.02, equal_weights=True,
+                                            param_bounds=param_bounds, transform=transform)
     elif method=='uniform':
         mc_samples = {}
         points = qmc.Sobol(gp.ndim, scramble=True, rng=np_rng).random(num_samples)

@@ -12,6 +12,8 @@ The ParameterTransform factory is kept for backward compatibility.
 
 import os
 import numpy as np
+import jax
+import jax.numpy as jnp
 from abc import ABC, abstractmethod
 
 from .utils.log import get_logger
@@ -119,12 +121,13 @@ class IdentityTransform(BaseTransform):
         log.info(f"Physical bounds: {list(zip(self._theta_min, self._theta_max))}")
 
     def to_unit(self, theta, clip=False):
-        theta, single = self._prep_input(theta, self._ndim)
-        if np.any(np.isnan(theta)):
-            log.warning("NaN detected in to_unit() input")
-        u = (theta - self._theta_min) / self._theta_range
+        theta = jnp.asarray(theta)
+        single = theta.ndim == 1
+        if single:
+            theta = theta[jnp.newaxis]
+        u = (theta - jnp.array(self._theta_min)) / jnp.array(self._theta_range)
         if clip:
-            u = np.clip(u, 0.0, 1.0)
+            u = jnp.clip(u, 0.0, 1.0)
         return u[0] if single else u
 
     def from_unit(self, u):
@@ -348,17 +351,18 @@ class RotationTransform(BaseTransform):
     # -----------------------------------------------------------------
 
     def to_unit(self, theta, clip=False):
-        theta, single = self._prep_input(theta, self._ndim)
-        if np.any(np.isnan(theta)):
-            log.warning("NaN detected in to_unit() input")
+        theta = jnp.asarray(theta)
+        single = theta.ndim == 1
+        if single:
+            theta = theta[jnp.newaxis]
         if self._use_rotation:
-            dtheta = theta - self._theta_center
-            z = dtheta @ self._V_r
-            u = (z - self._z_min) / self._z_range
+            dtheta = theta - jnp.array(self._theta_center)
+            z = dtheta @ jnp.array(self._V_r)
+            u = (z - jnp.array(self._z_min)) / jnp.array(self._z_range)
         else:
-            u = (theta - self._theta_min) / self._theta_range
+            u = (theta - jnp.array(self._theta_min)) / jnp.array(self._theta_range)
         if clip:
-            u = np.clip(u, 0.0, 1.0)
+            u = jnp.clip(u, 0.0, 1.0)
         return u[0] if single else u
 
     def from_unit(self, u):
@@ -833,20 +837,29 @@ class NormalisingFlowTransform(BaseTransform):
     # -----------------------------------------------------------------
 
     def to_unit(self, theta, clip=False):
-        theta, single = self._prep_input(theta, self._ndim)
+        theta = jnp.asarray(theta)
+        single = theta.ndim == 1
         if self._use_flow:
-            # Linear mapping: z in [-n_sigma, n_sigma] → u in [0, 1].
-            # Keeps the posterior concentrated around u=0.5, which is essential
-            # for WIPV/WIPStd: the acquisition ∫σ(u)p(u)du focuses on a compact
-            # region.  The Φ (probit) transform maps the posterior to Uniform
-            # over the entire cube, making the problem exponentially harder.
-            z = self._flow.to_latent(theta)
-            u = (z + self.n_sigma) / (2.0 * self.n_sigma)
+            # Equinox bijection.inverse is JAX-traceable (single-point per call).
+            # Linear mapping z → u keeps the posterior concentrated near u=0.5,
+            # which is essential for WIPV/WIPStd.
+            _mean = jnp.array(self._flow._pre_mean)
+            _std = jnp.array(self._flow._pre_std)
+            def _to_u(t):
+                x_norm = (t - _mean) / _std
+                z = self._flow._flow.bijection.inverse(x_norm)
+                return (z + self.n_sigma) / (2.0 * self.n_sigma)
+            u = _to_u(theta) if single else jax.vmap(_to_u)(theta)
         else:
-            u = (theta - self._theta_min) / self._theta_range
+            if single:
+                theta = theta[jnp.newaxis]
+            u = (theta - jnp.array(self._theta_min)) / jnp.array(self._theta_range)
+            if clip:
+                u = jnp.clip(u, 0.0, 1.0)
+            return u[0] if single else u
         if clip:
-            u = np.clip(u, 0.0, 1.0)
-        return u[0] if single else u
+            u = jnp.clip(u, 0.0, 1.0)
+        return u
 
     def from_unit(self, u):
         u, single = self._prep_input(u, self._ndim)
