@@ -1,10 +1,10 @@
-"""Planck-lite LCDM run using a flow-based GP mean function.
+"""Planck-lite LCDM run using a Gaussian approximation as GP mean function.
 
-A normalizing flow is trained on likelihood-weighted samples once the
-acquisition value drops below ``flow_acq_threshold``. The flow's calibrated
-log-probability is used as the GP mean function so that the GP fits residuals.
-The flow is retrained when the KL divergence between flow and HMC samples
-exceeds ``flow_kl_threshold``.
+A multivariate Gaussian is fit to HMC samples once the acquisition value
+drops below ``flow_acq_threshold``. The Gaussian's calibrated log-probability
+is used as the GP mean function so that the GP fits residuals. The Gaussian
+is retrained when the KL divergence between consecutive HMC samples exceeds
+``flow_kl_threshold``.
 """
 
 import os
@@ -26,10 +26,10 @@ def main():
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 42
 
     cobaya_input_file = 'cosmo_input/LCDM_lite.yaml'
-    likelihood_name = f'Planck_lite_LCDM_Flow_{seed}'
+    likelihood_name = f'Planck_lite_LCDM_Gaussian_{seed}'
 
     start = time.time()
-    print("Starting BOBE run with Normalising Flow transform...")
+    print("Starting BOBE run with Gaussian mean function...")
 
     bobe = BOBE(
         loglikelihood=cobaya_input_file,
@@ -46,16 +46,11 @@ def main():
         clf_type='svm',
         minus_inf=-1e5,
         seed=seed,
-        # Flow mean function settings: train flow when acquisition is low,
-        # retrain when KL divergence between flow and HMC samples is high
+        # Gaussian mean function settings: fit Gaussian when acquisition is low,
+        # retrain when KL divergence between consecutive HMC samples is high
         use_flow_mean=True,
-        flow_acq_threshold=2.0,   # acquisition value below which flow training triggers
+        flow_acq_threshold=2.0,   # acquisition value below which mean training triggers
         flow_kl_threshold=1.,    # KL divergence threshold for retraining
-        flow_kwargs={
-            'n_layers': 8,
-            'hidden_dim': 64,
-            'n_epochs': 2000,
-        },
         flow_retrain_step=3,
     )
 
@@ -111,34 +106,37 @@ def main():
             ranges=dict(zip(param_list, param_bounds.T)),
         )
 
-        # Draw samples from the trained flow if available
+        # Draw samples from the trained Gaussian approximation if available
         sample_list = [BOBE_Samples, reference_samples]
         legend_labels = ['BOBE (HMC)', 'Nested Sampling']
         contour_colors = ['#006FED', 'black']
         filled_list = [True, False]
         contour_lws = [1, 1.5]
         
-        if bobe.flow_trained and bobe.flow is not None:
-            print("Drawing samples from trained flow...")
-            # Draw samples from flow (in physical space)
-            flow_samples = bobe.flow.sample(5000)
+        if bobe.flow_trained and hasattr(bobe, 'gaussian_mean'):
+            print("Drawing samples from fitted Gaussian...")
+            # Draw samples from Gaussian (in physical space)
+            gaussian_cov = np.linalg.inv(np.array(bobe.gaussian_cov_inv))
+            gaussian_samples = np.random.multivariate_normal(
+                np.array(bobe.gaussian_mean), gaussian_cov, size=5000
+            )
             
-            # Create MCSamples object for flow samples
-            Flow_Samples = MCSamples(
-                samples=flow_samples,
+            # Create MCSamples object for Gaussian samples
+            Gaussian_Samples = MCSamples(
+                samples=gaussian_samples,
                 names=param_list,
                 labels=param_labels,
                 ranges=dict(zip(param_list, param_bounds.T)),
             )
             
-            # Insert flow samples before reference samples
-            sample_list.insert(1, Flow_Samples)
-            legend_labels.insert(1, 'Flow')
-            contour_colors.insert(1, '#FF6B35')  # Orange color for flow
+            # Insert Gaussian samples before reference samples
+            sample_list.insert(1, Gaussian_Samples)
+            legend_labels.insert(1, 'Gaussian')
+            contour_colors.insert(1, '#FF6B35')  # Orange color for Gaussian
             filled_list.insert(1, False)
             contour_lws.insert(1, 1.5)
             
-            print(f"Drew {len(flow_samples)} samples from flow")
+            print(f"Drew {len(gaussian_samples)} samples from Gaussian")
 
         print("Creating parameter samples plot...")
         sns.set_theme('notebook', 'ticks', palette='husl')

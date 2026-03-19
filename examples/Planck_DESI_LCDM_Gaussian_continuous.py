@@ -1,10 +1,10 @@
-"""Planck + DESI LCDM run with flow-based GP mean function.
+"""Planck + DESI LCDM run with Gaussian approximation as GP mean function.
 
-A normalizing flow is trained on likelihood-weighted samples once the
-acquisition value drops below ``flow_acq_threshold``. The flow's calibrated
-log-probability is used as the GP mean function so that the GP fits residuals.
-The flow is retrained when the KL divergence between flow and HMC samples
-exceeds ``flow_kl_threshold``.
+A multivariate Gaussian is fit to HMC samples once the acquisition value
+drops below ``flow_acq_threshold``. The Gaussian's calibrated log-probability
+is used as the GP mean function so that the GP fits residuals. The Gaussian
+is retrained when the KL divergence between consecutive HMC samples exceeds
+``flow_kl_threshold``.
 """
 
 import os
@@ -30,7 +30,7 @@ def main():
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 42
 
     cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
-    likelihood_name = f'Planck_DESI_LCDM_Flow_continuous_{seed}'
+    likelihood_name = f'Planck_DESI_LCDM_Gaussian_continuous_{seed}'
 
     print("Loading reference samples...")
     reference_samples = loadMCSamples(
@@ -40,7 +40,7 @@ def main():
 
     start = time.time()
     print("\n" + "=" * 80)
-    print("Starting BOBE run WITH flow-based GP mean function...")
+    print("Starting BOBE run WITH Gaussian mean function...")
     print("=" * 80)
 
     bobe = BOBE(
@@ -48,8 +48,8 @@ def main():
         likelihood_name=likelihood_name,
         confidence_for_unbounded=0.9999995,
         resume=True,
-        resume_file=f'./results/LCDM_Flow/{likelihood_name}',
-        save_dir='./results/LCDM_Flow/',
+        resume_file=f'./results/LCDM_Gaussian/{likelihood_name}',
+        save_dir='./results/LCDM_Gaussian/',
         save=True,
         verbosity='INFO',
         n_cobaya_init=16,
@@ -58,16 +58,11 @@ def main():
         clf_type='svm',
         minus_inf=-1e5,
         seed=seed,
-        # Flow mean function settings: train flow when acquisition is low,
-        # retrain when KL divergence between flow and HMC samples is high
+        # Gaussian mean function settings: fit Gaussian when acquisition is low,
+        # retrain when KL divergence between consecutive HMC samples is high
         use_flow_mean=True,
-        flow_acq_threshold=1.0,   # acquisition value below which flow training triggers
+        flow_acq_threshold=1.0,   # acquisition value below which mean training triggers
         flow_kl_threshold=0.5,    # KL divergence threshold for retraining
-        flow_kwargs={
-            'n_layers': 8,
-            'hidden_dim': 64,
-            'n_epochs': 2000,
-        },
         flow_retrain_step=5,
     )
 
@@ -103,11 +98,11 @@ def main():
         manual_timing = end - start
 
         print("\n" + "=" * 80)
-        print("RUN COMPLETED WITH FLOW-BASED GP MEAN FUNCTION")
+        print("RUN COMPLETED WITH GAUSSIAN GP MEAN FUNCTION")
         print("=" * 80)
         print(f"Total runtime: {manual_timing:.2f}s ({manual_timing / 60:.2f} min)")
         print(f"Number of GP training points: {gp.train_x.shape[0]}")
-        print(f"Flow trained: {bobe.flow_trained}")
+        print(f"Gaussian mean trained: {bobe.flow_trained}")
 
         sample_array = samples['x']
         weights_array = samples['weights']
@@ -135,9 +130,9 @@ def main():
             filled=[True, False],
             contour_colors=['#006FED', 'black'],
             contour_lws=[1, 1.5],
-            legend_labels=['BOBE (flow)', 'MCMC'],
+            legend_labels=['BOBE (Gaussian)', 'MCMC'],
         )
-        g.export(f'./results/LCDM_Flow/{likelihood_name}_cosmo_samples.pdf')
+        g.export(f'./results/LCDM_Gaussian/{likelihood_name}_cosmo_samples.pdf')
 
         g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
         g.settings.legend_fontsize = 16
@@ -149,9 +144,9 @@ def main():
             filled=[True, False],
             contour_colors=['#006FED', 'black'],
             contour_lws=[1, 1.5],
-            legend_labels=['BOBE (flow)', 'MCMC'],
+            legend_labels=['BOBE (Gaussian)', 'MCMC'],
         )
-        g.export(f'./results/LCDM_Flow/{likelihood_name}_full_samples.pdf')
+        g.export(f'./results/LCDM_Gaussian/{likelihood_name}_full_samples.pdf')
 
         print("\n" + "=" * 80)
         print("DETAILED TIMING ANALYSIS")
@@ -171,9 +166,9 @@ def main():
         ax.set_yscale('log')
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Acquisition Value')
-        ax.set_title('Acquisition Function Values (with flow mean)')
+        ax.set_title('Acquisition Function Values (with Gaussian mean)')
         ax.grid(True, alpha=0.3)
-        plt.savefig(f'./results/LCDM_Flow/{likelihood_name}_acquisition.pdf', bbox_inches='tight')
+        plt.savefig(f'./results/LCDM_Gaussian/{likelihood_name}_acquisition.pdf', bbox_inches='tight')
 
         print(f"\nGP Lengthscales: {gp.lengthscales}")
         print(f"Kernel variance: {gp.kernel_variance:.4f}")
