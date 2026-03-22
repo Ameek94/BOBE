@@ -892,6 +892,67 @@ class NormalisingFlowTransform(BaseTransform):
         )
 
     # -----------------------------------------------------------------
+    # Pre-training on external samples
+    # -----------------------------------------------------------------
+
+    def pretrain(self, x_phys, weights=None):
+        """Train the normalising flow on external samples and activate the transform.
+
+        After calling this the flow is live (``_use_flow = True``) and
+        ``update_count`` is set to ``max_updates`` so that no further
+        automatic updates are triggered during the BOBE run.
+
+        Parameters
+        ----------
+        x_phys : array-like (N, D)
+            Physical-space training samples (e.g. from reference MCMC chains).
+        weights : array-like (N,) or None
+            Optional importance weights for the samples.
+        """
+        from .flow import NormalisingFlow
+
+        x_phys = np.asarray(x_phys, dtype=np.float64)
+        N = x_phys.shape[0]
+        log.info(
+            f"[Flow pretrain] Training flow on {N} external samples "
+            f"({'rotation precon + ' if self.use_rotation_precon else ''}MAF) ..."
+        )
+
+        flow = NormalisingFlow(
+            ndim=self._ndim,
+            n_layers=self.n_layers,
+            hidden_dim=self.hidden_dim,
+            nn_depth=self.nn_depth,
+            n_sigma=self.n_sigma,
+            seed=self.seed,
+            use_rotation_precon=self.use_rotation_precon,
+        )
+        flow.fit(
+            x_phys,
+            weights=weights,
+            n_epochs=self.flow_n_epochs,
+            lr=self.flow_lr,
+            batch_size=self.flow_batch_size,
+            verbose=True,
+        )
+        self._flow = flow
+        self._use_flow = True
+        # Lock out automatic updates for the rest of the BOBE run.
+        self.update_count = self.max_updates
+
+        # Diagnostics
+        z_diag = self._flow.to_latent(x_phys[:min(N, 1000)])
+        u_diag = (z_diag + self.n_sigma) / (2.0 * self.n_sigma)
+        frac_in = float(np.mean(np.all((u_diag >= 0.0) & (u_diag <= 1.0), axis=1)))
+        log.info(
+            f"[Flow pretrain] External samples in unit cube: {frac_in * 100:.1f}% "
+            f"(n_sigma={self.n_sigma})"
+        )
+        rt_err = np.max(np.abs(flow.to_data(flow.to_latent(x_phys[:5])) - x_phys[:5]))
+        log.info(f"[Flow pretrain] Roundtrip max error: {rt_err:.2e}")
+        log.info(f"[Flow pretrain] Complete. Transform: {self!r}")
+
+    # -----------------------------------------------------------------
     # Automatic update
     # -----------------------------------------------------------------
 
