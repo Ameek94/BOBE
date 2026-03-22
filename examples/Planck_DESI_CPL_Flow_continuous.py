@@ -1,11 +1,10 @@
 """
-Test script demonstrating GP parameter rotation with covariance from reference chains.
+Planck + DESI CPL run with continuous Normalising Flow transform.
 
-This script:
-1. Loads reference MCMC chains with GetDist
-2. Extracts covariance matrix and best-fit point
-3. Runs BOBE with parameter rotation enabled
-4. Compares results with and without rotation
+A Masked Autoregressive Flow (MAF) with PCA rotation pre-conditioning is
+trained on HMC samples once the acquisition value drops below
+``transform_acq_threshold`` and then refreshed every ``update_step``
+iterations, progressively warping the GP's unit cube to match the posterior.
 """
 
 import os
@@ -14,8 +13,7 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
 from BOBE import BOBE
-from BOBE.transforms import RotationTransform
-from BOBE.utils.core import scale_from_unit
+from BOBE.transforms import NormalisingFlowTransform
 import time
 import matplotlib.pyplot as plt
 plt.rcParams['text.usetex'] = True
@@ -30,24 +28,17 @@ def main():
 
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/CPL_Planck_DESI.yaml'
-    likelihood_name = f'Planck_DESI_CPL_Rotation_continuous_{seed}'
+    likelihood_name = f'Planck_DESI_CPL_Flow_continuous_{seed}'
 
-    # Load reference samples to extract covariance and best-fit point
     print("Loading reference samples...")
     reference_samples = loadMCSamples(
             './cosmo_input/chains/union3_CPL',
             settings={'ignore_rows': 0.3, 'label': 'MCMC'}
         )
-    
-    # cov_matrix = np.loadtxt('./results/CPL/Planck_DESI_CPL_Fisher_100_cov_matrix.txt')
-    # center_point = np.loadtxt('./results/CPL/Planck_DESI_CPL_Fisher_100_cov_peak.txt')
-    # If an initial covariance is available, pass it via:
-    #   transform=RotationTransform(param_bounds, covariance=cov_matrix, center=center_point)
-    # param_bounds can be obtained from a CobayaLikelihood instance before constructing BOBE.
-    
+
     start = time.time()
     print("\n" + "="*80)
-    print("Starting BOBE run WITH parameter rotation...")
+    print("Starting BOBE run WITH Normalising Flow transform...")
     print("="*80)
 
     # Pass Cobaya YAML file path directly to BOBE with covariance rotation
@@ -56,8 +47,8 @@ def main():
         likelihood_name=likelihood_name,
         confidence_for_unbounded=0.9999995,
         resume=True,
-        resume_file=f'./results/CPL/{likelihood_name}',
-        save_dir='./results/CPL/',
+        resume_file=f'./results/CPL_Flow/{likelihood_name}',
+        save_dir='./results/CPL_Flow/',
         save=True,
         verbosity='INFO',
         n_cobaya_init=16,
@@ -66,25 +57,30 @@ def main():
         clf_type='svm',
         minus_inf=-1e5,
         seed=seed,
-        # RotationTransform passed as a class: BOBE instantiates it with the
-        # resolved param_bounds. Supply an instance instead to use an initial
-        # covariance, e.g.: RotationTransform(param_bounds, covariance=cov_matrix, center=center_point)
-        transform=(RotationTransform, {
-            'kl_threshold': 0.5,
-            'max_updates': 7,
-            'update_step': 20,
+        # Pass transform as (class, kwargs): BOBE resolves param_bounds from the
+        # likelihood and calls NormalisingFlowTransform(param_bounds, **kwargs).
+        transform=(NormalisingFlowTransform, {
+            'kl_threshold': 0.5,      # min KL between old/new posteriors to trigger update
+            'max_updates': 5,         # stop after 5 flow re-fits
+            'update_step': 50,        # minimum BO iterations between consecutive re-fits
+            'n_layers': 8,
+            'hidden_dim': 64,
+            'flow_n_epochs': 2000,
+            'use_rotation_precon': True,  # PCA-whiten before MAF (recommended)
         }),
     )
 
+    # Initial exploration with logei — flow should not trigger yet
     results = bobe.run(
         acq='logei',
-        min_evals=100, 
+        min_evals=100,
         max_evals=250,
         max_gp_size=1500,
-        fit_n_points=25, 
+        fit_n_points=25,
         ns_n_points=25,
         batch_size=5,
         do_final_ns=False,
+        transform_acq_threshold=1e10,  # prevent flow activation during exploration
     )
     
     results = bobe.run(
@@ -122,7 +118,7 @@ def main():
         manual_timing = end - start
 
         print("\n" + "="*80)
-        print("RUN COMPLETED WITH ROTATION")
+        print("RUN COMPLETED WITH NORMALISING FLOW TRANSFORM")
         print("="*80)
         # print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
         # if 'upper' in logz_dict and 'lower' in logz_dict:
@@ -172,41 +168,25 @@ def main():
             filled=[True, False],
             contour_colors=['#006FED', 'black'], 
             contour_lws=[1, 1.5],
-            legend_labels=['BOBE (rotated)', 'MCMC'],
-        ) 
-        
-        # # Add scatter points for GP training data
-        # points = scale_from_unit(gp.train_x_original, param_bounds)
-        # for i in range(ndim):
-        #     for j in range(i+1, ndim):
-        #         ax = g.subplots[j, i]
-        #         ax.scatter(points[:, i], points[:, j], alpha=0.75, color='red', s=4)
-        
-        g.export(f'./results/CPL/{likelihood_name}_cosmo_samples.pdf')
-        print(f"Saved plot to ./results/CPL/{likelihood_name}_cosmo_samples.pdf")
+            legend_labels=['BOBE (flow)', 'MCMC'],
+        )
+        g.export(f'./results/CPL_Flow/{likelihood_name}_cosmo_samples.pdf')
+        print(f"Saved plot to ./results/CPL_Flow/{likelihood_name}_cosmo_samples.pdf")
 
         g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
         g.settings.legend_fontsize = 16
         g.settings.axes_fontsize = 16
         g.settings.axes_labelsize = 16
         g.triangle_plot(
-            [BOBE_Samples, reference_samples], 
+            [BOBE_Samples, reference_samples],
             params=param_list,
             filled=[True, False],
-            contour_colors=['#006FED', 'black'], 
+            contour_colors=['#006FED', 'black'],
             contour_lws=[1, 1.5],
-            legend_labels=['BOBE (rotated)', 'MCMC'],
-        ) 
-        
-        # # Add scatter points for GP training data
-        # points = scale_from_unit(gp.train_x_original, param_bounds)
-        # for i in range(ndim):
-        #     for j in range(i+1, ndim):
-        #         ax = g.subplots[j, i]
-        #         ax.scatter(points[:, i], points[:, j], alpha=0.75, color='red', s=4)
-        
-        g.export(f'./results/CPL/{likelihood_name}_full_samples.pdf')
-        print(f"Saved plot to ./results/CPL/{likelihood_name}_full_samples.pdf")
+            legend_labels=['BOBE (flow)', 'MCMC'],
+        )
+        g.export(f'./results/CPL_Flow/{likelihood_name}_full_samples.pdf')
+        print(f"Saved plot to ./results/CPL_Flow/{likelihood_name}_full_samples.pdf")
 
 
         # Print timing analysis
@@ -234,10 +214,10 @@ def main():
         ax.set_yscale('log')
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Acquisition Value')
-        ax.set_title('Acquisition Function Values (with rotation)')
+        ax.set_title('Acquisition Function Values (with flow transform)')
         ax.grid(True, alpha=0.3)
-        plt.savefig(f"./results/CPL/{likelihood_name}_acquisition.pdf", bbox_inches='tight')
-        print(f"Saved acquisition plot to ./results/CPL/{likelihood_name}_acquisition.pdf")
+        plt.savefig(f"./results/CPL_Flow/{likelihood_name}_acquisition.pdf", bbox_inches='tight')
+        print(f"Saved acquisition plot to ./results/CPL_Flow/{likelihood_name}_acquisition.pdf")
 
         # Compare lengthscales before/after rotation
         print("\n" + "="*80)

@@ -3,53 +3,79 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
 from BOBE import BOBE
+from BOBE.transforms import NormalisingFlowTransform
 from BOBE.utils.core import renormalise_log_weights, scale_from_unit
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns # optional for improved plot aesthetics
-from getdist import MCSamples, plots, loadMCSamples
+from getdist import MCSamples, plots
 import numpy as np
+from dynesty import DynamicNestedSampler
+
+def loglike(X, slow=False):
+    logpdf = -0.25 * (5 * (0.2 - X[0])) ** 2 - (20 * (X[1] / 4 - X[0] ** 4)) ** 2
+    if slow: # artificial delay to simulate slow likelihood
+        time.sleep(2)
+    return logpdf
+
+def prior_transform(x):
+    x[0] = x[0]*2 - 1 
+    x[1] = x[1]*3 - 1 
+    return x
 
 def main():
-
-    # Set up the cosmological likelihood
-    cobaya_input_file = 'cosmo_input/LCDM_lite.yaml'
-    likelihood_name = f'Planck_lite_LCDM_z0025'
-
+    # Problem setup
+    ndim = 2
+    param_list = ['x1', 'x2']
+    param_labels = ['x_1', 'x_2']
+    param_bounds = np.array([[-1, 1], [-1, 2]]).T
+    likelihood_name = f'banana_flow'
+    
     start = time.time()
     print("Starting BOBE run...")
 
-    # Pass Cobaya YAML file path directly to BOBE
+    # Initialize BOBE instance
     bobe = BOBE(
-        loglikelihood=cobaya_input_file,
+        loglikelihood=loglike,
+        param_list=param_list,
+        param_bounds=param_bounds,
+        param_labels=param_labels,
         likelihood_name=likelihood_name,
-        confidence_for_unbounded=0.9999995,
-        resume=True,
-        resume_file=f'./results/LCDM_Lite/{likelihood_name}',
-        save_dir='./results/LCDM_Lite/',
-        save=True,
         verbosity='INFO',
-        n_cobaya_init=4, 
         n_sobol_init=8,
-        use_clf=True,
-        clf_type='svm',
-        minus_inf=-1e5,
-        seed=10,
+        optimizer='scipy',
+        use_clf=False,
+        seed=42,
+        save_dir='./results/',
+        save=True,
+        transform=(NormalisingFlowTransform, {
+            'kl_threshold': 0.5,
+            'max_updates': 5,
+            'update_step': 10,
+            'n_layers': 4,
+            'hidden_dim': 32,
+            'flow_n_epochs': 1000,
+            'use_rotation_precon': False,
+        }),
     )
     
+    # Run optimization with convergence and run settings
     results = bobe.run(
         acq='wipstd',
-        min_evals=50, 
-        max_evals=250,
-        max_gp_size=200,
-        fit_n_points=4, 
-        ns_n_points=4,
-        batch_size=4,
+        min_evals=25,
+        max_evals=150,
+        # max_gp_size=250,
+        logz_threshold=0.05,
+        # do_final_ns=True,
+        # fit_n_points=1,
+        # batch_size=1,
+        # ns_n_points=2,
         num_hmc_warmup=256,
-        num_hmc_samples=4000, 
+        num_hmc_samples=4000,
         mc_points_size=512,
-        logz_threshold=0.01,
-        do_final_ns=False,
+        # num_chains=4,
+        # convergence_n_iters=2,
+        transform_acq_threshold=0.2,  # effectively disable flow updates during acquisition
     )
 
     end = time.time()
@@ -61,10 +87,6 @@ def main():
         likelihood = results['likelihood']
         results_manager = results['results_manager']
         samples = results['samples']
-        param_bounds = likelihood.param_bounds
-        param_list = likelihood.param_list
-        param_labels = likelihood.param_labels
-        ndim = len(param_list)
 
         manual_timing = end - start
 
@@ -77,10 +99,24 @@ def main():
         print("="*60)
         print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
 
-        reference_samples = loadMCSamples(
-            './cosmo_input/chains/Planck_lite_pchord',
-            # settings={'ignore_rows': 0.3, 'label': 'MCMC'}
-        )
+
+        # Create Dynesty samples to compare against
+        dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,
+                                               sample='rwalk')
+
+        dns_sampler.run_nested(print_progress=True,dlogz_init=0.01) 
+        res = dns_sampler.results  
+        mean = res['logz'][-1]
+        logz_err = res['logzerr'][-1]
+        print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
+
+        dns_samples = res['samples']
+        weights = renormalise_log_weights(res['logwt'])
+
+        reference_samples = MCSamples(samples=dns_samples, names=param_list, labels=param_labels,
+                                    weights=weights, 
+                                    ranges= dict(zip(param_list,param_bounds.T)))  
+
 
         # Create MCSamples from BOBE results
         sample_array = samples['x']
@@ -88,7 +124,7 @@ def main():
         BOBE_Samples = MCSamples(samples=sample_array, names=param_list, labels=param_labels,
                                     weights=weights_array, 
                                     ranges= dict(zip(param_list,param_bounds.T)))
-
+        
         # Create parameter samples plot
         print("Creating parameter samples plot...")
         sns.set_theme('notebook', 'ticks', palette='husl')
@@ -99,17 +135,17 @@ def main():
         g.settings.legend_fontsize = 16
         g.settings.axes_fontsize = 16
         g.settings.axes_labelsize = 16
-        g.triangle_plot([BOBE_Samples,reference_samples], params=['ombh2','omch2','H0','ns','logA','tau'],
-                        filled=[True, False],
-                    contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
-                    legend_labels=['BOBE', 'Nested Sampling'],) 
+        g.triangle_plot([BOBE_Samples,reference_samples], filled=[True, False],
+                    contour_colors=['#006FED', 'black'], contour_lws=[1, 1.],
+                    legend_labels=['BOBE', 'Nested Sampler']) 
         # add scatter points for gp training data
         points = scale_from_unit(gp.train_x, param_bounds)
         for i in range(ndim):
+            # ax = g.subplots[i,i]
             for j in range(i+1, ndim):
                 ax = g.subplots[j, i]
                 ax.scatter(points[:, i], points[:, j], alpha=0.75, color='red', s=4)
-        g.export(f'./results/LCDM_Lite/{likelihood.name}_samples.pdf')
+        g.export(f'./results/{likelihood.name}_samples.pdf')
 
         # Print timing analysis
         print("DETAILED TIMING ANALYSIS")
@@ -134,7 +170,7 @@ def main():
         ax.set_yscale('log')
         ax.set_xlabel(r'Iteration')
         ax.set_ylabel(r'Acquisition Value')
-        plt.savefig(f"./results/LCDM_Lite/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
+        plt.savefig(f"./results/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
 
 if __name__ == "__main__":
     main()

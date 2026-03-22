@@ -1,7 +1,8 @@
 """
 Planck-lite LCDM run using a Normalising Flow transform.
 
-The flow is trained on HMC samples once the acquisition value drops below
+A Masked Autoregressive Flow (MAF) with PCA rotation pre-conditioning is
+trained on HMC samples once the acquisition value drops below
 ``transform_acq_threshold`` and then every ``update_step`` iterations after
 that, remapping the GP's unit cube to track the posterior manifold.
 """
@@ -49,12 +50,13 @@ def main():
         # Pass transform as (class, kwargs): BOBE resolves param_bounds from the
         # likelihood and calls NormalisingFlowTransform(param_bounds, **kwargs).
         transform=(NormalisingFlowTransform, {
-            'kl_threshold': 0.5,   # min KL between old/new posteriors to trigger update
-            'max_updates': 3,       # stop after 3 flow re-fits
-            'update_step': 5,      # minimum BO iterations between re-fits
+            'kl_threshold': 0.5,      # min KL between old/new posteriors to trigger update
+            'max_updates': 3,         # stop after 3 flow re-fits
+            'update_step': 5,         # minimum BO iterations between re-fits
             'n_layers': 8,
             'hidden_dim': 64,
             'flow_n_epochs': 2000,
+            'use_rotation_precon': True,  # PCA-whiten before MAF (recommended)
         }),
     )
 
@@ -63,16 +65,16 @@ def main():
         min_evals=25,
         max_evals=200,
         max_gp_size=150,
-        fit_n_points=8,
+        fit_n_points=4, 
         ns_n_points=4,
-        batch_size=2,
+        batch_size=4,
         num_hmc_warmup=256,
         num_hmc_samples=5000,
         mc_points_size=512,
-        logz_threshold=0.025,
+        logz_threshold=0.02,
         do_final_ns=False,
         # acquisition value below which a flow update is attempted
-        transform_acq_threshold=4.,
+        transform_acq_threshold=0.5,
     )
 
     end = time.time()

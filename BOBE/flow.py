@@ -75,6 +75,7 @@ class NormalisingFlow:
         nn_depth: int = 2,
         n_sigma: float = 5.0,
         seed: int = 42,
+        use_rotation_precon: bool = False,
     ):
         self.ndim = ndim
         self.n_layers = n_layers
@@ -82,10 +83,15 @@ class NormalisingFlow:
         self.nn_depth = nn_depth
         self.n_sigma = n_sigma
         self._seed = seed
+        self.use_rotation_precon = use_rotation_precon
 
         self._flow = None          # flowjax Transformed distribution
         self._pre_mean = np.zeros(ndim, dtype=np.float64)
         self._pre_std = np.ones(ndim, dtype=np.float64)
+        # Rotation preconditioning (PCA whitening before the MAF)
+        self._use_rotation_precon = False
+        self._pre_eigvecs = None   # (D, D) columns = eigenvectors, descending λ
+        self._pre_eigvals = None   # (D,) eigenvalues, descending
         self._trained = False
 
     # ------------------------------------------------------------------
@@ -106,10 +112,26 @@ class NormalisingFlow:
             nn_depth=self.nn_depth,
         )
 
-    def _preprocess(self, x: np.ndarray) -> jnp.ndarray:
+    def _preprocess(self, x) -> jnp.ndarray:
+        """Preprocess x → normalised space fed to the MAF.
+
+        When ``_use_rotation_precon`` is True this performs PCA whitening:
+            x_white = (x - mean) @ V / sqrt(λ)
+        so the MAF sees data with Cov ≈ I and only needs to learn non-Gaussian
+        residuals.  Otherwise falls back to axis-wise standardisation.
+        """
+        if self._use_rotation_precon:
+            centered = jnp.array(x, dtype=jnp.float64) - jnp.array(self._pre_mean)
+            return (centered @ jnp.array(self._pre_eigvecs)) / jnp.array(self._pre_std)
         return jnp.array((x - self._pre_mean) / self._pre_std, dtype=jnp.float64)
 
     def _unpreprocess(self, x_norm) -> np.ndarray:
+        if self._use_rotation_precon:
+            # Undo scaling then un-rotate: x = x_white * sqrt(λ) @ V^T + mean
+            return (
+                np.array(x_norm, dtype=np.float64)
+                * self._pre_std
+            ) @ self._pre_eigvecs.T + self._pre_mean
         return np.array(x_norm, dtype=np.float64) * self._pre_std + self._pre_mean
 
     # ------------------------------------------------------------------
@@ -120,6 +142,7 @@ class NormalisingFlow:
         self,
         x: np.ndarray,
         weights: Optional[np.ndarray] = None,
+        pre_covariance: Optional[np.ndarray] = None,
         n_epochs: int = 2000,
         lr: float = 3e-4,
         batch_size: Optional[int] = 512,
@@ -163,18 +186,48 @@ class NormalisingFlow:
         if D != self.ndim:
             raise ValueError(f"Expected {self.ndim}-D data, got {D}")
 
-        # Whitening statistics (optionally weighted)
+        # --- Preprocessing statistics ---
         if weights is not None:
             w = np.asarray(weights, dtype=np.float64)
             w = np.clip(w, 0.0, None)
             w /= w.sum()
             self._pre_mean = np.average(x, weights=w, axis=0)
             diff = x - self._pre_mean
-            self._pre_std = np.sqrt(np.average(diff ** 2, weights=w, axis=0))
+            sample_cov = (diff * w[:, None]).T @ diff
+            axis_std = np.sqrt(np.diag(sample_cov))
         else:
             self._pre_mean = x.mean(axis=0)
-            self._pre_std = x.std(axis=0)
-        self._pre_std = np.maximum(self._pre_std, 1e-6)
+            diff = x - self._pre_mean
+            sample_cov = np.cov(x.T) if N > 1 else np.eye(D)
+            axis_std = x.std(axis=0)
+
+        # Decide whether to use rotation preconditioning
+        _cov_for_rot = None
+        if pre_covariance is not None:
+            _cov_for_rot = np.asarray(pre_covariance, dtype=np.float64)
+        elif self.use_rotation_precon:
+            _cov_for_rot = sample_cov
+
+        if _cov_for_rot is not None:
+            # PCA whitening: eigenvectors in descending eigenvalue order
+            eigvals, eigvecs = np.linalg.eigh(_cov_for_rot)
+            idx = np.argsort(eigvals)[::-1]
+            eigvals = eigvals[idx]
+            eigvecs = eigvecs[:, idx]
+            self._pre_eigvals = np.maximum(eigvals, 1e-12)
+            self._pre_eigvecs = eigvecs
+            # _pre_std = sqrt(λ) so log_prob Jacobian formula is unchanged
+            self._pre_std = np.sqrt(self._pre_eigvals)
+            self._use_rotation_precon = True
+            log.info(
+                f"Rotation preconditioning enabled. "
+                f"Condition number: {self._pre_eigvals[0]/self._pre_eigvals[-1]:.2e}"
+            )
+        else:
+            self._pre_std = np.maximum(axis_std, 1e-6)
+            self._use_rotation_precon = False
+            self._pre_eigvecs = None
+            self._pre_eigvals = None
 
         x_norm = self._preprocess(x)
 
@@ -310,8 +363,12 @@ class NormalisingFlow:
             "n_sigma": self.n_sigma,
             "seed": self._seed,
             "trained": self._trained,
+            "use_rotation_precon": self.use_rotation_precon,
+            "active_rotation_precon": self._use_rotation_precon,
             "pre_mean": self._pre_mean.copy(),
             "pre_std": self._pre_std.copy(),
+            "pre_eigvecs": self._pre_eigvecs.copy() if self._pre_eigvecs is not None else None,
+            "pre_eigvals": self._pre_eigvals.copy() if self._pre_eigvals is not None else None,
             "flow_bytes": None,
         }
         if self._trained and self._flow is not None:
@@ -339,8 +396,14 @@ class NormalisingFlow:
             seed=int(state["seed"]),
         )
         obj._trained = bool(state["trained"])
+        obj.use_rotation_precon = bool(state.get("use_rotation_precon", False))
+        obj._use_rotation_precon = bool(state.get("active_rotation_precon", False))
         obj._pre_mean = np.array(state["pre_mean"], dtype=np.float64)
         obj._pre_std = np.array(state["pre_std"], dtype=np.float64)
+        _ev = state.get("pre_eigvecs")
+        obj._pre_eigvecs = np.array(_ev, dtype=np.float64) if _ev is not None else None
+        _el = state.get("pre_eigvals")
+        obj._pre_eigvals = np.array(_el, dtype=np.float64) if _el is not None else None
 
         flow_bytes = state.get("flow_bytes")
         if obj._trained and flow_bytes is not None:

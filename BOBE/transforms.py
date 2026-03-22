@@ -755,6 +755,7 @@ class NormalisingFlowTransform(BaseTransform):
         flow_lr: float = 3e-4,
         flow_batch_size: int = 512,
         seed: int = 42,
+        use_rotation_precon: bool = True,
     ):
         """
         Parameters
@@ -810,6 +811,7 @@ class NormalisingFlowTransform(BaseTransform):
         self.flow_lr = float(flow_lr)
         self.flow_batch_size = int(flow_batch_size)
         self.seed = int(seed)
+        self.use_rotation_precon = bool(use_rotation_precon)
 
         # runtime state
         self._use_flow = False
@@ -840,15 +842,21 @@ class NormalisingFlowTransform(BaseTransform):
         theta = jnp.asarray(theta)
         single = theta.ndim == 1
         if self._use_flow:
-            # Equinox bijection.inverse is JAX-traceable (single-point per call).
-            # Linear mapping z → u keeps the posterior concentrated near u=0.5,
-            # which is essential for WIPV/WIPStd.
+            # Build the preprocess function capturing flow state as JAX constants.
+            # This must be JAX-traceable for acquisition function autodiff.
             _mean = jnp.array(self._flow._pre_mean)
             _std = jnp.array(self._flow._pre_std)
-            def _to_u(t):
-                x_norm = (t - _mean) / _std
-                z = self._flow._flow.bijection.inverse(x_norm)
-                return (z + self.n_sigma) / (2.0 * self.n_sigma)
+            if self._flow._use_rotation_precon:
+                _eigvecs = jnp.array(self._flow._pre_eigvecs)
+                def _to_u(t):
+                    x_white = (t - _mean) @ _eigvecs / _std
+                    z = self._flow._flow.bijection.inverse(x_white)
+                    return (z + self.n_sigma) / (2.0 * self.n_sigma)
+            else:
+                def _to_u(t):
+                    x_norm = (t - _mean) / _std
+                    z = self._flow._flow.bijection.inverse(x_norm)
+                    return (z + self.n_sigma) / (2.0 * self.n_sigma)
             u = _to_u(theta) if single else jax.vmap(_to_u)(theta)
         else:
             if single:
@@ -926,21 +934,29 @@ class NormalisingFlowTransform(BaseTransform):
 
         weights = mc_samples.get("weights", None)
 
+        # Compute new posterior Gaussian approximation (also reused for KL check)
+        if weights is not None:
+            w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
+            w /= w.sum()
+            new_mean = np.average(mc_x_phys, weights=w, axis=0)
+            diff = mc_x_phys - new_mean
+            new_cov = (diff * w[:, None]).T @ diff
+        else:
+            new_mean = mc_x_phys.mean(axis=0)
+            new_cov = np.cov(mc_x_phys.T) if N > 1 else np.eye(self._ndim)
+        new_cov = 0.5 * (new_cov + new_cov.T) + 1e-10 * np.eye(self._ndim)
+
         # KL check using Gaussian approximation (skip on first update)
         if self._use_flow:
-            if weights is not None:
-                w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
-                w /= w.sum()
-                new_mean = np.average(mc_x_phys, weights=w, axis=0)
-                diff = mc_x_phys - new_mean
-                new_cov = (diff * w[:, None]).T @ diff
+            # Use the full sample covariance of the previous MC run (stored as
+            # _pre_eigvals / _pre_eigvecs when rotation precon is active, else
+            # fall back to diagonal diag(_pre_std^2)).
+            if self._flow._use_rotation_precon and self._flow._pre_eigvecs is not None:
+                V = self._flow._pre_eigvecs
+                old_cov = V @ np.diag(self._flow._pre_eigvals) @ V.T
             else:
-                new_mean = mc_x_phys.mean(axis=0)
-                new_cov = np.cov(mc_x_phys.T)
-            new_cov = 0.5 * (new_cov + new_cov.T) + 1e-10 * np.eye(self._ndim)
-
+                old_cov = np.diag(self._flow._pre_std ** 2)
             old_mean = self._flow._pre_mean.copy()
-            old_cov = np.diag(self._flow._pre_std ** 2)
             try:
                 from .utils.core import kl_divergence_gaussian
                 kl_dict = kl_divergence_gaussian(old_mean, old_cov, new_mean, new_cov)
@@ -959,7 +975,8 @@ class NormalisingFlowTransform(BaseTransform):
         from .flow import NormalisingFlow
         log.info(
             f"[Flow update {self.update_count + 1}] "
-            f"Training flow on {N} samples …"
+            f"Training flow on {N} samples "
+            f"({'rotation precon + ' if self.use_rotation_precon else ''}MAF) …"
         )
         flow = NormalisingFlow(
             ndim=self._ndim,
@@ -968,6 +985,7 @@ class NormalisingFlowTransform(BaseTransform):
             nn_depth=self.nn_depth,
             n_sigma=self.n_sigma,
             seed=self.seed + self.update_count,
+            use_rotation_precon=self.use_rotation_precon,
         )
         flow.fit(
             mc_x_phys,
@@ -979,8 +997,30 @@ class NormalisingFlowTransform(BaseTransform):
         )
         self._flow = flow
 
-        # Preview in-bounds training points under the new flow transform
-        u_cand = self.to_unit(all_x_phys, clip=False)
+        # --- Diagnostic: how well does the new transform cover MC samples? ---
+        # Compute directly via to_latent() to avoid any dependency on _use_flow.
+        _diag_x = mc_x_phys[:min(N, 1000)]
+        _z_diag = self._flow.to_latent(_diag_x)
+        u_diag = (_z_diag + self.n_sigma) / (2.0 * self.n_sigma)
+        frac_in = float(np.mean(np.all((u_diag >= 0.0) & (u_diag <= 1.0), axis=1)))
+        log.info(
+            f"[Flow update] MC samples in unit cube: {frac_in*100:.1f}% "
+            f"(n_sigma={self.n_sigma})"
+        )
+        log.info(
+            f"[Flow update] u mean: {np.round(u_diag.mean(0), 3)}, "
+            f"u std: {np.round(u_diag.std(0), 3)}"
+        )
+        # Roundtrip check on a small batch
+        _x5 = mc_x_phys[:5]
+        _rt_err = np.max(np.abs(flow.to_data(flow.to_latent(_x5)) - _x5))
+        log.info(f"[Flow update] Roundtrip max error: {_rt_err:.2e}")
+
+        # Compute new unit-cube coordinates for all GP training points directly
+        # using the new flow (mirrors RotationTransform: compute with new params
+        # before committing, so the GP always receives correct coordinates).
+        z_cand = self._flow.to_latent(all_x_phys)
+        u_cand = (z_cand + self.n_sigma) / (2.0 * self.n_sigma)
         in_bounds = np.all((u_cand >= 0.0) & (u_cand <= 1.0), axis=1)
 
         n_dropped = int((~in_bounds).sum())
@@ -1001,7 +1041,9 @@ class NormalisingFlowTransform(BaseTransform):
             self._flow = None
             return False
 
-        # Commit flow (must be done before GP remap so to_unit uses the flow)
+        # Commit flow AFTER computing x_ib, matching RotationTransform: pass
+        # correctly-transformed data to the GP first, then activate the new
+        # transform so that subsequent calls to to_unit() use the flow.
         self._use_flow = True
 
         # Update GP training data in new unit-cube space
@@ -1084,6 +1126,7 @@ class NormalisingFlowTransform(BaseTransform):
             "flow_batch_size": self.flow_batch_size,
             "seed": self.seed,
             "use_flow": self._use_flow,
+            "use_rotation_precon": self.use_rotation_precon,
             "update_count": self.update_count,
             "last_update_ii": (
                 self.last_update_ii if self.last_update_ii is not None else -1
@@ -1147,6 +1190,7 @@ class NormalisingFlowTransform(BaseTransform):
         obj.flow_lr = float(state.get("flow_lr", 3e-4))
         obj.flow_batch_size = int(state.get("flow_batch_size", 512))
         obj.seed = int(state.get("seed", 42))
+        obj.use_rotation_precon = bool(state.get("use_rotation_precon", True))
         obj._use_flow = bool(state.get("use_flow", False))
         obj.update_count = int(state.get("update_count", 0))
         _lii = state.get("last_update_ii", -1)

@@ -1,8 +1,9 @@
 """
 Planck + DESI LCDM run with continuous Normalising Flow transform.
 
-A Real-NVP flow is trained on HMC samples once the acquisition value drops
-below ``transform_acq_threshold`` and then refreshed every ``update_step``
+A Masked Autoregressive Flow (MAF) with PCA rotation pre-conditioning is
+trained on HMC samples once the acquisition value drops below
+``transform_acq_threshold`` and then refreshed every ``update_step``
 iterations, progressively warping the GP's unit cube to match the posterior.
 """
 
@@ -48,8 +49,8 @@ def main():
         likelihood_name=likelihood_name,
         confidence_for_unbounded=0.9999995,
         resume=True,
-        resume_file=f'./results/LCDM_Flow/{likelihood_name}',
-        save_dir='./results/LCDM_Flow/',
+        resume_file=f'./results/LCDM/{likelihood_name}',
+        save_dir='./results/LCDM/',
         save=True,
         verbosity='INFO',
         n_cobaya_init=8,
@@ -61,12 +62,13 @@ def main():
         # Pass transform as (class, kwargs): BOBE resolves param_bounds from the
         # likelihood and calls NormalisingFlowTransform(param_bounds, **kwargs).
         transform=(NormalisingFlowTransform, {
-            'kl_threshold': 0.5,   # min KL between old/new posteriors to trigger update
-            'max_updates': 5,       # stop after 5 flow re-fits
-            'update_step': 50,      # minimum BO iterations between consecutive re-fits
+            'kl_threshold': 0.5,      # min KL between old/new posteriors to trigger update
+            'max_updates': 5,         # stop after 5 flow re-fits
+            'update_step': 50,        # minimum BO iterations between consecutive re-fits
             'n_layers': 8,
             'hidden_dim': 64,
             'flow_n_epochs': 2000,
+            'use_rotation_precon': False,  # PCA-whiten before MAF (recommended)
         }),
     )
 
@@ -138,7 +140,7 @@ def main():
             contour_lws=[1, 1.5],
             legend_labels=['BOBE (flow)', 'MCMC'],
         )
-        g.export(f'./results/LCDM_Flow/{likelihood_name}_cosmo_samples.pdf')
+        g.export(f'./results/LCDM/{likelihood_name}_cosmo_samples.pdf')
 
         g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
         g.settings.legend_fontsize = 16
@@ -152,7 +154,7 @@ def main():
             contour_lws=[1, 1.5],
             legend_labels=['BOBE (flow)', 'MCMC'],
         )
-        g.export(f'./results/LCDM_Flow/{likelihood_name}_full_samples.pdf')
+        g.export(f'./results/LCDM/{likelihood_name}_full_samples.pdf')
 
         print("\n" + "=" * 80)
         print("DETAILED TIMING ANALYSIS")
@@ -174,7 +176,7 @@ def main():
         ax.set_ylabel('Acquisition Value')
         ax.set_title('Acquisition Function Values (with flow transform)')
         ax.grid(True, alpha=0.3)
-        plt.savefig(f'./results/LCDM_Flow/{likelihood_name}_acquisition.pdf', bbox_inches='tight')
+        plt.savefig(f'./results/LCDM/{likelihood_name}_acquisition.pdf', bbox_inches='tight')
 
         print(f"\nGP Lengthscales: {gp.lengthscales}")
         print(f"Kernel variance: {gp.kernel_variance:.4f}")
