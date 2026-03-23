@@ -71,8 +71,8 @@ def main():
         # covariance, e.g.: RotationTransform(param_bounds, covariance=cov_matrix, center=center_point)
         transform=(RotationTransform, {
             'kl_threshold': 0.5,
-            'max_updates': 7,
-            'update_step': 20,
+            'max_updates': 15,
+            'update_step': 10,
         }),
     )
 
@@ -97,7 +97,7 @@ def main():
         batch_size=5,
         convergence_n_iters=5,
         num_hmc_warmup=512,
-        num_hmc_samples=6000, 
+        num_hmc_samples=8000, 
         mc_points_size=512,
         logz_threshold=0.4,
         num_chains=8,

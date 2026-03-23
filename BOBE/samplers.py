@@ -241,13 +241,20 @@ def nested_sampling_Dy(gp: GP,
         'std': mean_gp_std,
     }
 
-    samples_dict = {
-        'x': eq_unit,
-        'weights': np.ones(len(eq_unit)),
-        'logl': eq_logl,
-        'best': best_pt,
-        'method': 'nested',
-    }
+    samples_dict = {}
+
+    if equal_weights:
+        samples_dict['x'] = eq_unit
+        samples_dict['weights'] = np.ones(len(eq_unit))
+        samples_dict['logl'] = eq_logl
+    else:
+        samples_dict['x'] = samples_phys_all
+        samples_dict['weights'] = weights_all
+        samples_dict['logl'] = logl
+
+    samples_dict['best'] = best_pt
+    samples_dict['method'] = 'nested'
+    
     return (samples_dict, logz_dict, success)
 
 def sample_GP_NUTS(gp: Union[GP, GPwithClassifier], 

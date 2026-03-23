@@ -455,6 +455,7 @@ class BOBE:
                 with open(flow_pkl, 'rb') as _f:
                     _flow_state = _pickle.load(_f)
                 self.transform._flow = NormalisingFlow.from_state_dict(_flow_state)
+                self.transform._build_to_u_fn()
                 log.info(f"Loaded flow weights from {flow_pkl}")
         else:
             self.transform = IdentityTransform.from_state_dict(ts)
@@ -1598,9 +1599,12 @@ class BOBE:
                 )
                 if did_update:
                     self.mc_samples = self.transform.updated_mc_samples
-                    # Warm-start refit GP in the new rotated space
+                    # Warm-start refit GP in the new transformed space.
+                    # Flow updates use more restarts: the non-linear unit-cube
+                    # change means old length-scale values are further from optimal.
                     self.results_manager.start_timing('GP Training')
-                    self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500,
+                    _n_restarts = 8 if isinstance(self.transform, NormalisingFlowTransform) else 4
+                    self.pool.gp_fit(self.gp, n_restarts=_n_restarts, maxiters=500,
                                      rng=self.np_rng, use_pool=True)
                     self.results_manager.end_timing('GP Training')
                     # Persist everything in the single checkpoint
@@ -1625,7 +1629,7 @@ class BOBE:
         ns_success = False
 
         # Final nested sampling if not yet converged and do_final_ns is True
-        if self.do_final_ns and not self.converged:
+        if self.do_final_ns:# and not self.converged:
             
             self.results_manager.start_timing('GP Training')
             self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)

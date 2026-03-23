@@ -50,14 +50,6 @@ class BaseTransform(ABC):
     @abstractmethod
     def effective_bounds(self): ...
 
-    @property
-    def uses_rotation(self):
-        return False
-
-    @property
-    def logprior_vol(self):
-        raise NotImplementedError
-
     @abstractmethod
     def state_dict(self): ...
 
@@ -137,14 +129,6 @@ class IdentityTransform(BaseTransform):
         theta = self._theta_min + u * self._theta_range
         return theta[0] if single else theta
 
-    def in_physical_bounds(self, theta):
-        theta = np.asarray(theta)
-        return np.all(
-            (theta >= self._effective_bounds[0]) &
-            (theta <= self._effective_bounds[1]),
-            axis=-1,
-        )
-
     @property
     def ndim(self):
         return self._ndim
@@ -156,10 +140,6 @@ class IdentityTransform(BaseTransform):
     @property
     def effective_bounds(self):
         return self._effective_bounds
-
-    @property
-    def logprior_vol(self):
-        return float(np.sum(np.log(self._theta_range)))
 
     def state_dict(self):
         return {
@@ -376,32 +356,6 @@ class RotationTransform(BaseTransform):
             theta = self._theta_min + u * self._theta_range
         return theta[0] if single else theta
 
-    def unit_to_rotated(self, u):
-        """Unit cube -> rotated eigenspace z (rotation mode only)."""
-        if not self._use_rotation:
-            raise RuntimeError("unit_to_rotated() requires rotation mode")
-        u, single = self._prep_input(u, self._r)
-        z = self._z_min + u * self._z_range
-        return z[0] if single else z
-
-    def rotated_to_unit(self, z, clip=False):
-        """Rotated eigenspace z -> unit cube (rotation mode only)."""
-        if not self._use_rotation:
-            raise RuntimeError("rotated_to_unit() requires rotation mode")
-        z, single = self._prep_input(z, self._r)
-        u = (z - self._z_min) / self._z_range
-        if clip:
-            u = np.clip(u, 0.0, 1.0)
-        return u[0] if single else u
-
-    def in_physical_bounds(self, theta):
-        theta = np.asarray(theta)
-        return np.all(
-            (theta >= self._effective_bounds[0]) &
-            (theta <= self._effective_bounds[1]),
-            axis=-1,
-        )
-
     # -----------------------------------------------------------------
     # Automatic update
     # -----------------------------------------------------------------
@@ -614,16 +568,6 @@ class RotationTransform(BaseTransform):
     def effective_bounds(self):
         return self._effective_bounds
 
-    @property
-    def uses_rotation(self):
-        return self._use_rotation
-
-    @property
-    def logprior_vol(self):
-        if self._use_rotation:
-            return float(np.sum(np.log(self._z_range)))
-        return float(np.sum(np.log(self._theta_range)))
-
     # -----------------------------------------------------------------
     # Persistence
     # -----------------------------------------------------------------
@@ -692,8 +636,6 @@ class RotationTransform(BaseTransform):
             None if np.isnan(float(_lav)) else float(_lav)
         )
         obj.updated_mc_samples = None
-        obj._dropped_pool_x_phys = np.zeros((0, obj._ndim))
-        obj._dropped_pool_y_raw = np.zeros(0)
 
         if obj._use_rotation:
             obj._covariance_phys = np.array(state["covariance_phys"])
@@ -816,6 +758,9 @@ class NormalisingFlowTransform(BaseTransform):
         # runtime state
         self._use_flow = False
         self._flow = None          # NormalisingFlow instance
+        self._cached_to_u_fn = None  # stable JAX closure for to_unit (rebuilt after each flow fit)
+        self._prev_mc_x_phys = None  # physical MC samples from last flow training (for KL check)
+        self._prev_mc_logl = None    # GP logL at those samples at training time (for KL check)
         self.update_count = 0
         self.last_update_ii = None
         self.last_update_acq_val = None
@@ -834,6 +779,31 @@ class NormalisingFlowTransform(BaseTransform):
         self._theta_range = self._theta_max - self._theta_min
         self._effective_bounds = self._original_bounds.copy()
 
+    def _build_to_u_fn(self):
+        """Build and cache the JAX-traceable per-point unit transform function.
+
+        Called once whenever ``self._flow`` is replaced (pretrain, update, resume)
+        so that ``to_unit()`` reuses a single stable closure instead of rebuilding
+        a new one—with fresh ``jnp.array`` allocations and a new equinox method
+        reference—on every call.  A stable closure lets JAX cache its trace across
+        calls and avoids spurious recompilation inside JIT-compiled samplers.
+        """
+        assert self._flow is not None, "_build_to_u_fn() requires a trained flow"
+        _mean = jnp.array(self._flow._pre_mean)
+        _std = jnp.array(self._flow._pre_std)
+        _n_sigma = self.n_sigma
+        _bij_inv = self._flow._flow.bijection.inverse
+        if self._flow._use_rotation_precon:
+            _eigvecs = jnp.array(self._flow._pre_eigvecs)
+            def _fn(t):
+                z = _bij_inv((t - _mean) @ _eigvecs / _std)
+                return (z + _n_sigma) / (2.0 * _n_sigma)
+        else:
+            def _fn(t):
+                z = _bij_inv((t - _mean) / _std)
+                return (z + _n_sigma) / (2.0 * _n_sigma)
+        self._cached_to_u_fn = _fn
+
     # -----------------------------------------------------------------
     # Core transforms
     # -----------------------------------------------------------------
@@ -842,22 +812,10 @@ class NormalisingFlowTransform(BaseTransform):
         theta = jnp.asarray(theta)
         single = theta.ndim == 1
         if self._use_flow:
-            # Build the preprocess function capturing flow state as JAX constants.
-            # This must be JAX-traceable for acquisition function autodiff.
-            _mean = jnp.array(self._flow._pre_mean)
-            _std = jnp.array(self._flow._pre_std)
-            if self._flow._use_rotation_precon:
-                _eigvecs = jnp.array(self._flow._pre_eigvecs)
-                def _to_u(t):
-                    x_white = (t - _mean) @ _eigvecs / _std
-                    z = self._flow._flow.bijection.inverse(x_white)
-                    return (z + self.n_sigma) / (2.0 * self.n_sigma)
-            else:
-                def _to_u(t):
-                    x_norm = (t - _mean) / _std
-                    z = self._flow._flow.bijection.inverse(x_norm)
-                    return (z + self.n_sigma) / (2.0 * self.n_sigma)
-            u = _to_u(theta) if single else jax.vmap(_to_u)(theta)
+            # Use the pre-built cached closure (see _build_to_u_fn).
+            # Avoids rebuilding a new function object with jnp.array allocations
+            # on every call, which would force JAX to retrace within JIT contexts.
+            u = self._cached_to_u_fn(theta) if single else jax.vmap(self._cached_to_u_fn)(theta)
         else:
             if single:
                 theta = theta[jnp.newaxis]
@@ -877,19 +835,6 @@ class NormalisingFlowTransform(BaseTransform):
         else:
             theta = self._theta_min + u * self._theta_range
         return theta[0] if single else theta
-
-    def in_physical_bounds(self, theta):
-        theta = np.asarray(theta, dtype=np.float64)
-        if self._use_flow:
-            # A point is in-bounds when its latent z lies within the n_sigma box.
-            z = self._flow.to_latent(np.atleast_2d(theta))
-            u = (z + self.n_sigma) / (2.0 * self.n_sigma)
-            return np.all((u >= 0.0) & (u <= 1.0), axis=-1).squeeze()
-        return np.all(
-            (theta >= self._effective_bounds[0]) &
-            (theta <= self._effective_bounds[1]),
-            axis=-1,
-        )
 
     # -----------------------------------------------------------------
     # Pre-training on external samples
@@ -937,6 +882,7 @@ class NormalisingFlowTransform(BaseTransform):
         )
         self._flow = flow
         self._use_flow = True
+        self._build_to_u_fn()
         # Lock out automatic updates for the rest of the BOBE run.
         self.update_count = self.max_updates
 
@@ -1007,30 +953,72 @@ class NormalisingFlowTransform(BaseTransform):
             new_cov = np.cov(mc_x_phys.T) if N > 1 else np.eye(self._ndim)
         new_cov = 0.5 * (new_cov + new_cov.T) + 1e-10 * np.eye(self._ndim)
 
-        # KL check using Gaussian approximation (skip on first update)
-        if self._use_flow:
-            # Use the full sample covariance of the previous MC run (stored as
-            # _pre_eigvals / _pre_eigvecs when rotation precon is active, else
-            # fall back to diagonal diag(_pre_std^2)).
-            if self._flow._use_rotation_precon and self._flow._pre_eigvecs is not None:
-                V = self._flow._pre_eigvecs
-                old_cov = V @ np.diag(self._flow._pre_eigvals) @ V.T
-            else:
-                old_cov = np.diag(self._flow._pre_std ** 2)
-            old_mean = self._flow._pre_mean.copy()
+        # KL divergence check: compare the GP surrogate's distribution at the
+        # physical MC sample locations used to train the last flow (stored in
+        # _prev_mc_x_phys / _prev_mc_logl) against the current GP predictions at
+        # those same locations.  This directly measures how much the GP posterior
+        # has shifted since the last flow fit, without a Gaussian approximation.
+        if self._prev_mc_x_phys is not None and self._prev_mc_logl is not None:
             try:
-                from .utils.core import kl_divergence_gaussian
-                kl_dict = kl_divergence_gaussian(old_mean, old_cov, new_mean, new_cov)
-                kl_sym = float(kl_dict["symmetric"])
-                log.info(
-                    f"[Flow update {self.update_count + 1}] "
-                    f"KL = {kl_sym:.4f} (threshold = {self.kl_threshold:.4f})"
-                )
-                if kl_sym < self.kl_threshold:
-                    log.info("[Flow update] KL below threshold; skipping.")
-                    return False
+                from .utils.core import kl_divergence_samples as _kl_samples
+                prev_u = np.asarray(self.to_unit(self._prev_mc_x_phys))
+                in_bounds = np.all((prev_u >= 0.0) & (prev_u <= 1.0), axis=1)
+                prev_u_valid = jnp.array(prev_u[in_bounds], dtype=jnp.float64)
+                prev_logl_valid = self._prev_mc_logl[in_bounds]
+                if len(prev_u_valid) >= 4:
+                    current_gp_logl = np.array(
+                        jax.lax.map(
+                            gp.predict_mean_single, prev_u_valid, batch_size=100
+                        )
+                    )
+                    kl_dict = _kl_samples(prev_logl_valid, current_gp_logl)
+                    kl_sym = float(kl_dict["symmetric"])
+                    log.info(
+                        f"[Flow update {self.update_count + 1}] "
+                        f"KL(GP samples) = {kl_sym:.4f} "
+                        f"(threshold = {self.kl_threshold:.4f})"
+                    )
+                    if kl_sym < self.kl_threshold:
+                        log.info("[Flow update] KL below threshold; skipping.")
+                        return False
+                else:
+                    log.info(
+                        "[Flow update] Too few prev samples in current bounds; "
+                        "skipping KL check."
+                    )
             except Exception as exc:
                 log.warning(f"[Flow update] KL check failed: {exc}; proceeding.")
+        else:
+            log.info(
+                f"[Flow update {self.update_count + 1}] "
+                "No previous flow samples stored — KL check bypassed."
+            )
+
+        # Pre-viability check using Gaussian approximation: verify enough training
+        # points fall within n_sigma of the new posterior centre before spending
+        # time on the full flow training.  Mirrors RotationTransform's cheap preview.
+        try:
+            _evals, _evecs = np.linalg.eigh(new_cov)
+            _idx = np.argsort(_evals)[::-1]
+            _sqrt_lam = np.sqrt(np.maximum(_evals[_idx], 0.0))
+            _V = _evecs[:, _idx]
+            _z_min_pre = -self.n_sigma * _sqrt_lam
+            _z_rng_pre = 2.0 * self.n_sigma * _sqrt_lam
+            _u_pre = (((all_x_phys - new_mean) @ _V) - _z_min_pre) / _z_rng_pre
+            n_pre_covered = int(np.all((_u_pre >= 0.0) & (_u_pre <= 1.0), axis=1).sum())
+            if n_pre_covered < self._ndim + 2:
+                log.warning(
+                    f"[Flow update] Pre-check: only {n_pre_covered}/{len(all_x_phys)} "
+                    "training points within Gaussian approx. bounds — "
+                    "skipping flow training."
+                )
+                return False
+            log.info(
+                f"[Flow update] Pre-check: {n_pre_covered}/{len(all_x_phys)} "
+                "training points covered; proceeding to flow training."
+            )
+        except np.linalg.LinAlgError:
+            pass  # eigendecomposition failed; proceed to flow training anyway
 
         # Train new flow
         from .flow import NormalisingFlow
@@ -1056,6 +1044,7 @@ class NormalisingFlowTransform(BaseTransform):
             batch_size=self.flow_batch_size,
             verbose=True,
         )
+        old_flow = self._flow   # save for rollback before committing candidate
         self._flow = flow
 
         # --- Diagnostic: how well does the new transform cover MC samples? ---
@@ -1099,20 +1088,23 @@ class NormalisingFlowTransform(BaseTransform):
                 f"[Flow update] Only {x_ib.shape[0]} points remain after "
                 "filtering — too few; rolling back."
             )
-            self._flow = None
+            self._flow = old_flow   # restore previous flow (not None) to avoid crash
             return False
 
-        # Commit flow AFTER computing x_ib, matching RotationTransform: pass
-        # correctly-transformed data to the GP first, then activate the new
-        # transform so that subsequent calls to to_unit() use the flow.
-        self._use_flow = True
-
-        # Update GP training data in new unit-cube space
+        # Update GP training data BEFORE committing the new transform, mirroring
+        # RotationTransform ordering: GP receives correctly-transformed coordinates
+        # first, then the transform is activated so subsequent to_unit() calls use
+        # the new flow.  This closes the window where classifier retraining inside
+        # remap_from_full_dataset could call to_unit() with an inconsistent state.
         is_clf = hasattr(gp, "train_x_clf")
         if is_clf:
             gp.remap_from_full_dataset(x_ib, y_ib)
         else:
             gp.remap_from_raw(x_ib, y_ib)
+
+        # Commit the new transform and rebuild the cached to_unit closure.
+        self._use_flow = True
+        self._build_to_u_fn()
 
         # Remap MC samples into the new unit cube
         mc_x_new_unit = self.to_unit(mc_x_phys, clip=False)
@@ -1136,6 +1128,15 @@ class NormalisingFlowTransform(BaseTransform):
         if "best" in mc_samples:
             new_mc["best"] = mc_samples["best"]
         self.updated_mc_samples = new_mc
+
+        # Store the MC samples (physical coords) and their GP logL values used
+        # for this flow training.  The next update() call uses these to compute
+        # a sample-based KL divergence against the then-current GP predictions,
+        # giving a direct measure of posterior shift since the last flow fit.
+        logl_key = 'logp' if 'logp' in mc_samples else ('logl' if 'logl' in mc_samples else None)
+        n_store = min(N, 2000)
+        self._prev_mc_x_phys = mc_x_phys[:n_store]
+        self._prev_mc_logl = np.array(mc_samples[logl_key])[:n_store] if logl_key else None
 
         self.update_count += 1
         self.last_update_ii = step
@@ -1161,10 +1162,6 @@ class NormalisingFlowTransform(BaseTransform):
     @property
     def effective_bounds(self):
         return self._original_bounds
-
-    @property
-    def logprior_vol(self):
-        return float(self._ndim * np.log(2.0 * self.n_sigma))
 
     # -----------------------------------------------------------------
     # Persistence
@@ -1262,6 +1259,9 @@ class NormalisingFlowTransform(BaseTransform):
         )
         obj.updated_mc_samples = None
         obj._flow = None
+        obj._cached_to_u_fn = None
+        obj._prev_mc_x_phys = None
+        obj._prev_mc_logl = None
 
         if not obj._use_flow:
             if "theta_min" in state:

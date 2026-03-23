@@ -48,7 +48,7 @@ def main():
         loglikelihood=cobaya_input_file,
         likelihood_name=likelihood_name,
         confidence_for_unbounded=0.9999995,
-        resume=True,
+        resume=False,
         resume_file=f'./results/LCDM/{likelihood_name}',
         save_dir='./results/LCDM/',
         save=True,
