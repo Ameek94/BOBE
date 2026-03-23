@@ -411,3 +411,118 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
     log.debug(f"Max logl found in HMC = {np.max(logps):.4f}")
 
     return samples_dict
+
+def sample_GP_ESS(gp: Union[GP, GPwithClassifier],
+                  np_rng=None,
+                  rng_key=None,
+                  num_chains=None,
+                  num_walkers_multiplier=3,
+                  warmup_steps=500,
+                  num_samples=1000,
+                  thinning=4,
+                  flat=True):
+    """
+    Sample from the GP surrogate posterior using the numpyro Ensemble Slice
+    Sampler (ESS), a gradient-free ensemble method suitable for low to
+    moderate dimensional posteriors.
+
+    ESS requires num_chains > 1, divisible by 2, and >= 2 * ndim.
+    All chains are run together with chain_method='vectorized' (single device)
+    or 'parallel' (multiple devices), matching the NUTS parallelisation
+    strategy.
+
+    Parameters
+    ----------
+    gp : GP or GPwithClassifier
+    np_rng : numpy Generator, optional
+    rng_key : jax.random.PRNGKey, optional
+    num_chains : int or None
+        Number of ensemble walkers.  Defaults to
+        max(2*ndim+2, num_walkers_multiplier*ndim), rounded up to even.
+    num_walkers_multiplier : int
+        Used only when num_chains is None.
+    warmup_steps : int
+    num_samples : int
+    thinning : int
+
+    Returns
+    -------
+    dict
+        Keys 'x', 'logp', 'best', 'method' — same format as sample_GP_NUTS.
+    """
+    from numpyro.infer import ESS
+
+    np_rng  = np_rng  if np_rng  is not None else get_numpy_rng()
+    rng_key = rng_key if rng_key is not None else get_new_jax_key()
+
+    ndim  = gp.train_x.shape[1]
+    # if num_chains is None:
+    num_chains = 2 * (ndim+1) #
+    # if num_chains % 2 != 0:
+    #     num_chains += 1
+
+    shape = ndim
+
+    def model():
+        x = numpyro.sample('x', dist.Uniform(
+            low=jnp.zeros(shape),
+            high=jnp.ones(shape),
+        ))
+        mean = gp.predict_mean_batched(x)
+        numpyro.factor('y', mean)
+        numpyro.deterministic('logp', mean)
+
+    # Build initial values using the same strategy as emcee:
+    # unique training points (sorted by logp) + Gaussian fill-in if needed.
+    train_x = np.asarray(gp.train_x)
+    train_y = np.asarray(gp.train_y).flatten()
+    best_x  = train_x[int(np.argmax(train_y))]
+    sorted_idx  = np.argsort(train_y)[::-1]
+    unique_pts  = train_x[sorted_idx]
+    n_train = len(unique_pts)
+
+    if n_train >= num_chains:
+        init_pts = unique_pts[:num_chains]
+    else:
+        n_needed = num_chains - n_train
+        scale = max(0.01, float(np.std(train_x, axis=0).mean()))
+        perturbed = best_x + np_rng.normal(0.0, scale * 0.1, size=(n_needed, ndim))
+        perturbed = np.clip(perturbed, 1e-4, 1.0 - 1e-4)
+        init_pts  = np.vstack([unique_pts, perturbed])
+
+    init_vals = {'x': jnp.array(init_pts, dtype=jnp.float64)}  # (num_chains, ndim)
+
+    num_devices = jax.device_count()
+    # chain_method = 'parallel' if num_devices > 1 else 'vectorized'
+    chain_method = 'vectorized'  # ESS only supports vectorized
+    log.info(
+        f"[ESS] num_chains={num_chains}, ndim={ndim}, "
+        f"warmup={warmup_steps}, samples={num_samples}, "
+        f"chain_method={chain_method}"
+    )
+
+
+    kernel = ESS(model, moves={ESS.DifferentialMove(): 1.0})
+    mcmc = MCMC(
+        kernel,
+        num_warmup=warmup_steps,
+        num_samples=num_samples,
+        num_chains=num_chains,
+        thinning=thinning,
+        chain_method=chain_method,
+        progress_bar=False,
+    )
+    mcmc.run(rng_key, init_params=init_vals)
+
+    group_by_chain = not flat
+    samples_x = mcmc.get_samples(group_by_chain=group_by_chain)['x']      # (num_chains * num_samples, ndim)
+    logps     = mcmc.get_samples(group_by_chain=group_by_chain)['logp']   # (num_chains * num_samples,)
+
+    log.info(f"[ESS] {len(samples_x)} samples. Max logp = {float(jnp.max(logps)):.4f}")
+
+    return {
+        'x':      samples_x,
+        'logp':   logps,
+        'best':   samples_x[int(jnp.argmax(logps))],
+        'method': 'MCMC',
+    }

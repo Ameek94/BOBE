@@ -46,6 +46,23 @@ def is_cluster_environment():
         
     return False
 
+def get_R(samples):
+    """Compute Gelman-Rubin R-hat diagnostic for MCMC convergence.
+    
+    Arguments
+    ---------
+    samples : np.ndarray
+        An array of shape (num_samples, num_chains, num_parameters) containing MCMC
+    """
+    c_shape = samples.shape
+    c_mean = np.mean(samples, axis=0)
+    g_mean = np.mean(c_mean, axis=0)
+    within = np.std(samples, axis=0, ddof=1) ** 2
+    between = c_shape[1] / (c_shape[1] - 1) * np.mean((c_mean - g_mean) ** 2, axis=0)
+    W = np.mean(within, axis=0)
+    val = ((c_shape[0] - 1) / c_shape[0] * W + between * (1 + 1 / c_shape[1])) / W
+    return np.mean(np.sqrt(val))
+
 def renormalise_log_weights(log_weights):
     log_total = logsumexp(log_weights)
     normalized_weights = np.exp(log_weights - log_total)
