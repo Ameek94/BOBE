@@ -41,8 +41,8 @@ def is_cluster_environment():
                 return True
     
     # Additional check for non-interactive environment
-    if not os.isatty(1):  # stdout is not a terminal
-        return True
+    # if not os.isatty(1):  # stdout is not a terminal
+    #     return True
         
     return False
 

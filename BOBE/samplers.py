@@ -169,12 +169,12 @@ def nested_sampling_Dy(gp: GP,
         for i in range(1000):
             sel_logl = init_logl[live_idx]
             if not np.all(sel_logl == sel_logl[0]):
-                log.debug(f" Successful live points on try {i+1}/1000.")
+                log.info(f" Successful live points on try {i+1}/1000.")
                 success = True
                 break
             live_idx = rng.choice(n_init, size=nlive, replace=False)
         if not success:
-            log.debug(" Could not find diverse live points; injecting GP fallback point.")
+            log.info(" Could not find diverse live points; injecting GP fallback point.")
             valid_unit = gp.get_random_point(rng=rng, nstd=1.0)
             valid_phys = transform.from_unit(valid_unit)
             init_theta[live_idx[0]] = valid_phys
@@ -261,7 +261,8 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
                    np_rng=None, 
                    rng_key=None, 
                    num_chains=4, 
-                   temp=1., 
+                   temp=1.,
+                   flat=True, 
                    **kwargs):
     """
     Obtain samples from the posterior represented by the GP mean as the logprob.
@@ -358,17 +359,21 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
             samples_x_i, logps_i = run_single_chain(rng_keys[i], inits[i])
             samples_x.append(samples_x_i)
             logps.append(logps_i)
-        samples_x = jnp.concatenate(samples_x)
-        logps = jnp.concatenate(logps)
+        
+        if flat:
+            samples_x = jnp.concatenate(samples_x)
+            logps = jnp.concatenate(logps)
         
     elif num_devices >= num_chains and num_chains > 1:
         # Direct pmap method when devices >= chains
         log.debug("Using direct pmap method (devices >= chains)")
         pmapped = jax.pmap(run_single_chain, in_axes=(0, 0), out_axes=(0, 0))
         samples_x, logps = pmapped(rng_keys, inits)
-        samples_x = jnp.concatenate(samples_x, axis=0)
-        logps = jnp.concatenate(logps, axis=0)
-        logps = jnp.reshape(logps, (samples_x.shape[0],))
+
+        if flat:
+            samples_x = jnp.concatenate(samples_x, axis=0)
+            logps = jnp.concatenate(logps, axis=0)
+            logps = jnp.reshape(logps, (samples_x.shape[0],))
         
     elif 1 < num_devices < num_chains:
         # Chunked method when devices < chains (but > 1 device)
@@ -391,14 +396,15 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
             all_samples.append(chunk_samples)
             all_logps.append(chunk_logps)
         
-        # Concatenate all chunks
-        samples_x = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_samples], axis=0)
-        logps = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_logps], axis=0)
+        if flat:
+            # Concatenate all chunks
+            samples_x = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_samples], axis=0)
+            logps = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_logps], axis=0)
 
     samples_dict = {
         'x': samples_x,
         'logp': logps,
-        'best': samples_x[jnp.argmax(logps)],
+        # 'best': samples_x[jnp.argmax(logps)],
         'method': "MCMC"
     }
 

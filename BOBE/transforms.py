@@ -915,50 +915,12 @@ class NormalisingFlowTransform(BaseTransform):
         """
         self.updated_mc_samples = None
 
-        if acq_val > acq_threshold:
-            return False
-        if self.update_count >= self.max_updates:
-            log.info("[Flow update] max_updates reached; skipping.")
-            return False
-
-        is_first = (self.update_count == 0)
-        if not is_first:
-            if self.update_step is None:
-                return False
-            if (step - self.last_update_ii) < self.update_step:
-                return False
-            if acq_val >= self.last_update_acq_val:
-                return False
-
-        # MC samples in physical space
-        mc_x_unit = np.array(mc_samples["x"])
-        mc_x_phys = self.from_unit(mc_x_unit)
-        N = mc_x_phys.shape[0]
-
-        if N < self._ndim + 2:
-            log.warning(f"[Flow update] Too few MC samples ({N}); skipping.")
-            return False
-
-        weights = mc_samples.get("weights", None)
-
-        # Compute new posterior Gaussian approximation (also reused for KL check)
-        if weights is not None:
-            w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
-            w /= w.sum()
-            new_mean = np.average(mc_x_phys, weights=w, axis=0)
-            diff = mc_x_phys - new_mean
-            new_cov = (diff * w[:, None]).T @ diff
-        else:
-            new_mean = mc_x_phys.mean(axis=0)
-            new_cov = np.cov(mc_x_phys.T) if N > 1 else np.eye(self._ndim)
-        new_cov = 0.5 * (new_cov + new_cov.T) + 1e-10 * np.eye(self._ndim)
-
-        # KL divergence check: compare the GP surrogate's distribution at the
-        # physical MC sample locations used to train the last flow (stored in
-        # _prev_mc_x_phys / _prev_mc_logl) against the current GP predictions at
-        # those same locations.  This directly measures how much the GP posterior
-        # has shifted since the last flow fit, without a Gaussian approximation.
-        if self._prev_mc_x_phys is not None and self._prev_mc_logl is not None:
+        # When the flow is already fitted, evaluate sample-based KL BEFORE the
+        # acquisition-value gate.  A large KL means the GP posterior has shifted
+        # enough that the flow geometry needs updating regardless of how good the
+        # current acquisition value looks.
+        _force_kl_update = False
+        if self._use_flow and self._prev_mc_x_phys is not None and self._prev_mc_logl is not None:
             try:
                 from .utils.core import kl_divergence_samples as _kl_samples
                 prev_u = np.asarray(self.to_unit(self._prev_mc_x_phys))
@@ -978,7 +940,13 @@ class NormalisingFlowTransform(BaseTransform):
                         f"KL(GP samples) = {kl_sym:.4f} "
                         f"(threshold = {self.kl_threshold:.4f})"
                     )
-                    if kl_sym < self.kl_threshold:
+                    if kl_sym >= self.kl_threshold:
+                        _force_kl_update = True
+                        log.info(
+                            "[Flow update] KL above threshold — "
+                            "forcing retraining regardless of acquisition value."
+                        )
+                    else:
                         log.info("[Flow update] KL below threshold; skipping.")
                         return False
                 else:
@@ -988,11 +956,60 @@ class NormalisingFlowTransform(BaseTransform):
                     )
             except Exception as exc:
                 log.warning(f"[Flow update] KL check failed: {exc}; proceeding.")
-        else:
+        elif self._use_flow:
             log.info(
                 f"[Flow update {self.update_count + 1}] "
                 "No previous flow samples stored — KL check bypassed."
             )
+
+        if self.update_count >= self.max_updates:
+            log.info("[Flow update] max_updates reached; skipping.")
+            return False
+        # Acquisition-value gate: skip only when not forced by a large KL.
+        if not _force_kl_update and acq_val > acq_threshold:
+            return False
+
+        is_first = (self.update_count == 0)
+        if not is_first:
+            if self.update_step is None:
+                return False
+            if (step - self.last_update_ii) < self.update_step:
+                return False
+            # Require acq improvement only when not forced by KL.
+            if not _force_kl_update and acq_val >= self.last_update_acq_val:
+                return False
+
+        # MC samples in physical space.
+        # mc_samples["x"] is always in the current unit cube; from_unit() maps it
+        # back to physical coordinates using whichever transform is currently active
+        # (flow or linear fallback).  The new flow is then trained on mc_x_phys.
+        mc_x_unit = np.array(mc_samples["x"])
+        mc_x_phys = self.from_unit(mc_x_unit)
+        N = mc_x_phys.shape[0]
+        log.debug(
+            f"[Flow update] mc_x_phys range: "
+            f"min={np.min(mc_x_phys, axis=0).round(4)}, "
+            f"max={np.max(mc_x_phys, axis=0).round(4)}"
+        )
+
+        if N < self._ndim + 2:
+            log.warning(f"[Flow update] Too few MC samples ({N}); skipping.")
+            return False
+
+        weights = mc_samples.get("weights", None)
+
+        # Compute new posterior Gaussian approximation (also reused for KL check)
+        if weights is not None:
+            w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
+            w /= w.sum()
+            new_mean = np.average(mc_x_phys, weights=w, axis=0)
+            diff = mc_x_phys - new_mean
+            new_cov = (diff * w[:, None]).T @ diff
+        else:
+            new_mean = mc_x_phys.mean(axis=0)
+            new_cov = np.cov(mc_x_phys.T) if N > 1 else np.eye(self._ndim)
+        new_cov = 0.5 * (new_cov + new_cov.T) + 1e-10 * np.eye(self._ndim)
+        # (KL check was already performed above the trigger guards.)
 
         # Pre-viability check using Gaussian approximation: verify enough training
         # points fall within n_sigma of the new posterior centre before spending
