@@ -1,43 +1,57 @@
 import os
+
+#-------------------------#
+#--- Environment Setup ---#
+#-------------------------#
+
 # Tell JAX about host CPU cores
-os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
-    os.cpu_count()
-)
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(os.cpu_count())
+# Force LaTeX to be available for plotting
+TEXBIN = "/apps/z_install_tree/linux-rocky8-ivybridge/gcc-12.2.0/texlive-20220321-7ejwbhyks4jxvs4cg6cddeczjlnf2fhi/bin/x86_64-linux/"
+os.environ["PATH"] = TEXBIN + ":" + os.environ["PATH"]
 
 import time
 import numpy as np
 import py21cmfast as p21c
+import matplotlib.pyplot as plt
+import seaborn as sns
+from getdist import MCSamples, plots
+from mpi4py import MPI
 
-# Import likelihood functions
 from likelihood_21cm import (
-    chunk_indices,
-    powerspectra_chunks,
-    build_mock_dataset,
+    PARAMETER_NAMES,
+    PARAMETER_LABELS,
+    FIDUCIAL_THETA,
+    build_fiducial_dataset,
+    make_base_inputs,
     make_loglike_function,
+    get_param_bounds,
+    get_varying_indices,
 )
 
 from BOBE import BOBE
 from BOBE.utils.core import renormalise_log_weights, scale_from_unit
-import time
-import matplotlib.pyplot as plt
-import seaborn as sns # optional for improved plot aesthetics
-from getdist import MCSamples, plots
-import numpy as np
-from mpi4py import MPI
 
 def main():
+    #----------------------------#
+    #--- MPI / Runtime config ---#
+    #----------------------------#
+
+    # Set up MPI communicator and identify this rank
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
-
-    # Get number of threads from environemnt (requires it to be set in the submission script).
+    
+    # Read runtime settings from the environemt
     n_threads = int(os.environ.get("OMP_NUM_THREADS", "1"))
-    # Get the path of the fiducial lightcone (requires it to be set in the submission script).
+    ndim = int(os.environ.get("NDIM", "2"))
+    obs_noise = float(os.environ.get("OBS_NOISE", "1e-8"))
+
+    # Paths to staged static input files. These are typically copied to node-local scratch by the submission script
     fiducial_path = os.environ.get(
         "FIDUCIAL_LC_PATH",
         "cache/21cm_test_runs_lcs/fiducial-lightcone.h5",
     )
-    # Get the path of the SKA sensitivities (requires it to be set in the submission script).
     ska_path = os.environ.get(
         "SKA_SENSE_PATH",
         "sensitivities/ska_sense.txt",
@@ -48,157 +62,140 @@ def main():
     print(f"[rank {rank}/{size}] n_concurrent_evals = {size}", flush=True)
     print(f"[rank {rank}/{size}] fiducial_path = {fiducial_path}", flush=True)
     print(f"[rank {rank}/{size}] ska_path = {ska_path}", flush=True)
-
-    # 1. Read saved fiducial lightcone
-    lightcone_fiducial = p21c.LightCone.from_file(path=fiducial_path)
+    #-----------------------------------------------------------------------------#
+    #--- Step 1: Define redshift chunks used for the power spectrum likelihood ---#
+    #-----------------------------------------------------------------------------#
     
-    # 2. Define redshift chunks
     chunk_z_list_HERA = [
         27.4, 23.4828, 20.5152, 18.1892, 16.3171, 14.7778, 13.4898, 12.3962,
         11.4561, 10.6393, 9.92308, 9.28986, 8.72603, 8.22078, 7.76543,
         7.35294, 6.97753, 6.63441, 6.31959, 6.0297, 5.7619, 5.51376
     ]
-    chunk_indices_HERA = chunk_indices(lightcone_fiducial, chunk_z_list_HERA)
-    
-    # 3. Compute fiducial power spectrum
-    chunk_redshifts_fiducial, data_fiducial, _ = powerspectra_chunks(
-        lightcone_fiducial,
-        chunk_indices=chunk_indices_HERA,
+    #-----------------------------------------------------------------#
+    #--- Step 2: Build the fiducial dataset used by the likelihood ---#
+    #-----------------------------------------------------------------#
+    # This helper:
+    #     - Loads the saved fiducial lightcone
+    #     - Computes the fiducial chunked power spectra
+    #     - Loads the sensitivity file
+    #     - Applies the z/k masking used by the likelihood
+    setup = build_fiducial_dataset(
+        fiducial_path=fiducial_path,
+        sensitivity_path=ska_path,
+        chunk_z_list=chunk_z_list_HERA,
         n_psbins=47,
-        k_min=3.337118317301632e-02,
-        k_max=2.675685850887854e+00,
-        remove_nans=False,
-    )
-    
-    fiducial_ps = np.array([chunk["delta"] for chunk in data_fiducial])
-    fiducial_k_list = data_fiducial[0]["k"]
-    fiducial_ps_z = chunk_redshifts_fiducial
-    
-    # 4. Load sensitivity
-    ska_sensitivity = np.loadtxt(ska_path)
-    ska_sensitivity = ska_sensitivity[:-2, :]
-    
-    # 5. Build dataset
-    dataset = build_mock_dataset(
-        fiducial_ps=fiducial_ps,
-        redshifts=fiducial_ps_z,
-        k_values=fiducial_k_list,
-        sensitivity=ska_sensitivity,
+        k_min_ps=3.337118317301632e-02,
+        k_max_ps=2.675685850887854e+00,
         z_min=6.0,
         z_max=30.0,
         k_min=0.1,
         k_max=1.0,
     )
+
+    dataset = setup["dataset"]
+    chunk_indices_HERA = setup["chunk_indices"]
+
+    #------------------------------------------------------------#
+    #--- Step 3: Construct the baseline 21cmFAST input object ---#
+    #------------------------------------------------------------#
+    # This uses:
+    #    - The Park19 template
+    #    - The Park et al. fiducial parameter values
+    #    - A fixed random seed for reproducibility
+    #    - The OpenMP thread count from the environment
+    inputs = make_base_inputs(n_threads=n_threads, random_seed=1234)
     
-    # 6. Base inputs
-    inputs = p21c.InputParameters.from_template("Park19", random_seed=1234)
-    inputs = inputs.evolve_input_structs(
-        F_STAR10=-1.3,
-        ALPHA_STAR=0.5,
-        F_ESC10=-1.0,
-        ALPHA_ESC=-0.5,
-        M_TURN=8.7,
-        t_STAR=0.5,
-        L_X=40.5,
-        NU_X_THRESH=500.0,
-        N_THREADS=n_threads,
-    )
+    #-----------------------------------------------------#
+    #--- Step 4: Build a rank-specific cache directory ---#
+    #-----------------------------------------------------#
+    # Each MPI rank gets its own cache directory so that concurrent evaluations do not clash
     
-    # 7. Per-rank cache - we do this to mitigate slowdowns from all ranks trying to read the same file in at the same time
     job_id = os.environ.get("PBS_JOBID", "nojid")
     cache_dir = f"/srv/scratch/cosmo/21CmTests/cache/21cm_test_runs_lcs_{job_id}_rank{rank}"
     os.makedirs(cache_dir, exist_ok=True)
     cache = p21c.OutputCache(cache_dir)
     print(f"[rank {rank}/{size}] using cache dir: {cache_dir}", flush=True)
-        
-    # 8. Parameter names and bounds
-    parameter_names = [
-    "F_STAR10",
-    "ALPHA_STAR",
-    "F_ESC10",
-    "ALPHA_ESC",
-    "M_TURN",
-    "t_STAR",
-    "L_X",
-    "NU_X_THRESH", #eV in code, keV in paper
-    ]
-
-    parameter_labels = [
-    r"\log_{10}(f_{*,10})",
-    r"\alpha_*",
-    r"\log_{10}(f_{\mathrm{esc},10})",
-    r"\alpha_{\mathrm{esc}}",
-    r"\log_{10}(M_{\mathrm{turn}})",
-    r"t_*",
-    r"\log_{10}\!\left(\frac{L_{X<2\,\mathrm{keV}}}{\mathrm{SFR}}\right)",
-    r"E_0",
-    ]
-    # 21cm only Fiducial value ± 5 sigma (Fiducial value from Table 2,  sigma from row 3: https://arxiv.org/pdf/1809.08995)
-    param_bounds = np.array([
-    [-2.35, -1.05, -2.05, -1.85,  7.40, -0.20, 40.15, 300.0],
-    [-0.40,  1.65,  0.20,  0.80, 10.05,  1.35, 40.85, 700.0],
-    ])
-    # 9. Likelihood lightcone quantities: keep minimal
-    lightcone_quantities_like = ("brightness_temp",)
     
-    # 10. Build loglike
+    #--------------------------------------------------#
+    #--- Step 5: Define the full parameter metadata ---#
+    #--------------------------------------------------#
+    # These are imported from likelihood_21cm.py so that the analysis choices all live in the same place
+    
+    parameter_names = PARAMETER_NAMES
+    parameter_labels = PARAMETER_LABELS
+    fiducial_theta = FIDUCIAL_THETA
+    
+    # Build the full parameter bounds as fiducial ± nsimga
+    # Here nsigma=1 corresponds to a 1-sigma box around the Park et al. fiducial point (Table 2 of the paper)
+    nsigma = 3.0
+    param_bounds = get_param_bounds(nsigma)
+
+    #--------------------------------------------------#
+    #--- Step 6: Build the full likelihood function ---#
+    #--------------------------------------------------#
+    #This returns a function of the full 8D parameter vector
+
     loglike = make_loglike_function(
         dataset=dataset,
         base_inputs=inputs,
         cache=cache,
-        lightcone_quantities=lightcone_quantities_like,
+        lightcone_quantities=("brightness_temp",),
         chunk_indices=chunk_indices_HERA,
         n_psbins=47,
         k_min_ps=3.337118317301632e-02,
-        k_max_ps=2.675685850887854e+00,
+        k_max_ps=2.675685850887854e00,
         parameter_names=parameter_names,
     )
 
-    fiducial_theta = np.array([
-        -1.3,   # F_STAR10
-         0.5,   # ALPHA_STAR
-        -1.0,   # F_ESC10
-        -0.5,   # ALPHA_ESC
-         8.7,   # M_TURN
-         0.5,   # t_STAR
-        40.5,   # L_X
-       500.0,   # NU_X_THRESH [eV]
-    ])
+    #-------------------------------------------------------------#
+    #--- Step 7: Choose which parameters to vary based on NDIM ---#
+    #-------------------------------------------------------------#
+    # The convention used here is to work backwards through the parameter list
+    # Doesn't really matter because we plan on going 1D -> 2D -> 8D
     
-    # Select a subset of the parameter space to test on.
-    varying_names = ["L_X", "NU_X_THRESH"]
-    varying_indices = [parameter_names.index(name) for name in varying_names]
+    varying_indices = get_varying_indices(ndim, parameter_names)
+    varying_names = [parameter_names[i] for i in varying_indices]
+    varying_labels = [parameter_labels[i] for i in varying_indices]
+    param_bounds_nd = param_bounds[:, varying_indices]
+    fiducial_nd = fiducial_theta[varying_indices]
+
+    #-------------------------------------------------------------------------#
+    #--- Step 8: Wrap the full likelihood as an NDIM-restricted likelihood ---#
+    #-------------------------------------------------------------------------#
+    # BOBE only sees the active n-D subspace. The inactive parameters are held fixed at their fiducial values.
     
-    param_bounds_2d = param_bounds[:, varying_indices]
-    param_labels_2d = [parameter_labels[i] for i in varying_indices]
-    
-    def expand_theta_2d(theta_2d, fiducial_theta, varying_indices):
+    def expand_theta_nd(theta_nd):
         theta_full = fiducial_theta.copy()
-        theta_full[varying_indices] = theta_2d
+        theta_full[varying_indices] = theta_nd
         return theta_full
     
-    def loglike_2d(theta_2d):
-        theta_full = expand_theta_2d(theta_2d, fiducial_theta, varying_indices)
-        return loglike(theta_full)
+    def loglike_nd(theta_nd):
+        return loglike(expand_theta_nd(theta_nd))
     
     print(f"[rank {rank}/{size}] varying_names = {varying_names}", flush=True)
     print(f"[rank {rank}/{size}] varying_indices = {varying_indices}", flush=True)
-    print(f"[rank {rank}/{size}] param_bounds_2d =\n{param_bounds_2d}", flush=True)
+    print(f"[rank {rank}/{size}] param_bounds_2d =\n{param_bounds_nd}", flush=True)
     print(f"[rank {rank}/{size}] fiducial 2D point = {fiducial_theta[varying_indices]}", flush=True)
 
-    # Set up the cosmological likelihood
-    likelihood_name = f'21cmTest_2D_z01_5sigma'
+    #--------------------------------------------------------#
+    #--- Step 9: Define a descriptive likelihood/run name ---#
+    #--------------------------------------------------------#
+
+    likelihood_name = f"21cmTest_{ndim}D_z01_{int(nsigma)}sigma_{float(obs_noise)}noise_{size}Ranks_{n_threads}Threads"
 
     start = time.time()
     print(f"[rank {rank}/{size}] Starting BOBE run...", flush=True)
 
-    # Run BO Loop
+    #----------------------------------------#
+    #--- Step 10: Initialise and run BOBE ---#
+    #----------------------------------------#
+    
     bobe = BOBE(
-        loglikelihood=loglike_2d,
+        loglikelihood=loglike_nd,
         likelihood_name=likelihood_name,
-        param_bounds=param_bounds_2d,
+        param_bounds=param_bounds_nd,
         param_list=varying_names,
-        param_labels=param_labels_2d,
+        param_labels=varying_labels,
         confidence_for_unbounded=0.9999995,
         resume=False,
         resume_file=f'./results/{likelihood_name}',
@@ -210,6 +207,7 @@ def main():
         clf_type='svm',
         minus_inf=-1e10,
         seed=10,
+        gp_kwargs={'noise': obs_noise}
     )
     
     results = bobe.run(
