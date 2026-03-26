@@ -699,7 +699,8 @@ class BOBE:
         # Extract GP hyperparameters for tracking
         lengthscales = list(self.gp.lengthscales)
         kernel_variance = float(self.gp.kernel_variance)
-        self.results_manager.update_gp_hyperparams(step, lengthscales, kernel_variance)
+        noise = float(self.gp.noise)
+        self.results_manager.update_gp_hyperparams(step, lengthscales, kernel_variance, noise)
 
         if isinstance(self.gp, GPwithClassifier):
             self.results_manager.start_timing('Classifier Training')

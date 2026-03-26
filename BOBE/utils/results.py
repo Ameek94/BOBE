@@ -162,6 +162,7 @@ class BOBEResults:
         self.gp_iterations = []
         self.gp_lengthscales = []
         self.gp_kernel_variances = []
+        self.gp_noise = []
         
         # Best loglikelihood tracking 
         self.best_loglike_iterations = []
@@ -268,6 +269,7 @@ class BOBEResults:
             self.gp_iterations = gp_data.get('iterations', []).copy()
             self.gp_lengthscales = gp_data.get('lengthscales', []).copy()
             self.gp_kernel_variances = gp_data.get('kernel_variances', []).copy()
+            self.gp_noise = gp_data.get('noise', []).copy()
             # Backward compatibility: check for old 'outputscales' key
             if 'outputscales' in gp_data and not self.gp_kernel_variances:
                 self.gp_kernel_variances = gp_data.get('outputscales', []).copy()
@@ -328,7 +330,7 @@ class BOBEResults:
         self.acquisition_values.append(float(acquisition_value))
         self.acquisition_functions.append(acquisition_function)
 
-    def update_gp_hyperparams(self, iteration: int, lengthscales: list, kernel_variance: float):
+    def update_gp_hyperparams(self, iteration: int, lengthscales: list, kernel_variance: float, noise: float):
         """
         Track GP hyperparameters evolution.
         
@@ -340,6 +342,7 @@ class BOBEResults:
         self.gp_iterations.append(iteration)
         self.gp_lengthscales.append(lengthscales)
         self.gp_kernel_variances.append(float(kernel_variance))
+        self.gp_noise.append(float(noise))
     
     def update_best_loglike(self, iteration: int, best_loglike: float):
         """
@@ -490,7 +493,8 @@ class BOBEResults:
         return {
             'iterations': self.gp_iterations,
             'lengthscales': convert_jax_to_json_serializable(self.gp_lengthscales),
-            'kernel_variances': convert_jax_to_json_serializable(self.gp_kernel_variances)
+            'kernel_variances': convert_jax_to_json_serializable(self.gp_kernel_variances),
+            'noise': convert_jax_to_json_serializable(self.gp_noise)
         }
     
     def get_acquisition_data(self) -> Dict[str, list]:
@@ -635,7 +639,8 @@ class BOBEResults:
             'gp_hyperparams': {
                 'iterations': self.gp_iterations,
                 'lengthscales': self.gp_lengthscales,
-                'kernel_variances': self.gp_kernel_variances
+                'kernel_variances': self.gp_kernel_variances,
+                'noise': self.gp_noise
             },
 
             # === BEST LOGLIKELIHOOD TRACKING ===
@@ -871,7 +876,8 @@ class BOBEResults:
             'gp_hyperparams': {
                 'iterations': self.gp_iterations,
                 'lengthscales': convert_jax_to_json_serializable(self.gp_lengthscales),
-                'kernel_variances': convert_jax_to_json_serializable(self.gp_kernel_variances)
+                'kernel_variances': convert_jax_to_json_serializable(self.gp_kernel_variances),
+                'noise': convert_jax_to_json_serializable(self.gp_noise)
             },
             'best_loglike_data': {
                 'iterations': self.best_loglike_iterations,
@@ -1021,6 +1027,7 @@ class BOBEResults:
                 results.gp_iterations = gp_data.get('iterations', [])
                 results.gp_lengthscales = gp_data.get('lengthscales', [])
                 results.gp_kernel_variances = gp_data.get('kernel_variances', [])
+                results.gp_noise = gp_data.get('noise', [])
                 # Backward compatibility: check for old 'outputscales' key
                 if 'outputscales' in gp_data and not results.gp_kernel_variances:
                     results.gp_kernel_variances = gp_data.get('outputscales', [])
