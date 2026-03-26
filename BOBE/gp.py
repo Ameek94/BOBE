@@ -109,8 +109,10 @@ def fast_update_cholesky(L: jnp.ndarray, k: jnp.ndarray, k_self: float):
 
 class GP:
     
-    def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
-                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,5],lengthscales=None,kernel_variance=None,
+    def __init__(self,train_x,train_y,
+                 noise=1e-8, noise_prior=None, noise_bounds=[1e-8, 1e-2],
+                 kernel="rbf",optimizer="scipy",optimizer_options={},
+                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01,5],lengthscales=None, kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior=None, tausq=None, tausq_bounds=[1e-4,1e4], param_names: List[str] = None):
         """
         Initialize the Gaussian Process model.
@@ -123,6 +125,12 @@ class GP:
             Objective function values at training points, shape (N, 1).
         noise : float, optional
             Noise parameter added to the diagonal of the kernel. Default is 1e-8.
+        noise_prior : str, optional
+            Specification for the noise prior.
+            If None, the noise will be fixed to the initial value and not optimiser
+            If 'learn', the noise will be learnt as a hyperparameter with bounds defined by noise_bounds
+        noise_bounds : list, optional
+            Bounds for noise (if optimised). Default is [1e-8, 1e-2]
         kernel : str, optional
             Kernel to use, either "rbf" or "matern". Default is "rbf".
         optimizer : str, optional
@@ -188,10 +196,12 @@ class GP:
         # Can store tausq for convenience even though it is only used for SAAS
         self.tausq = tausq if tausq is not None else 1.0
         self.tausq_bounds = tausq_bounds
-
+        # Can store noise bounds for convenience even though only used for learn_noise == True
+        self.noise_bounds = noise_bounds
         # Setup priors and optimization parameters
         self._setup_kernel_variance_prior(kernel_variance_prior)
         self._setup_lengthscale_prior(lengthscale_prior)
+        self._setup_noise_prior(noise_prior)
         self._setup_optimization_parameters()
 
     def _setup_training_data(self, train_x, train_y):
@@ -220,6 +230,15 @@ class GP:
         self.train_y = (train_y - self.y_mean) / self.y_std
         log.debug(f"GP training size = {self.train_x.shape[0]}")
 
+    
+    def _setup_noise_prior(self, noise_prior):
+        """Setup noise prior and determine if it should be fixed."""
+        self.noise_prior_spec = noise_prior
+        if self.noise_prior_spec is None:
+            self.fixed_noise = True
+        elif self.noise_prior_spec == 'learn':
+            self.fixed_noise = False
+    
     def _setup_kernel_variance_prior(self, kernel_variance_prior):
         """Setup kernel variance prior and determine if it should be fixed."""
         self.kernel_variance_prior_spec = kernel_variance_prior
@@ -263,6 +282,11 @@ class GP:
         if self.lengthscale_prior_spec == 'SAAS':
             self.hyperparam_names.append('tausq')
             self.hyperparam_bounds.append(self.tausq_bounds)
+        
+        if not self.fixed_noise:
+            self.hyperparam_names.append('noise')
+            self.hyperparam_bounds.append(self.noise_bounds)
+
 
         self.hyperparam_bounds = jnp.log(jnp.array(self.hyperparam_bounds).T)
         self.num_hyperparams = self.hyperparam_bounds.shape[1]
@@ -280,7 +304,7 @@ class GP:
         return saas_prior_logprob(lengthscales, kernel_variance, tausq)
     
     def _parse_hyperparams(self, log_params):
-        """Parse log parameters into lengthscales, kernel_variance, and optionally tausq."""
+        """Parse log parameters into lengthscales, kernel_variance, and optionally tausq and noise."""
         hyperparams = jnp.exp(log_params)
         lengthscales = hyperparams[:self.ndim]
         
@@ -293,17 +317,22 @@ class GP:
         else:
             kernel_variance = hyperparams[self.ndim]
             tausq = hyperparams[self.ndim + 1] if len(hyperparams) > self.ndim + 1 else self.tausq
+        
+        if not self.fixed_noise:
+            noise = hyperparams[-1]
+        else:
+            noise = self.noise
             
-        return lengthscales, kernel_variance, tausq
+        return lengthscales, kernel_variance, tausq, noise
 
     def neg_mll(self, log_params):
         """
         Computes the negative log marginal likelihood for the GP with given hyperparameters.
         """
-        lengthscales, kernel_variance, tausq = self._parse_hyperparams(log_params)
+        lengthscales, kernel_variance, tausq, noise = self._parse_hyperparams(log_params)
         
         # Update kernel hyperparameters and compute kernel matrix
-        self.kernel.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance)
+        self.kernel.update_hyperparams(lengthscales=lengthscales, kernel_variance=kernel_variance, noise=noise)
         K = self.kernel.covariance(self.train_x, self.train_x, include_noise=True)
         mll = gp_mll(K, self.train_y, self.train_y.shape[0])
         
@@ -355,13 +384,15 @@ class GP:
         """
         Update the GP hyperparameters and recompute the Cholesky and alphas.
         """
-        lengthscales, kernel_variance, tausq = self._parse_hyperparams(hyperparams)
+        lengthscales, kernel_variance, tausq, noise = self._parse_hyperparams(hyperparams)
         self.lengthscales = lengthscales
         if not self.fixed_kernel_variance:
             self.kernel_variance = kernel_variance
+        if not self.fixed_noise:
+            self.noise = noise
         self.tausq = tausq
         # Update kernel object
-        self.kernel.update_hyperparams(lengthscales=self.lengthscales, kernel_variance=self.kernel_variance)
+        self.kernel.update_hyperparams(lengthscales=self.lengthscales, kernel_variance=self.kernel_variance, noise=self.noise)
         self.recompute_cholesky()
     
     def predict_mean_single(self,x):
@@ -527,6 +558,8 @@ class GP:
             'lengthscale_prior_spec': self.lengthscale_prior_spec,
             'kernel_variance_prior_spec': self.kernel_variance_prior_spec,
             'fixed_kernel_variance': self.fixed_kernel_variance,
+            'fixed_noise': self.fixed_noise,
+            'noise_prior_spec': self.noise_prior_spec,
             'optimizer_method': self.optimizer_method,
             'optimizer_options': self.optimizer_options,
             
@@ -534,6 +567,7 @@ class GP:
             'lengthscale_bounds': self.lengthscale_bounds,
             'kernel_variance_bounds': self.kernel_variance_bounds,
             'tausq_bounds': self.tausq_bounds,
+            'noise_bounds': self.noise_bounds,
             
             # Computed state
             'cholesky': np.array(self.cholesky) if hasattr(self, 'cholesky') else None,
@@ -568,6 +602,8 @@ class GP:
             train_x=state['train_x'],
             train_y=state['train_y'],
             noise=state['noise'],
+            noise_prior=state['noise_prior_spec'],
+            noise_bounds=state['noise_bounds'],
             kernel=state['kernel_name'],
             optimizer=state['optimizer_method'],
             optimizer_options=state['optimizer_options'],
@@ -672,6 +708,8 @@ class GP:
             hp = jnp.hstack([hp, self.kernel_variance])
         if self.lengthscale_prior_spec == 'SAAS':
             hp = jnp.hstack([hp, self.tausq])
+        if not self.fixed_noise:
+            hp = jnp.hstack([hp, self.noise])
         return hp
     
     def hyperparams_dict(self):
@@ -682,4 +720,8 @@ class GP:
         }
         if 'tausq' in self.hyperparam_names:
             param_dict['tausq'] = f"{float(self.tausq):.4f}"
+        
+        if 'noise' in self.hyperparam_names:
+            param_dict['noise'] = f"{float(self.noise):.4e}"
+
         return param_dict
