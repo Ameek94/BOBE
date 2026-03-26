@@ -38,6 +38,22 @@ class BaseTransform(ABC):
         After a successful update, self.updated_mc_samples holds the remapped dict."""
         return False
 
+    def logz_correction(self, log_V_phys: float) -> float:
+        """Additive correction to convert unit-cube log-evidence to physical-space log-evidence.
+
+        logz_phys = logz_unit_cube + logz_correction(log_V_phys)
+
+        where log_V_phys = Σᵢ log(θ_max_i − θ_min_i) is the log-volume of the
+        physical prior box.
+
+        The base implementation returns 0.0 (identity/linear mapping, where the
+        unit-cube Jacobian exactly cancels the prior volume).  Subclasses with a
+        constant non-trivial Jacobian (e.g. RotationTransform) override this.
+        Transforms whose Jacobian varies per point (e.g. FlowTransform) leave the
+        default, since the correction cannot be expressed as a single constant.
+        """
+        return 0.0
+
     @property
     @abstractmethod
     def ndim(self): ...
@@ -356,6 +372,21 @@ class RotationTransform(BaseTransform):
             theta = self._theta_min + u * self._theta_range
         return theta[0] if single else theta
 
+    def logz_correction(self, log_V_phys: float) -> float:
+        """Σᵢ log(z_range_i) − log_V_phys.
+
+        The Jacobian ∂θ/∂u = V_r @ diag(z_range) has |det J| = ∏ᵢ z_range_i
+        (V_r is orthogonal so |det V_r| = 1).  Adding this constant inside the
+        nested-sampler loglike converts the unit-cube log-evidence into the
+        physical-space log-evidence with a uniform prior over the original
+        parameter bounds (volume exp(log_V_phys)).
+
+        Returns 0.0 when the rotation is not yet active (linear fallback mode).
+        """
+        if not self._use_rotation:
+            return 0.0
+        return float(np.sum(np.log(self._z_range))) - log_V_phys
+
     # -----------------------------------------------------------------
     # Automatic update
     # -----------------------------------------------------------------
@@ -503,6 +534,18 @@ class RotationTransform(BaseTransform):
             log.warning(
                 f"[Rotation update] Only {x_ib.shape[0]} points remain "
                 "after filtering -- too few; skipping."
+            )
+            return False
+
+        # pre-check: skip if all MC samples would fall outside the new unit cube
+        mc_dtheta = mc_x_phys - new_center
+        mc_z_cand = mc_dtheta @ _V_r_new
+        mc_u_cand_pre = (mc_z_cand - _z_min_new) / _z_range_new
+        n_mc_in = int(np.all((mc_u_cand_pre >= 0.0) & (mc_u_cand_pre <= 1.0), axis=1).sum())
+        if n_mc_in == 0:
+            log.warning(
+                f"[Rotation update] All {N} MC samples would fall outside new "
+                "unit cube; skipping update."
             )
             return False
 
@@ -1106,6 +1149,18 @@ class NormalisingFlowTransform(BaseTransform):
                 "filtering — too few; rolling back."
             )
             self._flow = old_flow   # restore previous flow (not None) to avoid crash
+            return False
+
+        # pre-check: skip if all MC samples would fall outside the new unit cube
+        mc_z_cand_pre = self._flow.to_latent(mc_x_phys)
+        mc_u_cand_pre = (mc_z_cand_pre + self.n_sigma) / (2.0 * self.n_sigma)
+        n_mc_in = int(np.all((mc_u_cand_pre >= 0.0) & (mc_u_cand_pre <= 1.0), axis=1).sum())
+        if n_mc_in == 0:
+            log.warning(
+                f"[Flow update] All {N} MC samples would fall outside new "
+                "unit cube; rolling back."
+            )
+            self._flow = old_flow
             return False
 
         # Update GP training data BEFORE committing the new transform, mirroring

@@ -51,12 +51,13 @@ def main():
         save_dir='./results/LCDM/',
         save=True,
         verbosity='INFO',
-        n_cobaya_init=8,
-        n_sobol_init=64,
+        n_cobaya_init=4,
+        n_sobol_init=32,
         use_clf=True,
         clf_type='svm',
         minus_inf=-1e5,
         seed=seed,
+        gp_kwargs = {'lengthscale_bounds': (0.01, 100), 'kernel_variance_bounds': (1e-4, 1e3)},
         # Pass transform as (class, kwargs) — BOBE resolves param_bounds from
         # the likelihood and instantiates RotationTransform(param_bounds, **kwargs).
         transform=(RotationTransform, {
@@ -77,7 +78,7 @@ def main():
         num_hmc_warmup=512,
         num_hmc_samples=8000,
         mc_points_size=512,
-        logz_threshold=0.25,
+        logz_threshold=0.1,
         num_chains=8,
         do_final_ns=False,
     )
