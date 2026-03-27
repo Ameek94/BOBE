@@ -91,7 +91,7 @@ def get_dimension_based_defaults(ndim: int):
         'num_chains': min(6, max(3,jax.device_count())),  # 3-6 chains depending on available devices
         'fit_n_points': min(50, 2*ndim),  # refit less often for higher dimensions
         'logz_threshold': 0.01 + 0.01*(ndim/6) if ndim<=6 else min(1.,0.1 + 0.1*(ndim/6)**2),  # looser threshold for higher dimensions
-        'transform_acq_threshold': 4 * (ndim/15)
+        'transform_acq_threshold': min(4, 2 * (ndim/15))
     }
     return defaults
 
@@ -1027,12 +1027,13 @@ class BOBE:
         delta_crosscheck = logz_dict['std']
 
         converged = delta < self.logz_threshold
-        
+
         # Compute KL divergences if we have nested sampling samples
         successive_kl = None
-        
-        equal_samples = np.asarray(self.transform.from_unit(equal_samples))
-    
+
+        # equal_samples passed in are already in physical space from nested_sampling_Dy
+        # (self.ns_samples['x'] is physical space, see samplers.py line 230/235)
+        equal_samples = np.asarray(equal_samples)
 
         if self.prev_samples is not None:
 
@@ -1667,8 +1668,8 @@ class BOBE:
             samples = mc_samples['x']
             weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
             loglikes = mc_samples['logp']
-                
-        samples = np.asarray(self.transform.from_unit(samples))
+            # Transform NUTS samples from unit cube to physical space
+            samples = np.asarray(self.transform.from_unit(samples))
 
         self.samples_dict = {
             'x': samples,

@@ -507,7 +507,8 @@ def get_mc_samples(gp: GP, warmup_steps=512, num_samples=1024, thinning=4, metho
                    np_rng=None, rng_key=None, param_bounds=None, transform=None):
     if method=='NUTS':
         mc_samples = sample_GP_NUTS(gp=gp, warmup_steps=warmup_steps,
-            num_samples=num_samples, thinning=thinning, num_chains=num_chains,np_rng=np_rng,rng_key=rng_key
+            num_samples=num_samples, thinning=thinning, num_chains=num_chains,
+            np_rng=np_rng, rng_key=rng_key, transform=transform,
         )
     elif method=='NS':
         mc_samples, logz, success = nested_sampling_Dy(gp=gp, ndim=gp.ndim, mode='acq', maxcall=int(2e6),

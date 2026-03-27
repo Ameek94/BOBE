@@ -63,18 +63,17 @@ def nested_sampling_Dy(gp: GP,
                        transform=None,
                        ) -> tuple[np.ndarray,Dict,bool]:
     """
-    Nested Sampling using Dynesty, always running in physical parameter space.
+    Nested Sampling using Dynesty, always running in the GP unit cube [0,1]^ndim.
 
-    The prior transform maps the dynesty unit cube to
-    ``[param_bounds[0], param_bounds[1]]``.  The log-likelihood converts
-    physical coordinates to the GP unit cube via ``transform.to_unit_jax()``
-    inside a JIT-compiled function, returning -1e300 for points outside
-    [0, 1]^D.
+    The prior transform is the identity.  When the transform has an active
+    rotation (RotationTransform), a Jacobian correction is added to every
+    loglike call so the reported log-evidence is in physical units:
 
-    After sampling, NS samples are resampled to equal weights in physical
-    space, mapped to the GP unit cube (no clipping), and samples outside
-    [0, 1]^D are discarded.  ``samples_dict['x']`` is always in GP unit-cube
-    space so downstream code remains unchanged.
+        logz_phys = logz_unit_cube + log_correction
+        log_correction = Σᵢ log(z_range_i) − log(V_phys)
+
+    When the transform is inactive (linear fallback) log_correction == 0,
+    which recovers the original behaviour.
 
     Arguments
     ---------
@@ -90,7 +89,7 @@ def nested_sampling_Dy(gp: GP,
     print_progress : bool, optional
         Print dynesty progress. Auto-disabled in cluster environments.
     equal_weights : bool
-        Unused; always returns equal-weighted in-bounds samples.
+        Unused; kept for API compatibility.
     sample_method : str
         Dynesty sampling method (default ``'rwalk'``).
     rng : numpy Generator, optional
@@ -98,16 +97,17 @@ def nested_sampling_Dy(gp: GP,
     param_bounds : array-like (2, D)
         Physical parameter bounds. Required.
     transform : BaseTransform
-        Parameter-space transform with a JIT-compatible ``to_unit_jax()``
-        method. Required.
+        Parameter-space transform. Required.
 
     Returns
     -------
     samples_dict : dict
-        ``x`` in GP unit-cube space (equal-weighted, in-bounds), ``weights``
-        (all ones), ``logl``, ``best``.
+        ``x`` — GP unit-cube samples (equal-weighted).
+        ``u`` — corresponding physical-space samples.
+        ``weights``, ``logl``, ``best``.
     logz_dict : dict
-        ``mean``, ``upper``, ``lower``, ``dlogz_sampler``, ``var``, ``std``.
+        ``mean``, ``upper``, ``lower``, ``dlogz_sampler``, ``var``, ``std``,
+        ``log_correction``.
     success : bool
         False when all logl values are identical (degenerate run).
     """
@@ -122,47 +122,22 @@ def nested_sampling_Dy(gp: GP,
     lb = np.asarray(param_bounds[0], dtype=np.float64)
     ub = np.asarray(param_bounds[1], dtype=np.float64)
     phys_range = ub - lb
-    ndim_phys = int(len(lb))
 
-    # ------------------------------------------------------------------
-    # Jacobian correction: log|det(∂θ/∂u)| − log(V_phys)
-    #
-    # For transforms with a constant Jacobian (RotationTransform), we run
-    # dynesty directly in the GP unit cube [0,1]^ndim and absorb the
-    # correction into each loglike call.  This is more efficient than
-    # physical-space sampling (NS stays in the GP's valid domain) and makes
-    # the correction explicit.
-    #
-    #   logz_phys = logz_unit_cube + log_correction
-    #
-    # For transforms with a varying Jacobian (FlowTransform) or when the
-    # rotation is not yet active, log_correction == 0.0 and we fall back to
-    # physical-space sampling, where the correction is implicit.
-    # ------------------------------------------------------------------
+    # Jacobian correction: non-zero only when RotationTransform is active.
     log_V_phys = float(np.sum(np.log(phys_range)))
     log_correction = float(transform.logz_correction(log_V_phys))
-    _unit_cube_mode = log_correction != 0.0
+    if log_correction != 0.0:
+        log.info(f"logz Jacobian correction = {log_correction:.4f}.")
 
-    if _unit_cube_mode:
-        log.info(f"Nested sampling in GP unit cube; logz correction = {log_correction:.4f}.")
-        def prior_transform(u):
-            return np.asarray(u, dtype=np.float64)
-        _ns_ndim = ndim
-        @jax.jit
-        def loglike(u):
-            in_bounds = jnp.all((u >= 0.0) & (u <= 1.0))
-            return jnp.where(in_bounds, gp.predict_mean_single(u) + log_correction, jnp.float64(-1e300))
-    else:
-        # Prior transform: dynesty unit cube [0,1]^D → physical space [lb, ub]
-        def prior_transform(u):
-            return lb + np.asarray(u, dtype=np.float64) * phys_range
-        _ns_ndim = ndim_phys
-        # JIT-compiled log-likelihood: physical → unit cube → GP surrogate.
-        @jax.jit
-        def loglike(theta):
-            u = transform.to_unit(theta)
-            in_bounds = jnp.all((u >= 0.0) & (u <= 1.0))
-            return jnp.where(in_bounds, gp.predict_mean_single(u), jnp.float64(-1e300))
+    # Always sample in the GP unit cube. The identity prior_transform means
+    # dynesty's unit cube IS the GP unit cube — no coordinate conversions needed.
+    def prior_transform(u):
+        return np.asarray(u, dtype=np.float64)
+
+    # No bounds check: prior_transform keeps every point in [0,1]^ndim.
+    @jax.jit
+    def loglike(u):
+        return gp.predict_mean_single(u) + log_correction
 
     # ------------------------------------------------------------------
     # nlive / budget settings (scaled by GP ndim)
@@ -179,18 +154,13 @@ def nested_sampling_Dy(gp: GP,
     rng = rng if rng is not None else get_numpy_rng()
 
     # ------------------------------------------------------------------
-    # Initial live points
-    # Always seed from the GP unit cube so every point has a valid GP
-    # prediction regardless of how large the physical bounding box is.
-    # In unit-cube mode the points are passed to dynesty as-is; in
-    # physical mode they are mapped to physical space first.
+    # Initial live points (always in GP unit cube)
     # ------------------------------------------------------------------
     if isinstance(gp, GPwithClassifier):
         n_init = 5000 * ndim
         init_u = rng.uniform(0.0, 1.0, size=(n_init, ndim))
-        init_pts = init_u if _unit_cube_mode else transform.from_unit(init_u)
         init_logl = np.array(
-            jax.lax.map(loglike, jnp.array(init_pts, dtype=jnp.float64), batch_size=200)
+            jax.lax.map(loglike, jnp.array(init_u, dtype=jnp.float64), batch_size=200)
         )
         live_idx = rng.choice(n_init, size=nlive, replace=False)
         success = False
@@ -204,28 +174,22 @@ def nested_sampling_Dy(gp: GP,
         if not success:
             log.info(" Could not find diverse live points; injecting GP fallback point.")
             valid_unit = gp.get_random_point(rng=rng, nstd=1.0)
-            valid_pt = valid_unit if _unit_cube_mode else transform.from_unit(valid_unit)
-            init_pts[live_idx[0]] = valid_pt
-            init_logl[live_idx[0]] = float(loglike(jnp.array(valid_pt, dtype=jnp.float64)))
-        live_pts = init_pts[live_idx]
+            init_u[live_idx[0]] = valid_unit
+            init_logl[live_idx[0]] = float(loglike(jnp.array(valid_unit, dtype=jnp.float64)))
+        live_pts = init_u[live_idx]
         live_logl = init_logl[live_idx]
     else:
-        init_u = rng.uniform(0.0, 1.0, size=(nlive, ndim))
-        live_pts = init_u if _unit_cube_mode else transform.from_unit(init_u)
+        live_pts = rng.uniform(0.0, 1.0, size=(nlive, ndim))
         live_logl = np.array(
             jax.lax.map(loglike, jnp.array(live_pts, dtype=jnp.float64), batch_size=200)
         )
 
-    # Dynesty live_points format: [unit_cube_coords, param_coords, logl].
-    # In unit-cube mode both coordinate sets are identical (identity prior).
-    live_u = live_pts if _unit_cube_mode else (live_pts - lb) / phys_range
-
     # ------------------------------------------------------------------
-    # Run dynesty static nested sampler
+    # Run dynesty (identity prior → unit_cube_coords == param_coords)
     # ------------------------------------------------------------------
     sampler = StaticNestedSampler(
-        loglike, prior_transform, ndim=_ns_ndim, blob=False,
-        live_points=[live_u, live_pts, live_logl],
+        loglike, prior_transform, ndim=ndim, blob=False,
+        live_points=[live_pts, live_pts, live_logl],
         sample=sample_method, nlive=nlive, rstate=rng,
     )
     sampler.run_nested(print_progress=print_progress, dlogz=dlogz, maxcall=maxcall)
@@ -234,32 +198,19 @@ def nested_sampling_Dy(gp: GP,
     mean = res['logz'][-1]
     logz_err = res['logzerr'][-1]
     logl = res['logl']
-    logvol = res['logvol']
     success = ~np.all(logl == logl[0])
     log.debug(f" Nested Sampling took {time.time() - start:.2f}s")
     log.debug(" Log Z evaluated using {} points".format(np.shape(logl)))
     log.debug(f" Dynesty made {np.sum(res['ncall'])} function calls, max value of logl = {np.max(logl):.4f}")
 
-    samples_all = res['samples']   # unit-cube coords in unit-cube mode, physical otherwise
-
-    # Resample to equal weights, convert to GP unit cube, discard out-of-bounds.
+    # res['samples'] are already unit-cube coords (identity prior_transform).
     weights_all = renormalise_log_weights(res['logwt'])
-    eq_pts, eq_logl = resample_equal(samples_all, logl, weights=weights_all)
-    if _unit_cube_mode:
-        eq_unit = np.asarray(eq_pts)   # already in GP unit cube
-    else:
-        eq_unit = np.asarray(transform.to_unit(eq_pts, clip=False))
-    in_bounds = np.all((eq_unit >= 0.0) & (eq_unit <= 1.0), axis=1)
-    n_discarded = int((~in_bounds).sum())
-    if n_discarded > 0:
-        log.debug(f" Discarded {n_discarded}/{len(eq_unit)} equal-weighted samples outside unit cube.")
-    eq_unit = eq_unit[in_bounds]
-    eq_logl = eq_logl[in_bounds]
+    eq_unit, eq_logl = resample_equal(res['samples'], logl, weights=weights_all)
+    eq_unit = np.asarray(eq_unit)
 
-    # Best point: highest logl among equal-weighted in-bounds samples.
     best_pt = eq_unit[np.argmax(eq_logl)]
 
-    # logZ uncertainty: mean GP predictive std over ≤512 posterior samples.
+    # logZ uncertainty: mean GP predictive std over ≤512 equal-weighted samples.
     n_std = min(512, len(eq_unit))
     gp_var = np.asarray(jax.lax.map(
         gp.predict_var_single, jnp.array(eq_unit[:n_std], dtype=jnp.float64), batch_size=100))
@@ -271,31 +222,38 @@ def nested_sampling_Dy(gp: GP,
         'lower': mean - mean_gp_std,
         'var': mean_gp_std ** 2,
         'std': mean_gp_std,
-        'log_correction': log_correction,  # Σ log(z_range_i) − log(V_phys); 0 when not active
+        'log_correction': log_correction,
     }
 
-    samples_dict = {}
-
     if equal_weights:
-        samples_dict['x'] = eq_unit
-        samples_dict['weights'] = np.ones(len(eq_unit))
-        samples_dict['logl'] = eq_logl
+        u_out = eq_unit
+        x_out = np.asarray(transform.from_unit(eq_unit))
+        w_out = np.ones(len(eq_unit))
+        l_out = eq_logl
     else:
-        samples_dict['x'] = samples_all
-        samples_dict['weights'] = weights_all
-        samples_dict['logl'] = logl
+        u_out = np.asarray(res['samples'])
+        x_out = np.asarray(transform.from_unit(u_out))
+        w_out = weights_all
+        l_out = logl
 
-    samples_dict['best'] = best_pt
-    samples_dict['method'] = 'nested'
-    
+    samples_dict = {
+        'x':      x_out,
+        'u':      u_out,
+        'weights': w_out,
+        'logl':   l_out,
+        'best':   best_pt,
+        'method': 'nested',
+    }
+
     return (samples_dict, logz_dict, success)
 
-def sample_GP_NUTS(gp: Union[GP, GPwithClassifier], 
-                   np_rng=None, 
-                   rng_key=None, 
-                   num_chains=4, 
+def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
+                   np_rng=None,
+                   rng_key=None,
+                   num_chains=4,
                    temp=1.,
-                   flat=True, 
+                   flat=True,
+                   transform=None,
                    **kwargs):
     """
     Obtain samples from the posterior represented by the GP mean as the logprob.
@@ -435,11 +393,12 @@ def sample_GP_NUTS(gp: Union[GP, GPwithClassifier],
             logps = jnp.concatenate([jnp.concatenate(chunk, axis=0) for chunk in all_logps], axis=0)
 
     samples_dict = {
-        'x': samples_x,
-        'logp': logps,
-        # 'best': samples_x[jnp.argmax(logps)],
-        'method': "MCMC"
+        'x':      samples_x,
+        'logp':   logps,
+        'method': "MCMC",
     }
+    if transform is not None:
+        samples_dict['u'] = np.asarray(transform.from_unit(np.asarray(samples_x)))
 
     log.debug(f"Max logl found in HMC = {np.max(logps):.4f}")
 
@@ -453,7 +412,8 @@ def sample_GP_ESS(gp: Union[GP, GPwithClassifier],
                   warmup_steps=500,
                   num_samples=1000,
                   thinning=4,
-                  flat=True):
+                  flat=True,
+                  transform=None):
     """
     Sample from the GP surrogate posterior using the numpyro Ensemble Slice
     Sampler (ESS), a gradient-free ensemble method suitable for low to
@@ -553,9 +513,12 @@ def sample_GP_ESS(gp: Union[GP, GPwithClassifier],
 
     log.info(f"[ESS] {len(samples_x)} samples. Max logp = {float(jnp.max(logps)):.4f}")
 
-    return {
+    result = {
         'x':      samples_x,
         'logp':   logps,
         'best':   samples_x[int(jnp.argmax(logps))],
         'method': 'MCMC',
     }
+    if transform is not None:
+        result['u'] = np.asarray(transform.from_unit(np.asarray(samples_x)))
+    return result

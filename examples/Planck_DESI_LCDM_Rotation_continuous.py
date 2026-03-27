@@ -80,7 +80,7 @@ def main():
         mc_points_size=512,
         logz_threshold=0.1,
         num_chains=8,
-        do_final_ns=False,
+        do_final_ns=True,
     )
 
     end = time.time()
