@@ -23,7 +23,7 @@ params:
       max: 0.13
     ref:
       dist: norm
-      loc: 0.1186384753
+      loc: 0.1193610821
       scale: 0.0005
     proposal: 0.0005
   logA:
@@ -32,7 +32,7 @@ params:
       max: 3.1
     ref:
       dist: norm
-      loc: 3.040776555
+      loc: 3.033306493
       scale: 0.001
     proposal: 0.001
     latex: \log(10^{10} A_\mathrm{s})
@@ -45,7 +45,7 @@ params:
       max: 0.99
     ref:
       dist: norm
-      loc: 0.9652909209
+      loc: 0.9668890930
       scale: 0.002
     proposal: 0.002
     latex: n_\mathrm{s}
@@ -56,7 +56,7 @@ params:
       max: 72
     ref:
       dist: norm
-      loc: 67.7123491
+      loc: 67.35797244
       scale: 0.05
     proposal: 0.05
   ombh2:
@@ -65,7 +65,7 @@ params:
       max: 0.023
     ref:
       dist: norm
-      loc: 0.02224954976
+      loc: 0.02219474792
       scale: 0.0001
     proposal: 0.0001
     latex: \Omega_\mathrm{b} h^2
@@ -76,10 +76,197 @@ params:
       max: 0.08
     ref:
       dist: norm
-      loc: 0.05546101493
+      loc: 0.05194943109
       scale: 0.003
     proposal: 0.003
   mnu: 0.06
+  A_planck:
+    prior:
+      dist: norm
+      loc: 1
+      scale: 0.0025
+    ref:
+      dist: norm
+      loc: 1
+      scale: 0.002
+    proposal: 0.0005
+    latex: y_\mathrm{cal}
+    renames: calPlanck
+  cal100A:
+    prior:
+      min: 0.9
+      max: 1.1
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.002
+    proposal: 0.005
+    latex: c_\mathrm{100A}
+  cal100B:
+    prior:
+      min: 0.9
+      max: 1.1
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.002
+    proposal: 0.005
+    latex: c_\mathrm{100B}
+  cal143A:
+    value: 1.0
+    latex: c_\mathrm{143A}
+  cal143B:
+    prior:
+      min: 0.9
+      max: 1.1
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.002
+    proposal: 0.005
+    latex: c_\mathrm{143B}
+  cal217A:
+    prior:
+      min: 0.9
+      max: 1.1
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.002
+    proposal: 0.005
+    latex: c_\mathrm{217A}
+  cal217B:
+    prior:
+      min: 0.9
+      max: 1.1
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.002
+    proposal: 0.005
+    latex: c_\mathrm{217B}
+  Aradio:
+    prior:
+      min: 0.0
+      max: 150.0
+    ref:
+      dist: norm
+      loc: 60.0
+      scale: 1.5
+    proposal: 1.0
+    latex: A_\mathrm{radio}^\mathrm{PS}
+  Adusty:
+    prior:
+      min: 0.0
+      max: 100.0
+    ref:
+      dist: norm
+      loc: 6.0
+      scale: 1.0
+    proposal: 1.0
+    latex: A_\mathrm{IR}^\mathrm{PS}
+  beta_dusty:
+    value: 'lambda beta_cib: beta_cib'
+    latex: \beta_\mathrm{IR}^\mathrm{PS}
+    derived: true
+  AdustT:
+    prior:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.02
+    proposal: 0.02
+    latex: A_\mathrm{dustT}
+  beta_dustT:
+    prior:
+      dist: norm
+      loc: 1.51
+      scale: 0.01
+    ref:
+      dist: norm
+      loc: 1.51
+      scale: 0.01
+    proposal: 0.01
+    latex: \beta_\mathrm{dustT}
+  AsyncT:
+    value: 0.0
+    latex: A_\mathrm{syncT}
+  Acib:
+    prior:
+      min: 0.0
+      max: 20.0
+    ref:
+      dist: norm
+      loc: 4.0
+      scale: 0.2
+    proposal: 1
+    latex: A_\mathrm{CIB}
+  beta_cib:
+    prior:
+      dist: norm
+      loc: 1.75
+      scale: 0.06
+    ref:
+      dist: norm
+      loc: 1.75
+      scale: 0.05
+    proposal: 0.05
+    latex: \beta_\mathrm{CIB}
+  Atsz:
+    prior:
+      min: 0.0
+      max: 50.0
+    ref:
+      dist: norm
+      loc: 3.0
+      scale: 0.5
+    proposal: 1
+    latex: A_\mathrm{tSZ}
+  Aksz:
+    prior:
+      min: 0
+      max: 50
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.5
+    proposal: 1
+    latex: A_\mathrm{kSZ}
+  xi:
+    prior:
+      min: -1.0
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.1
+      scale: 0.02
+    proposal: 0.1
+    latex: \xi_\mathrm{SZxCIB}
+  AdustP:
+    prior:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.02
+    proposal: 0.02
+    latex: A_\mathrm{dustP}
+  beta_dustP:
+    prior:
+      dist: norm
+      loc: 1.59
+      scale: 0.02
+    ref:
+      dist: norm
+      loc: 1.59
+      scale: 0.01
+    proposal: 0.01
+    latex: \beta_\mathrm{dustP}
 sampler:
   mcmc:
     drag: false

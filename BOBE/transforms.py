@@ -203,12 +203,13 @@ class RotationTransform(BaseTransform):
         kl_threshold=1.0,
         max_updates=10,
         update_step=None,
+        active_dims=None,
     ):
         """
         Parameters
         ----------
         param_bounds : array-like (2, D)
-        covariance : array-like (D, D) or None
+        covariance : array-like (D, D) or (|active_dims|, |active_dims|) or None
             Initial covariance (or Fisher if is_fisher=True). If None, starts
             in identity mode and learns rotation on first update() call.
         center : array-like (D,) or None
@@ -217,6 +218,7 @@ class RotationTransform(BaseTransform):
             Bounds in rotated space are +/- n_sigma * sqrt(eigenvalue).
         regularize_eps : float
         rank : int or None
+            Rank of rotation within the active subspace.
         kl_threshold : float
             Min symmetric KL between current and proposed Gaussian before an
             update fires. Updates are skipped when KL < kl_threshold.
@@ -224,12 +226,34 @@ class RotationTransform(BaseTransform):
         update_step : int or None
             Min BO iterations between consecutive updates (after the first).
             None disables further updates after the first.
+        active_dims : array-like of int or None
+            Indices of parameters to which the rotation is applied.  The
+            remaining ("inactive") dimensions use simple linear scaling.
+            ``None`` (default) means all dimensions are active, giving the
+            same behaviour as before this parameter was added.
         """
         bounds = np.asarray(param_bounds, dtype=np.float64)
         if bounds.shape[0] != 2:
             raise ValueError("param_bounds must have shape (2, D)")
         self._original_bounds = bounds
         self._ndim = bounds.shape[1]
+
+        # active / inactive dimension setup
+        if active_dims is None:
+            self._active_dims = np.arange(self._ndim, dtype=int)
+            self._inactive_dims = np.array([], dtype=int)
+        else:
+            self._active_dims = np.asarray(sorted(set(int(d) for d in active_dims)), dtype=int)
+            if len(self._active_dims) == 0:
+                raise ValueError("active_dims must not be empty")
+            if self._active_dims.min() < 0 or self._active_dims.max() >= self._ndim:
+                raise ValueError(
+                    f"active_dims indices out of range [0, {self._ndim})"
+                )
+            inactive = sorted(set(range(self._ndim)) - set(self._active_dims.tolist()))
+            self._inactive_dims = np.asarray(inactive, dtype=int)
+        self._n_active = len(self._active_dims)
+        self._n_inactive = len(self._inactive_dims)
 
         self.n_sigma = float(n_sigma)
         self.regularize_eps = float(regularize_eps)
@@ -261,49 +285,80 @@ class RotationTransform(BaseTransform):
         self._theta_range = self._theta_max - self._theta_min
         self._effective_bounds = self._original_bounds.copy()
         self._r = self._ndim
+        self._r_total = self._ndim
+        # Pre-compute inactive-dim arrays (empty when all dims active)
+        self._theta_min_inactive = self._original_bounds[0][self._inactive_dims].copy()
+        self._theta_range_inactive = (
+            self._original_bounds[1][self._inactive_dims]
+            - self._original_bounds[0][self._inactive_dims]
+        )
         log.info(f"RotationTransform (linear mode): ndim={self._ndim}")
         log.info(f"Physical bounds: {list(zip(self._theta_min, self._theta_max))}")
 
+    def _build_slot_arrays(self):
+        """Build index arrays mapping rotation/linear components to u-vector slots.
+
+        The output u-vector always preserves original dimension ordering:
+        u[i] corresponds to theta[i] for all surviving dimensions.
+        Active dims[0..r-1] (by original index) carry rotated components;
+        inactive dims carry linearly-scaled components.
+        """
+        surviving_active = self._active_dims[:self._r]  # first _r active dims
+        all_orig = np.concatenate([surviving_active, self._inactive_dims])
+        sort_order = np.argsort(all_orig)
+        inv_sort = np.argsort(sort_order)
+        self._u_slot_active = inv_sort[:self._r].copy()    # u-positions for rotation
+        self._u_slot_inactive = inv_sort[self._r:].copy()  # u-positions for linear
+        self._r_total = self._r + self._n_inactive         # total output dim
+
     def _setup_rotation(self, cov_input, center, is_fisher,
                         n_sigma, regularize_eps, rank):
-        """(Re-)initialise the internal rotation state from a covariance matrix."""
-        if cov_input.shape != (self._ndim, self._ndim):
+        """(Re-)initialise the internal rotation state from a covariance matrix.
+
+        ``cov_input`` may be either (D, D) — a full covariance from which the
+        active-dims subblock is extracted — or (n_active, n_active) directly.
+        """
+        n_a = self._n_active
+        if cov_input.shape == (self._ndim, self._ndim):
+            cov_sub = cov_input[np.ix_(self._active_dims, self._active_dims)].copy()
+        elif cov_input.shape == (n_a, n_a):
+            cov_sub = cov_input.copy()
+        else:
             raise ValueError(
-                f"covariance must be ({self._ndim},{self._ndim}), "
-                f"got {cov_input.shape}"
+                f"covariance must be ({self._ndim},{self._ndim}) or "
+                f"({n_a},{n_a}), got {cov_input.shape}"
             )
+
         if is_fisher:
             log.info("Inverting Fisher matrix to obtain covariance.")
             try:
-                cov_phys = np.linalg.inv(cov_input)
+                cov_sub = np.linalg.inv(cov_sub)
             except np.linalg.LinAlgError:
                 raise ValueError("Fisher matrix is singular.")
-        else:
-            cov_phys = cov_input.copy()
 
         if regularize_eps > 0.0:
-            cov_phys = cov_phys + regularize_eps * np.eye(self._ndim)
-        cov_phys = 0.5 * (cov_phys + cov_phys.T)
-        min_eval = np.min(np.linalg.eigvalsh(cov_phys))
+            cov_sub = cov_sub + regularize_eps * np.eye(n_a)
+        cov_sub = 0.5 * (cov_sub + cov_sub.T)
+        min_eval = np.min(np.linalg.eigvalsh(cov_sub))
         if min_eval <= 0:
             raise ValueError(
                 f"Covariance not positive definite (min eigenvalue {min_eval:.3e}). "
                 "Increase regularize_eps."
             )
-        self._covariance_phys = cov_phys
+        self._covariance_phys = cov_sub  # (n_active, n_active) subblock
 
-        eigvals, eigvecs = np.linalg.eigh(cov_phys)
+        eigvals, eigvecs = np.linalg.eigh(cov_sub)
         idx = np.argsort(eigvals)[::-1]
         eigvals = eigvals[idx]
         eigvecs = eigvecs[:, idx]
 
-        r = self._ndim if rank is None else int(rank)
-        if not (1 <= r <= self._ndim):
-            raise ValueError(f"rank must be in 1..{self._ndim}")
+        r = n_a if rank is None else int(rank)
+        if not (1 <= r <= n_a):
+            raise ValueError(f"rank must be in 1..{n_a} (number of active dims)")
         self._r = r
 
         lambdas_r = np.maximum(eigvals[:r], 0.0)
-        V_r = eigvecs[:, :r]
+        V_r = eigvecs[:, :r]   # (n_active, r)
         sqrt_lambdas = np.sqrt(lambdas_r)
         self._z_min = -n_sigma * sqrt_lambdas
         self._z_max = +n_sigma * sqrt_lambdas
@@ -321,17 +376,33 @@ class RotationTransform(BaseTransform):
             )
             log.info("No center provided; using midpoint of param_bounds")
 
-        theta_min_implied = self._theta_center + np.sum(
+        # Effective bounds: rotation-implied for active dims, original for inactive
+        theta_min_impl = self._original_bounds[0].copy()
+        theta_max_impl = self._original_bounds[1].copy()
+        center_a = self._theta_center[self._active_dims]
+        theta_min_impl[self._active_dims] = center_a + np.sum(
             np.minimum(V_r * self._z_min, V_r * self._z_max), axis=1
         )
-        theta_max_implied = self._theta_center + np.sum(
+        theta_max_impl[self._active_dims] = center_a + np.sum(
             np.maximum(V_r * self._z_min, V_r * self._z_max), axis=1
         )
-        self._effective_bounds = np.vstack([theta_min_implied, theta_max_implied])
+        self._effective_bounds = np.vstack([theta_min_impl, theta_max_impl])
+
+        # Pre-compute inactive-dim linear arrays for mixed to_unit/from_unit
+        self._theta_min_inactive = self._original_bounds[0][self._inactive_dims].copy()
+        self._theta_range_inactive = (
+            self._original_bounds[1][self._inactive_dims]
+            - self._original_bounds[0][self._inactive_dims]
+        )
+
+        self._build_slot_arrays()
 
         cond = (np.max(lambdas_r) / np.min(lambdas_r)
                 if np.min(lambdas_r) > 0 else np.inf)
-        log.info(f"RotationTransform enabled: rank={r}, n_sigma={n_sigma}")
+        log.info(
+            f"RotationTransform enabled: rank={r}/{n_a} active dims "
+            f"(inactive: {list(self._inactive_dims)}), n_sigma={n_sigma}"
+        )
         log.info(f"Eigenvalues (top {min(6, r)}): {lambdas_r[:min(6, r)]}")
         log.info(f"Condition number: {cond:.2e}")
         log.info(f"z bounds: {list(zip(self._z_min, self._z_max))}")
@@ -339,7 +410,7 @@ class RotationTransform(BaseTransform):
         for i in range(self._ndim):
             log.info(
                 f"  theta[{i}]: "
-                f"[{theta_min_implied[i]:.4g}, {theta_max_implied[i]:.4g}]"
+                f"[{theta_min_impl[i]:.4g}, {theta_max_impl[i]:.4g}]"
             )
 
     # -----------------------------------------------------------------
@@ -352,9 +423,23 @@ class RotationTransform(BaseTransform):
         if single:
             theta = theta[jnp.newaxis]
         if self._use_rotation:
-            dtheta = theta - jnp.array(self._theta_center)
-            z = dtheta @ jnp.array(self._V_r)
-            u = (z - jnp.array(self._z_min)) / jnp.array(self._z_range)
+            if self._n_inactive == 0:
+                # Fast path: all dims active (original behaviour)
+                dtheta = theta - jnp.array(self._theta_center)
+                z = dtheta @ jnp.array(self._V_r)
+                u = (z - jnp.array(self._z_min)) / jnp.array(self._z_range)
+            else:
+                # Mixed path: active dims rotated, inactive dims linear
+                u = jnp.zeros((theta.shape[0], self._r_total))
+                theta_a = theta[:, jnp.array(self._active_dims)]
+                dtheta_a = theta_a - jnp.array(self._theta_center[self._active_dims])
+                z = dtheta_a @ jnp.array(self._V_r)
+                u_rot = (z - jnp.array(self._z_min)) / jnp.array(self._z_range)
+                u = u.at[:, jnp.array(self._u_slot_active)].set(u_rot)
+                theta_i = theta[:, jnp.array(self._inactive_dims)]
+                u_lin = ((theta_i - jnp.array(self._theta_min_inactive))
+                         / jnp.array(self._theta_range_inactive))
+                u = u.at[:, jnp.array(self._u_slot_inactive)].set(u_lin)
         else:
             u = (theta - jnp.array(self._theta_min)) / jnp.array(self._theta_range)
         if clip:
@@ -362,30 +447,81 @@ class RotationTransform(BaseTransform):
         return u[0] if single else u
 
     def from_unit(self, u):
-        u, single = self._prep_input(u, self._r)
+        u, single = self._prep_input(u, self._r_total)
         if np.any(np.isnan(u)):
             log.warning("NaN detected in from_unit() input")
         if self._use_rotation:
-            z = self._z_min + u * self._z_range
-            theta = self._theta_center + z @ self._V_r.T
+            if self._n_inactive == 0:
+                # Fast path: all dims active (original behaviour)
+                z = self._z_min + u * self._z_range
+                theta = self._theta_center + z @ self._V_r.T
+            else:
+                # Mixed path
+                theta = np.empty((u.shape[0], self._ndim))
+                u_rot = u[:, self._u_slot_active]
+                z = self._z_min + u_rot * self._z_range
+                theta[:, self._active_dims] = (
+                    self._theta_center[self._active_dims] + z @ self._V_r.T
+                )
+                u_lin = u[:, self._u_slot_inactive]
+                theta[:, self._inactive_dims] = (
+                    self._theta_min_inactive + u_lin * self._theta_range_inactive
+                )
+                # If rank < n_active, dropped active dims are set to center
+                if self._r < self._n_active:
+                    dropped = self._active_dims[self._r:]
+                    theta[:, dropped] = self._theta_center[dropped]
         else:
             theta = self._theta_min + u * self._theta_range
         return theta[0] if single else theta
 
     def logz_correction(self, log_V_phys: float) -> float:
-        """Σᵢ log(z_range_i) − log_V_phys.
+        """Additive correction converting unit-cube log-evidence to physical-space.
 
-        The Jacobian ∂θ/∂u = V_r @ diag(z_range) has |det J| = ∏ᵢ z_range_i
-        (V_r is orthogonal so |det V_r| = 1).  Adding this constant inside the
-        nested-sampler loglike converts the unit-cube log-evidence into the
-        physical-space log-evidence with a uniform prior over the original
-        parameter bounds (volume exp(log_V_phys)).
+        For the active dims the Jacobian |det(∂θ/∂u)| = ∏ᵢ z_range_i
+        (V_r is orthogonal). For the inactive dims the Jacobian equals their
+        physical range, which cancels exactly with the corresponding factor in
+        log_V_phys. Hence the net correction is:
 
-        Returns 0.0 when the rotation is not yet active (linear fallback mode).
+            Σᵢ∈active log(z_range_i) − Σᵢ∈active log(θ_range_i)
+
+        When all dims are active this reduces to Σᵢ log(z_range_i) − log_V_phys,
+        the original formula. Returns 0.0 in linear fallback mode.
         """
         if not self._use_rotation:
             return 0.0
-        return float(np.sum(np.log(self._z_range))) - log_V_phys
+        log_z_vol = float(np.sum(np.log(self._z_range)))
+        theta_range_active = (
+            self._original_bounds[1][self._active_dims]
+            - self._original_bounds[0][self._active_dims]
+        )
+        log_phys_active = float(np.sum(np.log(theta_range_active)))
+        return log_z_vol - log_phys_active
+
+    # -----------------------------------------------------------------
+    # Automatic update helpers
+    # -----------------------------------------------------------------
+
+    def _compute_subblock_cov(self, mc_x_phys, weights=None):
+        """Return the weighted sample covariance over active dims.
+
+        Returns an (n_active, n_active) array.
+        """
+        x_a = mc_x_phys[:, self._active_dims]
+        N = x_a.shape[0]
+        if weights is not None:
+            w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
+            if w.sum() <= 0.0:
+                w = np.ones(N)
+            w /= w.sum()
+            mu = np.average(x_a, weights=w, axis=0)
+            d = x_a - mu
+            cov = (d * w[:, None]).T @ d
+        else:
+            cov = np.cov(x_a.T) if N > 1 else np.zeros((self._n_active, self._n_active))
+        cov = 0.5 * (cov + cov.T)
+        cov += 1e-10 * np.eye(self._n_active)
+        return cov
 
     # -----------------------------------------------------------------
     # Automatic update
@@ -438,36 +574,25 @@ class RotationTransform(BaseTransform):
         mc_x_phys = self.from_unit(mc_x_unit)
         N = mc_x_phys.shape[0]
 
-        if N < self._ndim + 2:
+        if N < self._n_active + 2:
             log.warning(
                 f"[Rotation update] Too few MC samples ({N}); skipping."
             )
             return False
 
-        # weighted sample covariance
+        # weighted sample covariance over active dims only -> (n_active, n_active)
         weights = mc_samples.get("weights", None)
-        if weights is not None:
-            w = np.clip(np.array(weights, dtype=np.float64), 0.0, None)
-            if w.sum() <= 0.0:
-                w = np.ones(N)
-            w /= w.sum()
-            sample_mean = np.average(mc_x_phys, weights=w, axis=0)
-            diff = mc_x_phys - sample_mean
-            new_cov = (diff * w[:, None]).T @ diff
-        else:
-            new_cov = np.cov(mc_x_phys.T)
-        new_cov = 0.5 * (new_cov + new_cov.T)
-        new_cov += 1e-10 * np.eye(self._ndim)
+        new_cov = self._compute_subblock_cov(mc_x_phys, weights)
 
         new_center = np.asarray(best_pt, dtype=np.float64).flatten()
 
-        # KL divergence check
+        # KL divergence check (in active subspace)
         if self._use_rotation:
             from .utils.core import kl_divergence_gaussian
             try:
                 kl_dict = kl_divergence_gaussian(
-                    self._theta_center, self._covariance_phys,
-                    new_center, new_cov,
+                    self._theta_center[self._active_dims], self._covariance_phys,
+                    new_center[self._active_dims], new_cov,
                 )
                 kl_sym = float(kl_dict["symmetric"])
             except Exception as e:
@@ -491,19 +616,19 @@ class RotationTransform(BaseTransform):
                 "(KL check bypassed)."
             )
 
-        # preview candidate rotation: compute in-bounds without committing
+        # preview candidate rotation over active dims: compute in-bounds without committing
         try:
             _cov = new_cov.copy()
             if self.regularize_eps > 0:
-                _cov += self.regularize_eps * np.eye(self._ndim)
+                _cov += self.regularize_eps * np.eye(self._n_active)
             _cov = 0.5 * (_cov + _cov.T)
             _evals, _evecs = np.linalg.eigh(_cov)
             _idx = np.argsort(_evals)[::-1]
             _evals = _evals[_idx]
             _evecs = _evecs[:, _idx]
-            _r = self._ndim if self._rank_cfg is None else int(self._rank_cfg)
+            _r = self._n_active if self._rank_cfg is None else int(self._rank_cfg)
             _lam_r = np.maximum(_evals[:_r], 0.0)
-            _V_r_new = _evecs[:, :_r]
+            _V_r_new = _evecs[:, :_r]   # (n_active, _r)
             _sqrt_lam = np.sqrt(_lam_r)
             _z_min_new = -self.n_sigma * _sqrt_lam
             _z_range_new = 2.0 * self.n_sigma * _sqrt_lam
@@ -515,10 +640,27 @@ class RotationTransform(BaseTransform):
 
         is_clf = hasattr(gp, "train_x_clf")
 
-        dtheta = all_x_phys - new_center
-        z_cand = dtheta @ _V_r_new
-        u_cand = (z_cand - _z_min_new) / _z_range_new
-        in_bounds = np.all((u_cand >= 0.0) & (u_cand <= 1.0), axis=1)
+        # In-bounds check: active dims via candidate rotation, inactive via linear bounds
+        new_center_a = new_center[self._active_dims]
+        dtheta_a = all_x_phys[:, self._active_dims] - new_center_a
+        z_cand = dtheta_a @ _V_r_new
+        u_cand_active = (z_cand - _z_min_new) / _z_range_new
+        in_bounds_active = np.all(
+            (u_cand_active >= 0.0) & (u_cand_active <= 1.0), axis=1
+        )
+        if self._n_inactive > 0:
+            theta_min_i = self._original_bounds[0][self._inactive_dims]
+            theta_range_i = (
+                self._original_bounds[1][self._inactive_dims] - theta_min_i
+            )
+            u_cand_inactive = (
+                (all_x_phys[:, self._inactive_dims] - theta_min_i) / theta_range_i
+            )
+            in_bounds = in_bounds_active & np.all(
+                (u_cand_inactive >= 0.0) & (u_cand_inactive <= 1.0), axis=1
+            )
+        else:
+            in_bounds = in_bounds_active
 
         n_dropped = int((~in_bounds).sum())
         if n_dropped > 0:
@@ -527,19 +669,18 @@ class RotationTransform(BaseTransform):
                 "outside new unit cube (excluded from GP; retained in all_train_x_phys)."
             )
 
-        x_ib = u_cand[in_bounds]
         y_ib = all_y_raw[in_bounds]
 
-        if x_ib.shape[0] < self._ndim + 2:
+        if in_bounds.sum() < self._n_active + 2:
             log.warning(
-                f"[Rotation update] Only {x_ib.shape[0]} points remain "
+                f"[Rotation update] Only {in_bounds.sum()} points remain "
                 "after filtering -- too few; skipping."
             )
             return False
 
         # pre-check: skip if all MC samples would fall outside the new unit cube
-        mc_dtheta = mc_x_phys - new_center
-        mc_z_cand = mc_dtheta @ _V_r_new
+        mc_dtheta_a = mc_x_phys[:, self._active_dims] - new_center_a
+        mc_z_cand = mc_dtheta_a @ _V_r_new
         mc_u_cand_pre = (mc_z_cand - _z_min_new) / _z_range_new
         n_mc_in = int(np.all((mc_u_cand_pre >= 0.0) & (mc_u_cand_pre <= 1.0), axis=1).sum())
         if n_mc_in == 0:
@@ -549,18 +690,18 @@ class RotationTransform(BaseTransform):
             )
             return False
 
-        # hand new data to GP (before committing transform)
-        if is_clf:
-            gp.remap_from_full_dataset(x_ib, y_ib)
-        else:
-            gp.remap_from_raw(x_ib, y_ib)
-
-        # commit the new rotation
+        # commit the new rotation, then remap GP training data in new unit cube
         self._setup_rotation(
             new_cov, new_center, False,
             self.n_sigma, self.regularize_eps, self._rank_cfg,
         )
         self._use_rotation = True
+
+        x_ib = np.asarray(self.to_unit(all_x_phys[in_bounds], clip=False))
+        if is_clf:
+            gp.remap_from_full_dataset(x_ib, y_ib)
+        else:
+            gp.remap_from_raw(x_ib, y_ib)
 
         # remap MC samples into new unit cube
         mc_x_new_unit = self.to_unit(mc_x_phys, clip=False)
@@ -621,6 +762,7 @@ class RotationTransform(BaseTransform):
             "original_bounds": self._original_bounds,
             "ndim": self._ndim,
             "r": self._r,
+            "r_total": self._r_total,
             "use_rotation": self._use_rotation,
             "effective_bounds": self._effective_bounds,
             "n_sigma": self.n_sigma,
@@ -635,6 +777,8 @@ class RotationTransform(BaseTransform):
             "last_update_acq_val": (self.last_update_acq_val
                                     if self.last_update_acq_val is not None
                                     else np.nan),
+            "active_dims": self._active_dims,
+            "inactive_dims": self._inactive_dims,
         }
         if self._use_rotation:
             state.update({
@@ -645,6 +789,13 @@ class RotationTransform(BaseTransform):
                 "z_max": self._z_max,
                 "z_range": self._z_range,
             })
+            if self._n_inactive > 0:
+                state.update({
+                    "u_slot_active": self._u_slot_active,
+                    "u_slot_inactive": self._u_slot_inactive,
+                    "theta_min_inactive": self._theta_min_inactive,
+                    "theta_range_inactive": self._theta_range_inactive,
+                })
         else:
             state.update({
                 "theta_min": self._theta_min,
@@ -659,6 +810,7 @@ class RotationTransform(BaseTransform):
         obj._original_bounds = np.array(state["original_bounds"])
         obj._ndim = int(state["ndim"])
         obj._r = int(state["r"])
+        obj._r_total = int(state.get("r_total", int(state["r"])))
         obj._use_rotation = bool(state["use_rotation"])
         obj._effective_bounds = np.array(state["effective_bounds"])
 
@@ -680,6 +832,17 @@ class RotationTransform(BaseTransform):
         )
         obj.updated_mc_samples = None
 
+        # active/inactive dims — backward compat: old checkpoints have no key
+        _ad = state.get("active_dims", None)
+        if _ad is None:
+            obj._active_dims = np.arange(obj._ndim, dtype=int)
+            obj._inactive_dims = np.array([], dtype=int)
+        else:
+            obj._active_dims = np.asarray(_ad, dtype=int)
+            obj._inactive_dims = np.asarray(state["inactive_dims"], dtype=int)
+        obj._n_active = len(obj._active_dims)
+        obj._n_inactive = len(obj._inactive_dims)
+
         if obj._use_rotation:
             obj._covariance_phys = np.array(state["covariance_phys"])
             obj._theta_center = np.array(state["theta_center"])
@@ -687,24 +850,51 @@ class RotationTransform(BaseTransform):
             obj._z_min = np.array(state["z_min"])
             obj._z_max = np.array(state["z_max"])
             obj._z_range = np.array(state["z_range"])
+            if obj._n_inactive > 0 and "u_slot_active" in state:
+                obj._u_slot_active = np.asarray(state["u_slot_active"], dtype=int)
+                obj._u_slot_inactive = np.asarray(state["u_slot_inactive"], dtype=int)
+                obj._theta_min_inactive = np.asarray(state["theta_min_inactive"])
+                obj._theta_range_inactive = np.asarray(state["theta_range_inactive"])
+            elif obj._n_inactive > 0:
+                # Recompute slot arrays from stored arrays if not persisted
+                obj._theta_min_inactive = obj._original_bounds[0][obj._inactive_dims].copy()
+                obj._theta_range_inactive = (
+                    obj._original_bounds[1][obj._inactive_dims]
+                    - obj._original_bounds[0][obj._inactive_dims]
+                )
+                obj._build_slot_arrays()
+            else:
+                # All dims active: slot arrays are identity
+                obj._u_slot_active = np.arange(obj._r, dtype=int)
+                obj._u_slot_inactive = np.array([], dtype=int)
+                obj._theta_min_inactive = np.array([])
+                obj._theta_range_inactive = np.array([])
         else:
             obj._theta_min = np.array(state["theta_min"])
             obj._theta_max = np.array(state["theta_max"])
             obj._theta_range = np.array(state["theta_range"])
+            obj._theta_min_inactive = obj._original_bounds[0][obj._inactive_dims].copy()
+            obj._theta_range_inactive = (
+                obj._original_bounds[1][obj._inactive_dims]
+                - obj._original_bounds[0][obj._inactive_dims]
+            )
 
         return obj
 
     def __repr__(self):
+        active_info = (
+            f", active_dims={list(self._active_dims)}" if self._n_inactive > 0 else ""
+        )
         if self._use_rotation:
             vol = float(np.prod(self._z_range))
             return (
-                f"RotationTransform(ndim={self._ndim}, rank={self._r}, "
+                f"RotationTransform(ndim={self._ndim}, rank={self._r}{active_info}, "
                 f"updates={self.update_count}/{self.max_updates}, "
                 f"z_vol={vol:.2e})"
             )
         vol = float(np.prod(self._theta_max - self._theta_min))
         return (
-            f"RotationTransform(ndim={self._ndim}, "
+            f"RotationTransform(ndim={self._ndim}{active_info}, "
             f"mode=linear->rotation, phys_vol={vol:.2e})"
         )
 
@@ -1366,10 +1556,12 @@ def ParameterTransform(
     n_sigma=5.0,
     regularize_eps=0.0,
     rank=None,
+    active_dims=None,
 ):
     """
     Factory function retained for backward compatibility.
     Returns IdentityTransform when rotation_matrix is None, RotationTransform otherwise.
+    ``active_dims`` is passed through to RotationTransform when provided.
     """
     if rotation_matrix is None:
         return IdentityTransform(param_bounds)
@@ -1381,6 +1573,7 @@ def ParameterTransform(
         n_sigma=n_sigma,
         regularize_eps=regularize_eps,
         rank=rank,
+        active_dims=active_dims,
     )
 
 

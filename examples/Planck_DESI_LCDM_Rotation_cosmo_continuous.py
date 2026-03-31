@@ -1,8 +1,12 @@
 """
-Hpop script with continuous GP parameter rotation.
+LCDM script with continuous GP parameter rotation applied to cosmological
+parameters only.  Planck nuisance parameters (CamSpec calibration) are kept
+in a simple linear (axis-aligned) unit-cube mapping.
 
-Loads reference MCMC chains with GetDist and runs BOBE with parameter
-rotation enabled, updating the rotation matrix as new samples accumulate.
+The active cosmological parameters are:
+    omch2, ombh2, H0, logA, ns, tau
+All remaining sampled parameters (A_planck and CamSpec calibration) use
+linear scaling.
 """
 
 import os
@@ -12,8 +16,9 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
     os.cpu_count()
 )
 
-from BOBE import BOBE
+from BOBE import BOBE, CobayaLikelihood
 from BOBE.transforms import RotationTransform
+from BOBE.utils.core import scale_from_unit
 import time
 import matplotlib.pyplot as plt
 plt.rcParams['text.usetex'] = True
@@ -22,101 +27,105 @@ import seaborn as sns
 from getdist import MCSamples, plots, loadMCSamples
 import numpy as np
 
+# Cosmological parameters to which the rotation is applied.
+# All other sampled parameters (nuisance / calibration) remain linear.
+LCDM_COSMO_PARAMS = ['omch2', 'ombh2', 'H0', 'logA', 'ns', 'tau']
 
 
 def main():
 
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 42
 
-    cobaya_input_file = './cosmo_input/Hpop.yaml'
-    likelihood_name = f'Planck_Hpop_Rotation_continuous_{seed}'
+    cobaya_input_file = './cosmo_input/LCDM_Planck_DESI.yaml'
+    likelihood_name = f'Planck_DESI_LCDM_Rotation_cosmo_continuous_{seed}'
 
     print("Loading reference samples...")
     reference_samples = loadMCSamples(
-        './cosmo_input/chains/Hpop',
+        './cosmo_input/chains/Planck_DESIDr2_LCDM_MCMC',
         settings={'ignore_rows': 0.3, 'label': 'MCMC'}
+    )
+
+    # Build the likelihood first so we can read param_list and param_bounds
+    # before constructing the transform.
+    print("Building Cobaya likelihood...")
+    likelihood = CobayaLikelihood(
+        cobaya_input_file,
+        confidence_for_unbounded=0.9999995,
+        minus_inf=-1e5,
+        name=likelihood_name,
+    )
+
+    active_dims = [likelihood.param_list.index(p)
+                   for p in LCDM_COSMO_PARAMS if p in likelihood.param_list]
+    print(f"param_list      : {likelihood.param_list}")
+    print(f"active dims     : {active_dims}")
+    print(f"active params   : {[likelihood.param_list[i] for i in active_dims]}")
+    print(f"inactive params : {[p for p in likelihood.param_list if p not in LCDM_COSMO_PARAMS]}")
+
+    transform = RotationTransform(
+        likelihood.param_bounds,
+        active_dims=active_dims,
+        kl_threshold=0.5,
+        max_updates=5,
+        update_step=25,
     )
 
     start = time.time()
     print("\n" + "="*80)
-    print("Starting BOBE run WITH parameter rotation...")
+    print("Starting BOBE run WITH cosmological-parameter rotation...")
     print("="*80)
 
     bobe = BOBE(
-        loglikelihood=cobaya_input_file,
-        likelihood_name=likelihood_name,
-        confidence_for_unbounded=0.9999995,
+        loglikelihood=likelihood,
         resume=True,
         resume_file=f'./results/LCDM/{likelihood_name}',
         save_dir='./results/LCDM/',
         save=True,
         verbosity='INFO',
-        n_cobaya_init=36,
-        n_sobol_init=64,
+        n_cobaya_init=4,
+        n_sobol_init=32,
         use_clf=True,
         clf_type='svm',
-        minus_inf=-1e5,
         seed=seed,
-        gp_kwargs = {'lengthscale_bounds': (0.01, 100), 'kernel_variance_bounds': (1e-6, 1e6)},
-        # Pass transform as (class, kwargs) — BOBE resolves param_bounds from
-        # the likelihood and instantiates RotationTransform(param_bounds, **kwargs).
-        transform=(RotationTransform, {
-            'kl_threshold': 0.5,
-            'max_updates': 10,
-            'update_step': 20,
-            'n_sigma': 3,
-        }),
+        gp_kwargs={'lengthscale_bounds': (0.01, 100), 'kernel_variance_bounds': (1e-4, 1e4)},
+        transform=transform,
     )
-
-    # results = bobe.run(
-    #     acq='logei',
-    #     min_evals=100,
-    #     max_evals=700,
-    # )
 
     results = bobe.run(
         acq='wipstd',
-        min_evals=800,
-        max_evals=6000,
-        max_gp_size=1600,
-        fit_n_points=50,
-        ns_n_points=40,
-        batch_size=6,
+        min_evals=400,
+        max_evals=1500,
+        max_gp_size=1000,
+        fit_n_points=25,
+        ns_n_points=25,
+        batch_size=5,
         num_hmc_warmup=512,
-        num_hmc_samples=6000,
+        num_hmc_samples=8000,
         mc_points_size=512,
-        logz_threshold=2/3,
+        logz_threshold=0.25,
         num_chains=8,
         do_final_ns=False,
-        convergence_n_iters=5,
     )
 
     end = time.time()
 
-    if results is not None:  # when running in MPI mode, only rank 0 returns results, rest return None
+    if results is not None:
 
         gp = results['gp']
-        logz_dict = results.get('logz', {})
-        likelihood = results['likelihood']
         results_manager = results['results_manager']
         samples = results['samples']
         param_bounds = likelihood.param_bounds
         param_list = likelihood.param_list
         param_labels = likelihood.param_labels
-        ndim = len(param_list)
 
         manual_timing = end - start
 
         print("\n" + "="*80)
-        print("RUN COMPLETED WITH ROTATION")
+        print("RUN COMPLETED WITH COSMO ROTATION")
         print("="*80)
-        # print(f"Final LogZ: {logz_dict.get('mean', 'N/A'):.4f}")
-        # if 'upper' in logz_dict and 'lower' in logz_dict:
-        #     print(f"LogZ uncertainty: ±{(logz_dict['upper'] - logz_dict['lower'])/2:.4f}")
         print(f"Total runtime: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
         print(f"Number of GP training points: {gp.train_x.shape[0]}")
 
-        # Create MCSamples from BOBE results
         sample_array = samples['x']
         weights_array = samples['weights']
         BOBE_Samples = MCSamples(
@@ -127,29 +136,27 @@ def main():
             ranges=dict(zip(param_list, param_bounds.T))
         )
 
-        # Cosmology parameters plot
         print("\nCreating cosmology parameter samples plot...")
         sns.set_theme('notebook', 'ticks', palette='husl')
         plt.rcParams['text.usetex'] = False
         plt.rcParams['font.family'] = 'sans-serif'
 
-        param_list_cosmo = ['omch2', 'ombh2', 'H0', 'logA', 'ns', 'tau']
+        param_list_LCDM = ['omch2', 'ombh2', 'H0', 'logA', 'ns', 'tau']
         g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
         g.settings.legend_fontsize = 16
         g.settings.axes_fontsize = 16
         g.settings.axes_labelsize = 16
         g.triangle_plot(
             [BOBE_Samples, reference_samples],
-            params=param_list_cosmo,
+            params=param_list_LCDM,
             filled=[True, False],
             contour_colors=['#006FED', 'black'],
             contour_lws=[1, 1.5],
-            legend_labels=['BOBE (rotated)', 'MCMC'],
+            legend_labels=['BOBE (cosmo rotation)', 'MCMC'],
         )
         g.export(f'./results/LCDM/{likelihood_name}_cosmo_samples.pdf')
         print(f"Saved plot to ./results/LCDM/{likelihood_name}_cosmo_samples.pdf")
 
-        # Full parameter plot
         g = plots.get_subplot_plotter(subplot_size=2.5, subplot_size_ratio=1)
         g.settings.legend_fontsize = 16
         g.settings.axes_fontsize = 16
@@ -160,12 +167,11 @@ def main():
             filled=[True, False],
             contour_colors=['#006FED', 'black'],
             contour_lws=[1, 1.5],
-            legend_labels=['BOBE (rotated)', 'MCMC'],
+            legend_labels=['BOBE (cosmo rotation)', 'MCMC'],
         )
         g.export(f'./results/LCDM/{likelihood_name}_full_samples.pdf')
         print(f"Saved plot to ./results/LCDM/{likelihood_name}_full_samples.pdf")
 
-        # Timing analysis
         print("\n" + "="*80)
         print("DETAILED TIMING ANALYSIS")
         print("="*80)
@@ -179,7 +185,6 @@ def main():
                 percentage = timing_data['percentages'].get(phase, 0)
                 print(f"{phase:30s}: {time_spent:8.2f}s ({percentage:5.1f}%)")
 
-        # Acquisition function plot
         acquisition_data = results_manager.get_acquisition_data()
         iterations = np.array(acquisition_data['iterations'])
         values = np.array(acquisition_data['values'])
@@ -189,12 +194,11 @@ def main():
         ax.set_yscale('log')
         ax.set_xlabel('Iteration')
         ax.set_ylabel('Acquisition Value')
-        ax.set_title('Acquisition Function Values (with rotation)')
+        ax.set_title('Acquisition Function Values (cosmo rotation)')
         ax.grid(True, alpha=0.3)
         plt.savefig(f"./results/LCDM/{likelihood_name}_acquisition.pdf", bbox_inches='tight')
         print(f"Saved acquisition plot to ./results/LCDM/{likelihood_name}_acquisition.pdf")
 
-        # GP hyperparameters
         print("\n" + "="*80)
         print("GP HYPERPARAMETERS")
         print("="*80)
