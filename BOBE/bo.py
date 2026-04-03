@@ -444,6 +444,7 @@ class BOBE:
         ts = data.get('transform_state', {})
         type_key = ts.get('type', IdentityTransform._TYPE_KEY)
         if type_key == RotationTransform._TYPE_KEY:
+            # override with new settings if given in BOBE init
             self.transform = RotationTransform.from_state_dict(ts)
         elif type_key == NormalisingFlowTransform._TYPE_KEY:
             self.transform = NormalisingFlowTransform.from_state_dict(ts)
@@ -750,6 +751,7 @@ class BOBE:
         # Track actual points added (accounts for filtering by classifier or other mechanisms)
         gp_size_after = self.gp.train_x.shape[0]
         actual_points_added = gp_size_after - gp_size_before
+        log.info(f"Added {actual_points_added} new points to GP (size before: {gp_size_before}, size after: {gp_size_after})")
         self.n_points_since_last_fit += actual_points_added
         
         # Determine refit parameters based on training set size and points added
@@ -1195,7 +1197,9 @@ class BOBE:
             zeta_ei: float = 0.0,
             transform_update_min_evals: Optional[int] = None,
             transform_acq_threshold: Optional[float] = None,
-            kl_convergence_threshold: float = 0.1):
+            kl_convergence_threshold: float = 0.1,
+            adaptive_batch: bool = False,
+            min_batch_size: Optional[int] = None):
         """
         Run the Bayesian Optimization loop.
         
@@ -1257,7 +1261,17 @@ class BOBE:
             back to the dimension-based default from
             ``get_dimension_based_defaults()['transform_acq_threshold']``.
             Pass explicitly to override both.
-            
+        adaptive_batch : bool, optional
+            Enable adaptive batch sizing (default False). When True, the effective batch
+            size each iteration is determined by how far the current acquisition value is
+            from ``logz_threshold``:
+              - acq_val >= 10x threshold  ->  min_batch_size
+              - acq_val <= 2x  threshold  ->  batch_size
+              - between                   ->  linear interpolation
+            ``num_hmc_samples`` is also scaled proportionally to the effective batch size.
+        min_batch_size : int, optional
+            Minimum (starting) batch size when ``adaptive_batch=True``. Default is 1.
+
         Returns
         -------
         dict
@@ -1276,6 +1290,7 @@ class BOBE:
         max_gp_size = max_gp_size if max_gp_size is not None else dim_defaults['max_gp_size']
         fit_n_points = fit_n_points if fit_n_points is not None else dim_defaults['fit_n_points']
         batch_size = batch_size if batch_size is not None else dim_defaults['batch_size']
+        min_batch_size = min_batch_size if min_batch_size is not None else 1
         ns_n_points = ns_n_points if ns_n_points is not None else dim_defaults['ns_n_points']
         num_hmc_warmup = num_hmc_warmup if num_hmc_warmup is not None else dim_defaults['num_hmc_warmup']
         num_hmc_samples = num_hmc_samples if num_hmc_samples is not None else dim_defaults['num_hmc_samples']
@@ -1341,7 +1356,8 @@ class BOBE:
         else:
             acq_info = "ei_goal = {:.4e}".format(ei_goal)
         log.info(f"convergence_n_iters = {convergence_n_iters}, acq = {acq}, {acq_info}")
-        log.info(f"fit_n_points = {fit_n_points}, batch_size = {batch_size}, ns_n_points = {ns_n_points}")
+        adaptive_str = f", min_batch_size = {min_batch_size} (adaptive)" if adaptive_batch else ""
+        log.info(f"fit_n_points = {fit_n_points}, batch_size = {batch_size}{adaptive_str}, ns_n_points = {ns_n_points}")
         
         # Initialize result containers
         self.samples_dict = {}
@@ -1355,7 +1371,9 @@ class BOBE:
         self.fit_n_points = fit_n_points
         self.ns_n_points = ns_n_points
         self.batch_size = batch_size
-        
+        self.adaptive_batch = adaptive_batch
+        self.min_batch_size = min_batch_size
+
         # Initialize point counters for triggering GP refit and NS
         self.n_points_since_last_fit = 0
         self.n_points_since_last_ns = 0
@@ -1509,6 +1527,25 @@ class BOBE:
         # End EI
         self.current_iteration = ii
 
+    def _compute_effective_batch(self, acq_val: float) -> int:
+        """Return effective batch size for this iteration.
+
+        When adaptive_batch=True, interpolates linearly between min_batch_size
+        and batch_size based on how close acq_val is to the convergence threshold:
+          - ratio >= 10x threshold  ->  min_batch_size
+          - ratio <= 2x  threshold  ->  batch_size
+          - between                 ->  linear interpolation
+        """
+        if not self.adaptive_batch:
+            return self.batch_size
+
+        ratio_high = 10.0
+        ratio_low  = 2.0
+        ratio = abs(acq_val) / max(abs(self.logz_threshold), 1e-12)
+        progress = max(0.0, min(1.0, (ratio_high - ratio) / (ratio_high - ratio_low)))
+        effective = int(self.min_batch_size + (self.batch_size - self.min_batch_size) * progress)
+        return max(self.min_batch_size, min(self.batch_size, effective))
+
     def run_weighted_integrated_posterior(self, acq_func_class, ii=0):
         """
         Run the optimization loop for Weighted Integrated Posterior acquisition functions (WIPV or WIPStd).
@@ -1544,7 +1581,7 @@ class BOBE:
         self.results_manager.end_timing('MCMC Sampling')
         self.ns_samples = None
         logz_keys = ['mean', 'upper', 'lower', 'dlogz_sampler']  # used in do_final_ns block
-
+        prev_acq_val = abs(self.logz_threshold) * 10.0  # seed: far from convergence → min_batch_size
 
         while not self.converged:
             ii += 1
@@ -1554,7 +1591,13 @@ class BOBE:
                 log.info(f"Iteration {ii} of {acq_name}, objective evals {current_evals}/{self.max_evals}")
 
             acq_kwargs = {'mc_samples': self.mc_samples, 'mc_points_size': self.mc_points_size}
-            new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = self.batch_size, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
+            effective_batch = self._compute_effective_batch(prev_acq_val)
+            if self.adaptive_batch:
+                log.debug(f"  Adaptive batch={effective_batch}/{self.batch_size} "
+                          f"(acq_val={prev_acq_val:.4f}, threshold={self.logz_threshold:.4f})")
+            new_pts_u, acq_vals = self.get_next_batch(acq_kwargs, n_batch = effective_batch, n_restarts = 1, maxiter = 100, early_stop_patience = 10, step = ii, verbose=verbose)
+            mean_acq_val = float(np.mean(acq_vals))
+            prev_acq_val = mean_acq_val
             new_pts_u = jnp.atleast_2d(new_pts_u)
             new_vals = self.evaluate_likelihood(new_pts_u, ii, verbose=verbose)
             current_evals = self.total_objective_evals
@@ -1563,11 +1606,15 @@ class BOBE:
             self.results_manager.update_best_loglike(ii, self.best_f)
 
             # MCMC sampling to update mc_samples every iteration
+            effective_hmc_samples = (
+                max(512, int(self.num_hmc_samples * effective_batch / self.batch_size))
+                if self.adaptive_batch else self.num_hmc_samples
+            )
             self.results_manager.start_timing('MCMC Sampling')
             self.mc_samples = get_mc_samples(
                 self.gp,
                 warmup_steps=self.num_hmc_warmup,
-                num_samples=self.num_hmc_samples,
+                num_samples=effective_hmc_samples,
                 thinning=self.hmc_thinning,
                 num_chains=self.hmc_num_chains,
                 method=self.mc_points_method,
@@ -1591,7 +1638,7 @@ class BOBE:
                 did_update = self.transform.update(
                     gp=self.gp,
                     mc_samples=self.mc_samples,
-                    acq_val=float(acq_vals[-1]),
+                    acq_val=mean_acq_val,
                     acq_threshold=self.transform_acq_threshold,
                     best_pt=self.best_pt,
                     all_x_phys=self.all_train_x_phys,
@@ -1613,7 +1660,7 @@ class BOBE:
 
             # Check convergence via acquisition value + consecutive KL divergence
             self.current_iteration = ii
-            self.converged = self._check_convergence(float(acq_vals[-1]))
+            self.converged = self._check_convergence(mean_acq_val)
             if self.converged:
                 self.termination_reason = "Converged (acq + KL)"
                 self.results_dict['termination_reason'] = self.termination_reason
@@ -1670,6 +1717,9 @@ class BOBE:
             loglikes = mc_samples['logp']
             # Transform NUTS samples from unit cube to physical space
             samples = np.asarray(self.transform.from_unit(samples))
+
+            # Check GP uncertainty at the MC samples: if high warn that convergence may not have been reached yet.
+            # TODO
 
         self.samples_dict = {
             'x': samples,

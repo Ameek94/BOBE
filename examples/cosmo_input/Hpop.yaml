@@ -87,7 +87,7 @@ params:
       scale: 0.0025
     ref:
       dist: norm
-      loc: 1
+      loc: 0.9994785129
       scale: 0.002
     proposal: 0.0005
     latex: y_\mathrm{cal}
@@ -98,7 +98,7 @@ params:
       max: 1.1
     ref:
       dist: norm
-      loc: 1.0
+      loc: 0.9973838635
       scale: 0.002
     proposal: 0.005
     latex: c_\mathrm{100A}
@@ -108,7 +108,7 @@ params:
       max: 1.1
     ref:
       dist: norm
-      loc: 1.0
+      loc: 1.005065924
       scale: 0.002
     proposal: 0.005
     latex: c_\mathrm{100B}
@@ -121,7 +121,7 @@ params:
       max: 1.1
     ref:
       dist: norm
-      loc: 1.0
+      loc: 0.9991554326
       scale: 0.002
     proposal: 0.005
     latex: c_\mathrm{143B}
@@ -131,7 +131,7 @@ params:
       max: 1.1
     ref:
       dist: norm
-      loc: 1.0
+      loc: 0.9952273372
       scale: 0.002
     proposal: 0.005
     latex: c_\mathrm{217A}
@@ -141,7 +141,7 @@ params:
       max: 1.1
     ref:
       dist: norm
-      loc: 1.0
+      loc: 1.001947595
       scale: 0.002
     proposal: 0.005
     latex: c_\mathrm{217B}
@@ -151,7 +151,7 @@ params:
       max: 150.0
     ref:
       dist: norm
-      loc: 60.0
+      loc: 63.45327394
       scale: 1.5
     proposal: 1.0
     latex: A_\mathrm{radio}^\mathrm{PS}
@@ -161,7 +161,7 @@ params:
       max: 100.0
     ref:
       dist: norm
-      loc: 6.0
+      loc: 6.291786006
       scale: 1.0
     proposal: 1.0
     latex: A_\mathrm{IR}^\mathrm{PS}
@@ -176,7 +176,7 @@ params:
       scale: 0.1
     ref:
       dist: norm
-      loc: 1.0
+      loc: 1.093406391
       scale: 0.02
     proposal: 0.02
     latex: A_\mathrm{dustT}
@@ -187,7 +187,7 @@ params:
       scale: 0.01
     ref:
       dist: norm
-      loc: 1.51
+      loc: 1.514532812
       scale: 0.01
     proposal: 0.01
     latex: \beta_\mathrm{dustT}
@@ -200,7 +200,7 @@ params:
       max: 20.0
     ref:
       dist: norm
-      loc: 4.0
+      loc: 0.8484240302
       scale: 0.2
     proposal: 1
     latex: A_\mathrm{CIB}
@@ -211,7 +211,7 @@ params:
       scale: 0.06
     ref:
       dist: norm
-      loc: 1.75
+      loc: 1.841420434
       scale: 0.05
     proposal: 0.05
     latex: \beta_\mathrm{CIB}
@@ -221,7 +221,7 @@ params:
       max: 50.0
     ref:
       dist: norm
-      loc: 3.0
+      loc: 5.601210701
       scale: 0.5
     proposal: 1
     latex: A_\mathrm{tSZ}
@@ -231,7 +231,7 @@ params:
       max: 50
     ref:
       dist: norm
-      loc: 1.0
+      loc: 3.824975740
       scale: 0.5
     proposal: 1
     latex: A_\mathrm{kSZ}
@@ -241,7 +241,7 @@ params:
       max: 1.0
     ref:
       dist: norm
-      loc: 0.1
+      loc: 0.6047229592
       scale: 0.02
     proposal: 0.1
     latex: \xi_\mathrm{SZxCIB}
@@ -252,7 +252,7 @@ params:
       scale: 0.1
     ref:
       dist: norm
-      loc: 1.0
+      loc: 1.202586051
       scale: 0.02
     proposal: 0.02
     latex: A_\mathrm{dustP}
@@ -263,7 +263,7 @@ params:
       scale: 0.02
     ref:
       dist: norm
-      loc: 1.59
+      loc: 1.596264151
       scale: 0.01
     proposal: 0.01
     latex: \beta_\mathrm{dustP}
