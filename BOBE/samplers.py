@@ -56,7 +56,6 @@ def nested_sampling_Dy(gp: GP,
                        dynamic: bool = False,
                        maxcall: Optional[int] = int(5e6),
                        print_progress: Optional[bool] = True,
-                       equal_weights: bool = False,
                        sample_method: str = 'rwalk',
                        rng=None,
                        param_bounds=None,
@@ -102,9 +101,9 @@ def nested_sampling_Dy(gp: GP,
     Returns
     -------
     samples_dict : dict
-        ``x`` — GP unit-cube samples (equal-weighted).
-        ``u`` — corresponding physical-space samples.
-        ``weights``, ``logl``, ``best``.
+        ``x``, ``u``, ``weights``, ``logl`` — full weighted samples (physical and unit-cube).
+        ``eq_x``, ``eq_u``, ``eq_logl`` — equal-weighted resampled samples.
+        ``best`` — best unit-cube point by logl.
     logz_dict : dict
         ``mean``, ``upper``, ``lower``, ``dlogz_sampler``, ``var``, ``std``,
         ``log_correction``.
@@ -225,24 +224,18 @@ def nested_sampling_Dy(gp: GP,
         'log_correction': log_correction,
     }
 
-    if equal_weights:
-        u_out = eq_unit
-        x_out = np.asarray(transform.from_unit(eq_unit))
-        w_out = np.ones(len(eq_unit))
-        l_out = eq_logl
-    else:
-        u_out = np.asarray(res['samples'])
-        x_out = np.asarray(transform.from_unit(u_out))
-        w_out = weights_all
-        l_out = logl
+    u_out = np.asarray(res['samples'])
 
     samples_dict = {
-        'x':      x_out,
-        'u':      u_out,
-        'weights': w_out,
-        'logl':   l_out,
-        'best':   best_pt,
-        'method': 'nested',
+        'x':       np.asarray(transform.from_unit(u_out)),
+        'u':       u_out,
+        'weights': weights_all,
+        'logl':    logl,
+        'eq_u':    eq_unit,
+        'eq_x':    np.asarray(transform.from_unit(eq_unit)),
+        'eq_logl': eq_logl,
+        'best':    best_pt,
+        'method':  'nested',
     }
 
     return (samples_dict, logz_dict, success)

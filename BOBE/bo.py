@@ -8,7 +8,7 @@ from typing import Optional, Union, Tuple, Dict, Any, Callable
 from .gp import GP
 from .clf_gp import GPwithClassifier
 from .likelihood import Likelihood, CobayaLikelihood
-from .utils.core import scale_from_unit, scale_to_unit,  resample_equal, kl_divergence_gaussian, get_threshold_for_nsigma
+from .utils.core import scale_from_unit, scale_to_unit, kl_divergence_gaussian, get_threshold_for_nsigma
 from .transforms import ParameterTransform, BaseTransform, IdentityTransform, RotationTransform, NormalisingFlowTransform, load_transform
 from .utils.seed import set_global_seed, get_jax_key,  get_numpy_rng, get_new_jax_key
 from .samplers import nested_sampling_Dy, sample_GP_NUTS
@@ -113,7 +113,7 @@ class BOBE:
                  resume_file=None,
                  save_dir='.',
                  save=True,
-                 save_step=5,
+                 save_step=1,
                  optimizer='scipy',
                  use_clf=False,
                  clf_type = "svm",
@@ -1006,101 +1006,55 @@ class BOBE:
             self.convergence_counter = 0  # Reset counter if not converged
             return False
 
-    def check_convergence_logz(self, step, logz_dict, equal_samples, equal_logl, verbose=True, save_checkpoint=True):
+    def check_convergence_logz(self, step, logz_dict, equal_samples, equal_logl):
         """
-        Check if the nested sampling has converged and compute KL divergence metrics.
-        
-        Args:
-            step: Current iteration number
-            logz_dict: Dictionary with logz bounds and mean
-            ns_samples: Nested sampling samples with x, weights, logl
-            threshold: LogZ convergence threshold
-            
-        Returns:
-            bool: Whether convergence is achieved based on logz only
+        Check convergence after nested sampling using logz_std + KL divergence.
+
+        Convergence requires BOTH:
+          1. logz_dict['std'] (GP uncertainty on logZ) < logz_threshold
+          2. Symmetric KL between consecutive NS sample distributions < kl_convergence_threshold
+        for convergence_n_iters successive calls.
         """
         if not self.is_main:
             return False
-        
-        # Standard logz convergence check
-        delta = (logz_dict['upper'] - logz_dict['lower'])/2 
-        
-        # alternative cross-check using std, not used for convergence
-        delta_crosscheck = logz_dict['std']
 
-        converged = delta < self.logz_threshold
-
-        # Compute KL divergences if we have nested sampling samples
-        successive_kl = None
-
-        # equal_samples passed in are already in physical space from nested_sampling_Dy
-        # (self.ns_samples['x'] is physical space, see samplers.py line 230/235)
+        delta = logz_dict['std']   # GP uncertainty = (upper - lower) / 2
         equal_samples = np.asarray(equal_samples)
 
+        kl_sym = np.inf
         if self.prev_samples is not None:
+            try:
+                prev_x = self.prev_samples['x']
+                mu1, cov1 = np.mean(prev_x, axis=0), np.atleast_2d(np.cov(prev_x, rowvar=False))
+                mu2, cov2 = np.mean(equal_samples, axis=0), np.atleast_2d(np.cov(equal_samples, rowvar=False))
+                kl = kl_divergence_gaussian(mu1, cov1, mu2, cov2)
+                kl_sym = float(kl.get('symmetric', np.inf))
+                self.results_manager.update_kl_divergences(iteration=step, successive_kl=kl)
+            except Exception as e:
+                log.warning(f"KL computation failed: {e}")
 
-            prev_samples_x = self.prev_samples['x']
-            mu1 = np.mean(prev_samples_x, axis=0)
-            cov1 = np.cov(prev_samples_x, rowvar=False)
-            mu2 = np.mean(equal_samples, axis=0)
-            cov2 = np.cov(equal_samples, rowvar=False)
-            successive_kl = kl_divergence_gaussian(mu1, np.atleast_2d(cov1), mu2, np.atleast_2d(cov2))
-
-            log.info(f"Successive KL: symmetric={successive_kl.get('symmetric', 0):.4f}")
-            # Store KL divergences if computed
-            self.results_manager.update_kl_divergences(
-                iteration=step,
-                successive_kl=successive_kl
-            )
-
-        # Store current samples for next iteration
         self.prev_samples = {'x': equal_samples, 'logl': equal_logl}
 
-        # Update results manager with convergence info and KL divergences.
-        # Pass delta explicitly so the stored value matches what was used for the check.
-        self.results_manager.update_convergence(
-            iteration=step,
-            logz_dict=logz_dict,
-            converged=converged,
-            threshold=self.logz_threshold,
-            delta=delta
+        log.info(
+            f"Convergence check: logz_std={delta:.4e} < thresh={self.logz_threshold:.4e} = {delta < self.logz_threshold}, "
+            f"KL_sym={kl_sym:.4f} (thresh={self.kl_convergence_threshold:.4f})"
         )
-        
-        log.info(f"Convergence check: delta = {delta:.4f}, step = {step}, threshold = {self.logz_threshold}")
-        
-        if converged:
+
+        if (delta < self.logz_threshold): # and (kl_sym < self.kl_convergence_threshold):
             self.convergence_counter += 1
-            if self.convergence_counter >= self.convergence_n_iters:
-                log.info(f"Convergence achieved after {self.convergence_n_iters} successive iterations")
-                converged = True
-            else:
-                log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
-                converged = False
         else:
-            self.convergence_counter = 0  # Reset counter if not converged
-            converged = False
+            self.convergence_counter = 0
 
-        # Check if this is the smallest delta seen so far and save checkpoint, also ensure delta is reasonably good
-        if (delta < self.min_delta_seen) and (delta_crosscheck < 1.0) and save_checkpoint:
-            self.min_delta_seen = delta
+        self.results_manager.update_convergence(
+            iteration=step, logz_dict=logz_dict, converged=False,
+            threshold=self.logz_threshold, delta=delta
+        )
 
-            # Create checkpoint filename with suffix
-            checkpoint_filename = f"{self.output_file}_checkpoint"
-
-            if not converged:
-
-                # Save checkpoint and getdist chains
-                self._save_checkpoint()
-
-                # Save getdist chains
-                self.results_manager.save_chain_files(samples_dict=self.ns_samples, filename=f"{checkpoint_filename}")
-
-                if verbose:
-                    log.info(f"New minimum delta achieved: {delta:.4f}")
-                    log.info("Saving checkpoint results for new minimum delta")
-                    log.info(f"Saved checkpoint to {self.save_path}.pkl")
-                    log.info(f"Saved intermediate results checkpoint to {checkpoint_filename}.json")
-
+        converged = self.convergence_counter >= self.convergence_n_iters
+        if converged:
+            log.info(f"Convergence achieved after {self.convergence_n_iters} successive iterations")
+        else:
+            log.info(f"Convergence iteration {self.convergence_counter}/{self.convergence_n_iters}")
         return converged
 
     def _check_convergence(self, acq_val: float) -> bool:
@@ -1582,6 +1536,7 @@ class BOBE:
         self.ns_samples = None
         logz_keys = ['mean', 'upper', 'lower', 'dlogz_sampler']  # used in do_final_ns block
         prev_acq_val = abs(self.logz_threshold) * 10.0  # seed: far from convergence → min_batch_size
+        _ns_evals_last = 0  # track evals at last periodic NS run
 
         while not self.converged:
             ii += 1
@@ -1658,13 +1613,55 @@ class BOBE:
                     # Persist everything in the single checkpoint
                     self._save_checkpoint()
 
-            # Check convergence via acquisition value + consecutive KL divergence
+            # Periodic nested sampling: trigger once acq is below threshold and ns_n_points new evals have elapsed.
+            # When NS runs it owns the convergence_counter, so _check_convergence is skipped that iteration.
+            # Neither NS nor convergence checks are run before min_evals have been reached.
             self.current_iteration = ii
-            self.converged = self._check_convergence(mean_acq_val)
-            if self.converged:
-                self.termination_reason = "Converged (acq + KL)"
-                self.results_dict['termination_reason'] = self.termination_reason
-                break
+            _ran_periodic_ns = False
+            if current_evals >= self.min_evals and (mean_acq_val <= self.logz_threshold) and (current_evals - _ns_evals_last >= self.ns_n_points):
+                _ns_evals_last = current_evals
+                _ran_periodic_ns = True
+                log.info(f"Periodic nested sampling triggered at eval {current_evals}")
+                self.results_manager.start_timing('Nested Sampling')
+                self.ns_samples, logz_dict, ns_success = nested_sampling_Dy(
+                    mode='conv', gp=self.gp, ndim=self.ndim, dlogz=0.025,
+                    maxcall = int(2e6), rng=self.np_rng,
+                    param_bounds=self.transform._original_bounds,
+                    transform=self.transform,
+                )
+                self.results_manager.end_timing('Nested Sampling')
+                if ns_success:
+                    logz_str = ", ".join([f"{k}={logz_dict[k]:.4f}" for k in logz_keys if k in logz_dict])
+                    log.info(f"Periodic NS LogZ: {logz_str}")
+                    # Replace mc_samples with equal-weighted NS samples for next acquisition step
+                    self.mc_samples = {'x': self.ns_samples['eq_u'], 'logp': self.ns_samples['eq_logl'], 'method': 'nested'}
+                    # Fake mode detection: NS best GP-predicted logL is much higher than best observed,
+                    # scaled by ndim/2 (typical log-likelihood variation for a Gaussian posterior).
+                    # If triggered and adaptive_batch is on, force min_batch_size next iteration
+                    # so poor NS-guided points don't dominate the batch.
+                    ns_best_logl = float(np.max(self.ns_samples['eq_logl']))
+                    if self.adaptive_batch and (ns_best_logl > self.best_f + self.ndim / 2):
+                        log.info(
+                            f"NS may have found a fake mode (NS best logl={ns_best_logl:.4f} vs GP best={self.best_f:.4f}, "
+                            f"gap={ns_best_logl - self.best_f:.4f} > ndim/2={self.ndim/2:.1f}), "
+                            f"forcing min_batch_size next iteration"
+                        )
+                        prev_acq_val = 10.0 * abs(self.logz_threshold)
+                    # Convergence check using logz_std + KL
+                    self.converged = self.check_convergence_logz(ii, logz_dict, self.ns_samples['eq_x'], self.ns_samples['eq_logl'])
+                    if self.converged:
+                        self.termination_reason = "LogZ converged (periodic NS)"
+                        self.results_dict['termination_reason'] = self.termination_reason
+                        break
+
+            # Check convergence via acquisition value + consecutive KL divergence.
+            # Skipped when periodic NS ran this iteration (NS owns the convergence_counter).
+            if not _ran_periodic_ns and _ns_evals_last == 0 and current_evals >= self.min_evals:
+                self.converged = self._check_convergence(mean_acq_val)
+                if self.converged:
+                    self.termination_reason = "Converged (acq + KL)"
+                    self.results_dict['termination_reason'] = self.termination_reason
+                    break
 
             self.pool.clear_jax_caches()
 
@@ -1674,11 +1671,9 @@ class BOBE:
 
         # End of main BO loop
         self.current_iteration = ii
-        ns_success = False
 
         # Final nested sampling if not yet converged and do_final_ns is True
-        if self.do_final_ns:# and not self.converged:
-            
+        if self.do_final_ns and not self.converged:
             self.results_manager.start_timing('GP Training')
             self.pool.gp_fit(self.gp, n_restarts=4, maxiters=500, rng=self.np_rng, use_pool=True)
             self.results_manager.end_timing('GP Training')
@@ -1693,19 +1688,16 @@ class BOBE:
             logz_str = ", ".join([f"{k}={logz_dict[k]:.4f}" for k in logz_keys if k in logz_dict])
             log.info(f"Final LogZ: {logz_str}")
             if ns_success:
-                equal_samples, equal_logl = resample_equal(self.ns_samples['x'], self.ns_samples['logl'], weights=self.ns_samples['weights'])
                 log.info(f"Using nested sampling results")
-                self.check_convergence_logz(ii+1, logz_dict, equal_samples, equal_logl, save_checkpoint=False)
+                self.check_convergence_logz(ii+1, logz_dict, self.ns_samples['eq_x'], self.ns_samples['eq_logl'])
                 self.results_dict['logz'] = logz_dict
                 if self.converged:
                     self.termination_reason = "LogZ converged"
                     self.results_dict['termination_reason'] = self.termination_reason
-
-        if (self.ns_samples is not None) and ns_success:
-            samples = self.ns_samples['x']
-            weights = self.ns_samples['weights']
-            loglikes = self.ns_samples['logl']
         else:
+            log.info("Skipping final nested sampling")
+
+        if self.ns_samples is None:
             log.info("No nested sampling results found or nested sampling unsuccessful, MC samples from HMC/MCMC will be used instead.")
             self.results_manager.start_timing('MCMC Sampling')
             mc_samples = get_mc_samples(
@@ -1720,6 +1712,11 @@ class BOBE:
 
             # Check GP uncertainty at the MC samples: if high warn that convergence may not have been reached yet.
             # TODO
+        else:
+            log.info("Using nested sampling results for final samples and logZ estimation.")
+            samples = self.ns_samples['x']
+            weights = self.ns_samples['weights']
+            loglikes = self.ns_samples['logl']
 
         self.samples_dict = {
             'x': samples,
