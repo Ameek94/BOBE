@@ -5,7 +5,10 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from .gp import GP, safe_noise_floor
 from .clf import (
-    CLASSIFIER_REGISTRY
+    CLASSIFIER_REGISTRY,
+    MLPClassifier,
+    serialize_eqx_clf, deserialize_eqx_clf,
+    EQX_AVAILABLE,
 )
 from .utils.seed import get_new_jax_key, get_numpy_rng
 from .utils.log import get_logger
@@ -210,8 +213,8 @@ class GPwithClassifier(GP):
             init_params=self.clf_params, **kwargs
         )
 
-        log.debug(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
-        log.debug(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
+        log.info(f"Trained {self.clf_type.upper()} classifier on {self.clf_data_size} points in {time.time() - start_time:.2f}s")
+        log.info(f"Classifier metrics: {self.clf_metrics}") # Use debug for detailed metrics
 
     def predict_mean_single(self,x):
         gp_mean = super().predict_mean_single(x)
@@ -336,7 +339,7 @@ class GPwithClassifier(GP):
             # Classifier training data
             'train_x_clf': np.array(self.train_x_clf),
             'train_y_clf': np.array(self.train_y_clf),
-            
+
             # Classifier configuration
             'clf_type': self.clf_type,
             'clf_settings': self.clf_settings,
@@ -347,14 +350,28 @@ class GPwithClassifier(GP):
             'clf_threshold': self.clf_threshold,
             'gp_threshold': self.gp_threshold,
             'use_clf': self.use_clf,
-            
-            # Classifier state
-            'clf_params': self.clf_params,
+
+            # Classifier metrics (always stored as-is)
             'clf_metrics': self.clf_metrics,
-            
+
             # Class identifier
             'gp_class': 'GPwithClassifier'
         }
+
+        # Serialise classifier parameters
+        # Only 'nn' uses equinox; 'svm' and 'ellipsoid' use plain dicts
+        if (self.clf_type == 'nn' and self.clf_params is not None and EQX_AVAILABLE):
+            # Store equinox MLPClassifier as raw bytes
+            classifier_state['clf_model_bytes'] = serialize_eqx_clf(self.clf_params)
+            classifier_state['clf_input_dim'] = int(self.train_x_clf.shape[1])
+            classifier_state['clf_model_mu'] = None
+            classifier_state['clf_params'] = None  # not pickled separately
+        else:
+            # SVM and ellipsoid: plain dict stored directly
+            classifier_state['clf_params'] = self.clf_params
+            classifier_state['clf_model_bytes'] = None
+            classifier_state['clf_input_dim'] = None
+            classifier_state['clf_model_mu'] = None
         
         # Update the state with classifier-specific data
         state.update(classifier_state)
@@ -411,20 +428,34 @@ class GPwithClassifier(GP):
         
         # Restore classifier state
         gp_clf.use_clf = state['use_clf']
-        gp_clf.clf_params = state.get('clf_params')
         gp_clf.clf_metrics = state.get('clf_metrics', {})
-        
-        # Regenerate prediction function if classifier parameters exist
-        if gp_clf.clf_params is not None:
-            if gp_clf.clf_type == 'svm':
-                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params)
-            elif gp_clf.clf_type == 'nn':
-                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params, gp_clf.clf_settings)
-            elif gp_clf.clf_type == 'ellipsoid':
-                d = gp_clf.train_x_clf.shape[1]
-                gp_clf._clf_predict_func = gp_clf.clf_predict_fn(
-                    gp_clf.clf_params, gp_clf.clf_settings, d
-                )
+
+        # Reconstruct classifier parameters and prediction function
+        clf_model_bytes = state.get('clf_model_bytes')
+        _has_bytes = (clf_model_bytes is not None
+                      and isinstance(clf_model_bytes, np.ndarray)
+                      and clf_model_bytes.size > 0)
+
+        if _has_bytes and gp_clf.clf_type == 'nn' and EQX_AVAILABLE:
+            # Reconstruct equinox MLPClassifier from serialised bytes
+            input_dim = int(state['clf_input_dim'])
+            settings = gp_clf.clf_settings
+            dummy_key = jax.random.PRNGKey(0)
+            template = MLPClassifier(input_dim=input_dim, key=dummy_key, **settings)
+            gp_clf.clf_params = deserialize_eqx_clf(clf_model_bytes, template)
+            gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params)
+
+        else:
+            # SVM and ellipsoid: plain dict stored directly
+            gp_clf.clf_params = state.get('clf_params')
+            if gp_clf.clf_params is not None:
+                if gp_clf.clf_type == 'svm':
+                    gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params)
+                elif gp_clf.clf_type == 'ellipsoid':
+                    gp_clf._clf_predict_func = gp_clf.clf_predict_fn(gp_clf.clf_params)
+                elif gp_clf.clf_type == 'nn':
+                    gp_clf._clf_predict_func = gp_clf.clf_predict_fn(
+                        gp_clf.clf_params, gp_clf.clf_settings)
         
         return gp_clf
 

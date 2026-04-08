@@ -232,6 +232,8 @@ class BOBE:
         self.pool = MPI_Pool()
         self.is_main = self.pool.is_main_process
         self.is_mpi = self.pool.is_mpi
+        if self.is_mpi:
+            self.pool.comm.Barrier()  # Ensure all processes start together
         
         # Convert to Likelihood instance and store for all processes
         self.loglikelihood = self._prepare_likelihood(
@@ -668,6 +670,7 @@ class BOBE:
 
         # Use pool to generate Cobaya points in parallel
         if self.is_main:
+            log.info(f"Evaluating {n_cobaya_init} Cobaya initial points")
             results_tuples = self.pool.get_cobaya_initial_points(
                 self.loglikelihood, n_cobaya_init, rng=self.np_rng
             )
