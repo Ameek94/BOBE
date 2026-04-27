@@ -8,6 +8,12 @@ import psutil
 import py21cmfast as p21c
 from powerbox.tools import get_power
 
+import hashlib
+
+def theta_to_hash(theta):
+    theta_bytes = np.asarray(theta, dtype=np.float64).tobytes()
+    return hashlib.sha1(theta_bytes).hexdigest()[:16]
+
 
 def rss_gb() -> float:
     return psutil.Process(os.getpid()).memory_info().rss / 1024**3
@@ -215,11 +221,30 @@ def save_ps_comparison_txt(filename, z, k, data_ps, sigma_ps, model_ps, theta=No
     np.savetxt(filename, out, header="\n".join(header), fmt="%.10e")
 
 
+def save_model_prediction_npz(filename, theta, z, k, model_ps, data_ps=None, sigma_ps=None, extra_metadata=None):
+    payload = {
+        "theta": np.asarray(theta, dtype=float),
+        "z": np.asarray(z, dtype=float),
+        "k": np.asarray(k, dtype=float),
+        "model_ps": np.asarray(model_ps, dtype=float),
+    }
+
+    if data_ps is not None:
+        payload["data_ps"] = np.asarray(data_ps, dtype=float)
+    if sigma_ps is not None:
+        payload["sigma_ps"] = np.asarray(sigma_ps, dtype=float)
+    if extra_metadata is not None:
+        for key, value in extra_metadata.items():
+            payload[key] = value
+
+    np.savez(filename, **payload)
+
+
 @dataclass
 class Likelihood21cmFAST:
     """
     21cm power-spectrum likelihood built from 21cmFAST:
-    - 8 Dimensional with parameters in the order given by PARAMETER_NAMES
+    - 8D with parameters in the order given by PARAMETER_NAMES
     - fiducial data vector is built from a stored fiducial lightcone
     - sensitivity is read from a fixed text file and treated as fixed noise
     - Gaussian likelihood with diagonal covariance
@@ -364,6 +389,21 @@ class Likelihood21cmFAST:
             return -0.5 * (chi2 + np.sum(np.log(2.0 * np.pi * var)))
         return -0.5 * chi2
 
+    # def gaussian_loglike_with_systematics(model_ps, data_ps, sigma_ps, mask=None, include_norm=False):
+    #     base_mask = np.isfinite(model_ps) & np.isfinite(data_ps) & np.isfinite(sigma_ps) & (sigma_ps > 0)
+    #     if mask is None:
+    #         mask = base_mask
+    #     else:
+    #         mask = mask & base_mask
+    
+    #     resid = model_ps[mask] - data_ps[mask]
+    #     var = sigma_ps[mask] ** 2
+    #     chi2 = np.sum((resid ** 2) / var)
+    
+    #     if include_norm:
+    #         return -0.5 * (chi2 + np.sum(np.log(2.0 * np.pi * var)))
+    #     return -0.5 * chi2
+
     def __call__(self, theta: np.ndarray) -> float:
         theta = np.asarray(theta, dtype=float)
         if theta.shape != (8,):
@@ -371,16 +411,32 @@ class Likelihood21cmFAST:
 
         model_ps = self._compute_model_ps(theta)
 
-        if self.debug_output_file:
-            save_ps_comparison_txt(
-                self.debug_output_file,
+        if self.prediction_cache_dir is not None:
+            tag = theta_to_hash(theta)
+            pred_file = os.path.join(
+                self.prediction_cache_dir,
+                f"model_{tag}.npz"
+            )
+            save_model_prediction_npz(
+                pred_file,
+                theta=theta,
                 z=self.z,
                 k=self.k,
+                model_ps=model_ps,
                 data_ps=self.data_ps,
                 sigma_ps=self.sigma_ps,
-                model_ps=model_ps,
-                theta=theta,
             )
+
+        # if self.debug_output_file:
+        #     save_ps_comparison_txt(
+        #         self.debug_output_file,
+        #         z=self.z,
+        #         k=self.k,
+        #         data_ps=self.data_ps,
+        #         sigma_ps=self.sigma_ps,
+        #         model_ps=model_ps,
+        #         theta=theta,
+        #     )
 
         return self.gaussian_loglike(model_ps)
 
