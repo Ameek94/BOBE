@@ -8,8 +8,8 @@ import jax.numpy as jnp
 from sklearn.svm import SVC
 from typing import Callable, Dict, Any, Union, List, Optional, Tuple
 from functools import partial
-from .utils.log import get_logger 
-from .utils.seed import get_numpy_rng
+from .utils.log import get_logger
+from .utils.seed import get_numpy_rng, get_new_jax_key
 log = get_logger("clf")
 
 try:
@@ -39,8 +39,10 @@ def train_svm_classifier(X, Y, settings = {}, init_params=None, **kwargs):
     C = settings.get('C', 1e7)
     kernel = settings.get('kernel', 'rbf')
     
-    clf = SVC(kernel=kernel, gamma=gamma, C=C)
-    clf.fit(X, Y) 
+    rng = get_numpy_rng()
+    random_state = int(rng.integers(0, 2**31 - 1))
+    clf = SVC(kernel=kernel, gamma=gamma, C=C, random_state=random_state)
+    clf.fit(X, Y)
     support_vectors = clf.support_vectors_
     dual_coef = clf.dual_coef_[0]  # convert to 1D array
     intercept = float(clf.intercept_[0])
@@ -223,21 +225,17 @@ def train_with_restarts(
     x: jnp.ndarray,
     y: jnp.ndarray,
     n_restarts: int = 2,
-    seed_offset: int = 0,
-    split_seed: int = 42,
-    init_params = None,  # Add this parameter
+    init_params = None,
     **train_kwargs
 ) -> Tuple[Dict, Dict]:
     """
     Train model with multiple restarts using the entire dataset.
-    
+
     Args:
         train_fn: Training function that returns (params, metrics)
         x: (N, d) features
         y: (N,) labels
         n_restarts: number of random restarts
-        seed_offset: offset for training seed generation
-        split_seed: fixed seed for train/val split consistency (unused now)
         init_params: initial parameters for first restart
         **train_kwargs: passed to train_fn
     """
@@ -245,19 +243,12 @@ def train_with_restarts(
     best_params = None
     best_metrics = {}
 
-    try:
-        rng = get_numpy_rng()
-    except Exception as e:
-        log.error(f"{e} - falling back to default RNG")
-        rng = np.random.default_rng()
-
     for i in range(n_restarts):
-        current_seed = rng.integers(0, 2**32 - 1)
-        log.debug(f"[Restart {i+1}/{n_restarts}] Starting training with seed {current_seed}")
-        
+        key = get_new_jax_key()
+
         # Use initial params for first restart, None for others
         restart_init_params = init_params if i == 0 else None
-        
+
         if i == 0 and init_params is not None:
             log.debug(f"[Restart {i+1}/{n_restarts}] Using provided initial parameters")
         elif i > 0:
@@ -266,8 +257,8 @@ def train_with_restarts(
         # Use entire dataset for training
         params, metrics = train_fn(
             x_train=x, y_train=y,
-            seed=current_seed,
-            init_params=restart_init_params,  # Pass init_params to training function
+            key=key,
+            init_params=restart_init_params,
             **train_kwargs
         )
 
@@ -295,8 +286,6 @@ if FLAX_AVAILABLE:
         early_stop_patience: int = 50
         n_restarts: int = 2
         val_frac: float = 0.2
-        seed_offset: int = 0
-        split_seed: int = 42
 
         @nn.compact
         def __call__(self, x, train: bool = False):
@@ -312,19 +301,21 @@ else:
 def train_nn(
     model: MLPClassifier,
     x_train: jnp.ndarray, y_train: jnp.ndarray,
-    seed=0,
-    init_params=None,  # Add this parameter
+    key: jax.Array,
+    init_params=None,
     **kwargs
 ):
     """Simplified NN training using entire dataset"""
     N, d = x_train.shape
-    
+
+    init_key = get_new_jax_key()
+    rng_opt = get_numpy_rng()
+
     # Handle initialization
     if init_params is not None:
         params = init_params
     else:
-        key = jax.random.PRNGKey(seed)
-        params = model.init(key, jnp.ones((1, d)), train=True)
+        params = model.init(init_key, jnp.ones((1, d)), train=True)
 
     optimizer = optax.adamw(model.lr, weight_decay=model.weight_decay)
     opt_state = optimizer.init(params)
@@ -343,8 +334,7 @@ def train_nn(
     x_np, y_np = np.array(x_train), np.array(y_train)
     steps = max(1, x_train.shape[0] // model.batch_size)
 
-    rng_opt = np.random.default_rng(seed)
-    key = jax.random.PRNGKey(seed)
+    rng_opt = np.random.default_rng(np_seed)
 
     for epoch in range(model.n_epochs):
         perm_train = rng_opt.permutation(x_train.shape[0])
@@ -367,10 +357,8 @@ def train_nn(
 
 def train_nn_multiple_restarts(model: MLPClassifier, x: jnp.ndarray, y: jnp.ndarray, **kwargs):
     """Wrapper for NN training with restarts"""
-    return train_with_restarts(partial(train_nn, model), x, y, 
-                               n_restarts=model.n_restarts, 
-                               seed_offset=model.seed_offset, 
-                               split_seed=model.split_seed, **kwargs)
+    return train_with_restarts(partial(train_nn, model), x, y,
+                               n_restarts=model.n_restarts, **kwargs)
 
 # Ellipsoid Classifier with center at best fit point
 if FLAX_AVAILABLE:
@@ -385,8 +373,6 @@ if FLAX_AVAILABLE:
         patience: int = 25
         n_restarts: int = 2
         val_frac: float = 0.1
-        seed_offset: int = 0
-        split_seed: int = 42
 
         def setup(self):
             tril = self.d * (self.d + 1) // 2
@@ -415,19 +401,20 @@ else:
 def train_ellipsoid(
     model: EllipsoidClassifier,
     x_train: jnp.ndarray, y_train: jnp.ndarray,
-    seed: int = 0,
-    init_params=None,  # Add this parameter
+    key: jax.Array,
+    init_params=None,
     **kwargs
 ):
     """Simplified ellipsoid training using entire dataset"""
+    init_key = get_new_jax_key()
+    rng = get_numpy_rng()
+
     # Handle initialization
     if init_params is not None:
         params = init_params
     else:
-        key = jax.random.PRNGKey(seed)
-        params = model.init(key, x_train)
-    
-        
+        params = model.init(init_key, x_train)
+
     optimizer = optax.adamw(model.lr, weight_decay=model.weight_decay)
     opt_state = optimizer.init(params)
 
@@ -435,7 +422,7 @@ def train_ellipsoid(
     def loss_fn(params, batch_x, batch_y):
         logits = model.apply(params, batch_x, train=False)
         return optax.sigmoid_binary_cross_entropy(logits, batch_y).mean()
-    
+
     @jax.jit
     def train_step(params, opt_state, bx, by):
         grads = jax.grad(loss_fn)(params, bx, by)
@@ -444,8 +431,8 @@ def train_ellipsoid(
 
     x_np, y_np = np.array(x_train), np.array(y_train)
     steps = max(1, x_train.shape[0] // model.batch_size)
-    
-    rng = np.random.RandomState(seed)
+
+    rng = np.random.default_rng(np_seed)
 
     for epoch in range(model.n_epochs):
         perm_train = rng.permutation(x_train.shape[0])
@@ -467,7 +454,5 @@ def train_ellipsoid(
 
 def train_ellipsoid_multiple_restarts(model: EllipsoidClassifier, x: jnp.ndarray, y: jnp.ndarray, **kwargs):
     """Wrapper for ellipsoid training with restarts"""
-    return train_with_restarts(partial(train_ellipsoid, model), x, y, 
-                               n_restarts=model.n_restarts, 
-                               seed_offset=model.seed_offset, 
-                               split_seed=model.split_seed, **kwargs)
+    return train_with_restarts(partial(train_ellipsoid, model), x, y,
+                               n_restarts=model.n_restarts, **kwargs)

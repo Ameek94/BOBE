@@ -33,7 +33,7 @@ class MPI_Pool:
     TASK_INIT = 99
     TASK_EXIT = 100
     
-    def __init__(self):
+    def __init__(self, dynamic_dispatch: bool = False):
         """Initializes the pool based on whether MPI is available and active."""
         if IS_MPI_AVAILABLE:
             self.comm = MPI.COMM_WORLD
@@ -52,6 +52,8 @@ class MPI_Pool:
         
         # Track if workers are in waiting loop
         self._workers_active = False
+        # Static vs dynamic task dispatch
+        self.dynamic_dispatch = dynamic_dispatch
 
     def worker_wait(self, likelihood: Likelihood, gp: Union[GP, GPwithClassifier] = None, seed: Optional[int] = None):
         """
@@ -87,6 +89,9 @@ class MPI_Pool:
         self._likelihood = likelihood
         self._gp = gp
 
+        # Wire format: every task message is (task_type, data) where
+        # data = (payload, task_index) for TASK_OBJECTIVE_EVAL / TASK_COBAYA_INIT / TASK_GP_FIT
+        # data = None for TASK_EXIT / TASK_CLEAR_JAX_CACHES
         while True:
             # Wait for task from master
             task_data = self.comm.recv(source=0, tag=MPI.ANY_TAG)
@@ -101,7 +106,7 @@ class MPI_Pool:
                     
                 elif task_type == self.TASK_GP_FIT:
                     # Fit GP with given starting points
-                    payload = data
+                    payload, task_index = data
                     state_dict = payload['state_dict']
                     fit_params = payload['fit_params']
                     use_clf = payload.get('use_clf', False)
@@ -114,7 +119,7 @@ class MPI_Pool:
 
                     # Fit GP and return results
                     fit_results = worker_gp.fit(**fit_params)
-                    self.comm.send(fit_results, dest=0)
+                    self.comm.send((fit_results, task_index), dest=0)
 
                 elif task_type == self.TASK_COBAYA_INIT:
                     # Get initial point from Cobaya reference prior
@@ -134,9 +139,12 @@ class MPI_Pool:
                 import traceback
                 log.error(f"Worker {self.rank} error: {e}")
                 log.error(traceback.format_exc())
-                # Send error back to master with task index
-                _, task_index = data
-                self.comm.send(("error", str(e), task_index), dest=0)
+                # Send error back to master with task index (skip for tasks with no index)
+                if data is None:
+                    pass  # TASK_EXIT / TASK_CLEAR_JAX_CACHES — nothing to report
+                else:
+                    _, task_index = data
+                    self.comm.send(("error", str(e), task_index), dest=0)
         
         return
 
@@ -205,6 +213,64 @@ class MPI_Pool:
         
         return results
 
+    def _static_distribute(self, tasks: List[Any], task_type: int, local_fn: Callable = None) -> List[Any]:
+        """
+        MASTER-ONLY METHOD: Distributes tasks statically (round-robin) across all ranks.
+
+        Master participates in evaluation. Task i is always assigned to rank i % size,
+        making the assignment deterministic given (seed, nprocs). Uses the same
+        individual task messages as _dynamic_distribute — no extra task type needed.
+
+        Parameters
+        ----------
+        tasks : list
+            List of task data to distribute.
+        task_type : int
+            Type of task (TASK_OBJECTIVE_EVAL or TASK_COBAYA_INIT).
+        local_fn : callable
+            Function for the master to evaluate its own tasks. Must accept a single
+            task element and return its result.
+
+        Returns
+        -------
+        list
+            Results from all tasks in the same order as input tasks.
+        """
+        if not self.is_main_process or not self.is_mpi:
+            raise RuntimeError("_static_distribute is designed for the master process in MPI mode.")
+
+        n_tasks = len(tasks)
+        if n_tasks == 0:
+            return []
+
+        results = [None] * n_tasks
+        master_tasks = []  # (task, global_index) pairs for master to run locally
+
+        # Send each task to its pre-assigned rank (round-robin)
+        for i, task in enumerate(tasks):
+            assigned_rank = i % self.size
+            if assigned_rank == 0:
+                master_tasks.append((task, i))
+            else:
+                self.comm.send((task_type, (task, i)), dest=assigned_rank)
+
+        # Master evaluates its own tasks locally
+        for task, idx in master_tasks:
+            results[idx] = local_fn(task)
+
+        # Collect one response per non-master task
+        n_worker_tasks = n_tasks - len(master_tasks)
+        for _ in range(n_worker_tasks):
+            response = self.comm.recv(source=MPI.ANY_SOURCE)
+            if len(response) == 3 and response[0] == "error":
+                _, msg, original_index = response
+                log.error(f"Worker failed on task {original_index}: {msg}")
+                raise RuntimeError(f"Worker failed on task {original_index}: {msg}")
+            result, original_index = response
+            results[original_index] = result
+
+        return results
+
     # REFACTORED: Now uses the central utility
     def run_map_objective(self, function: Callable, tasks: List[Any]) -> np.ndarray:
         """
@@ -231,8 +297,10 @@ class MPI_Pool:
         if not self.is_mpi:
             # Serial execution if not in MPI mode
             results = [function(task) for task in tasks]
-        else:
+        elif self.dynamic_dispatch:
             results = self._dynamic_distribute(tasks, self.TASK_OBJECTIVE_EVAL)
+        else:
+            results = self._static_distribute(tasks, self.TASK_OBJECTIVE_EVAL, local_fn=function)
 
         return np.array(results)
 
@@ -308,7 +376,7 @@ class MPI_Pool:
                 'fit_params': fit_params, 
                 'use_clf': isinstance(gp, GPwithClassifier)
             }
-            self.comm.send((self.TASK_GP_FIT, payload), dest=i)
+            self.comm.send((self.TASK_GP_FIT, (payload, i)), dest=i)
 
         # Master does its share of work
         master_x0 = x0_chunks[0]
@@ -317,7 +385,7 @@ class MPI_Pool:
         # Collect results from workers
         all_results = [master_result]
         for i in range(1, self.size):
-            worker_result = self.comm.recv(source=i)
+            worker_result, _ = self.comm.recv(source=i)
             all_results.append(worker_result)
 
         # Select best result and update GP
@@ -358,7 +426,14 @@ class MPI_Pool:
 
         # The payload for this task is trivial; we just need to send n_points signals
         tasks = [None] * n_points
-        results_tuples = self._dynamic_distribute(tasks, self.TASK_COBAYA_INIT)
+        if self.dynamic_dispatch:
+            results_tuples = self._dynamic_distribute(tasks, self.TASK_COBAYA_INIT)
+        else:
+            master_rng = get_numpy_rng()
+            results_tuples = self._static_distribute(
+                tasks, self.TASK_COBAYA_INIT,
+                local_fn=lambda _: likelihood._get_single_valid_point(master_rng)
+            )
 
         return results_tuples
 

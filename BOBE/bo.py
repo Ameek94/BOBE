@@ -122,6 +122,7 @@ class BOBE:
                  minus_inf=-1e10,
                  seed: Optional[int] = None,
                  verbosity: str = 'INFO',
+                 dynamic_dispatch: bool = False,
                  ):
         """
         Initialize the BOBE (Bayesian Optimization for Bayesian Evidence) sampler.
@@ -190,6 +191,14 @@ class BOBE:
             Random seed for reproducibility. Default is None.
         verbosity : str, optional
             Logging verbosity level: 'DEBUG', 'INFO', 'WARNING', 'ERROR'. Default is 'INFO'.
+        dynamic_dispatch : bool, optional
+            If False (default), use static (round-robin) task distribution across MPI ranks.
+            Static dispatch is fully reproducible across runs at a fixed ``nprocs`` and seed
+            because task i always lands on rank i % nprocs, whose RNG is seeded deterministically.
+            If True, use dynamic dispatch (first-available worker). Dynamic dispatch can be
+            faster on heterogeneous tasks but yields non-deterministic task-to-worker assignment,
+            breaking reproducibility for any task that consumes randomness (notably
+            ``TASK_COBAYA_INIT``). Only set to True if reproducibility is not required.
             
         Notes
         -----
@@ -206,7 +215,7 @@ class BOBE:
         update_verbosity(verbosity=verbosity)
         
         # Initialize MPI pool
-        self.pool = MPI_Pool()
+        self.pool = MPI_Pool(dynamic_dispatch=dynamic_dispatch)
         self.is_main = self.pool.is_main_process
         self.is_mpi = self.pool.is_mpi
         
@@ -226,7 +235,7 @@ class BOBE:
         self._setup_main_process(
             seed, optimizer, save, save_dir, save_step,
             n_cobaya_init, n_sobol_init, use_clf, clf_type,
-            clf_nsigma_threshold, minus_inf, resume
+            clf_nsigma_threshold, minus_inf, resume, dynamic_dispatch
         )
         
         # handle resume if needed
@@ -308,7 +317,7 @@ class BOBE:
     
     def _setup_main_process(self, seed, optimizer, save, save_dir, save_step,
                            n_cobaya_init, n_sobol_init, use_clf, clf_type,
-                           clf_nsigma_threshold, minus_inf, resume):
+                           clf_nsigma_threshold, minus_inf, resume, dynamic_dispatch=False):
         """Setup full attributes for main process."""
         set_global_seed(seed)
         self.np_rng = get_numpy_rng()
@@ -342,7 +351,8 @@ class BOBE:
                 'clf_type': clf_type,
                 'clf_nsigma_threshold': clf_nsigma_threshold,
                 'minus_inf': minus_inf,
-                'seed': seed
+                'seed': seed,
+                'dynamic_dispatch': dynamic_dispatch
             },
             likelihood_name=self.loglikelihood.name,
             resume_from_existing=resume
@@ -1321,7 +1331,7 @@ class BOBE:
             thinning=self.hmc_thinning,
             num_chains=self.hmc_num_chains,
             np_rng=self.np_rng,
-            rng_key=get_jax_key(),
+            rng_key=get_new_jax_key(),
             method=self.mc_points_method,
         )
         self.results_manager.end_timing('MCMC Sampling')
@@ -1390,7 +1400,7 @@ class BOBE:
                         num_chains=self.hmc_num_chains,
                         method=self.mc_points_method,
                         np_rng=self.np_rng,
-                        rng_key=get_jax_key()
+                        rng_key=get_new_jax_key()
                     )
                 self.results_manager.end_timing('MCMC Sampling')
             
