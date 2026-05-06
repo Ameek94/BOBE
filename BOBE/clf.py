@@ -244,8 +244,6 @@ def train_with_restarts(
     best_metrics = {}
 
     for i in range(n_restarts):
-        key = get_new_jax_key()
-
         # Use initial params for first restart, None for others
         restart_init_params = init_params if i == 0 else None
 
@@ -254,10 +252,9 @@ def train_with_restarts(
         elif i > 0:
             log.debug(f"[Restart {i+1}/{n_restarts}] Using random initialization")
 
-        # Use entire dataset for training
+        # Use entire dataset for training (train_fn pulls fresh keys internally)
         params, metrics = train_fn(
             x_train=x, y_train=y,
-            key=key,
             init_params=restart_init_params,
             **train_kwargs
         )
@@ -301,21 +298,19 @@ else:
 def train_nn(
     model: MLPClassifier,
     x_train: jnp.ndarray, y_train: jnp.ndarray,
-    key: jax.Array,
     init_params=None,
     **kwargs
 ):
     """Simplified NN training using entire dataset"""
     N, d = x_train.shape
 
-    init_key = get_new_jax_key()
     rng_opt = get_numpy_rng()
 
     # Handle initialization
     if init_params is not None:
         params = init_params
     else:
-        params = model.init(init_key, jnp.ones((1, d)), train=True)
+        params = model.init(get_new_jax_key(), jnp.ones((1, d)), train=True)
 
     optimizer = optax.adamw(model.lr, weight_decay=model.weight_decay)
     opt_state = optimizer.init(params)
@@ -334,19 +329,16 @@ def train_nn(
     x_np, y_np = np.array(x_train), np.array(y_train)
     steps = max(1, x_train.shape[0] // model.batch_size)
 
-    rng_opt = np.random.default_rng(np_seed)
-
     for epoch in range(model.n_epochs):
         perm_train = rng_opt.permutation(x_train.shape[0])
         for i in range(steps):
             idx = perm_train[i*model.batch_size:(i+1)*model.batch_size]
             bx = jnp.array(x_np[idx])
             by = jnp.array(y_np[idx])
-            key, subkey = jax.random.split(key)
-            params, opt_state = train_step(params, opt_state, bx, by, subkey)
+            params, opt_state = train_step(params, opt_state, bx, by, get_new_jax_key())
 
     # Compute final training loss
-    final_train_loss = loss_fn(params, x_train, y_train, key)
+    final_train_loss = loss_fn(params, x_train, y_train, get_new_jax_key())
     
     metrics = {
         'train_loss': f"{float(final_train_loss):.2e}",
@@ -401,19 +393,17 @@ else:
 def train_ellipsoid(
     model: EllipsoidClassifier,
     x_train: jnp.ndarray, y_train: jnp.ndarray,
-    key: jax.Array,
     init_params=None,
     **kwargs
 ):
     """Simplified ellipsoid training using entire dataset"""
-    init_key = get_new_jax_key()
     rng = get_numpy_rng()
 
     # Handle initialization
     if init_params is not None:
         params = init_params
     else:
-        params = model.init(init_key, x_train)
+        params = model.init(get_new_jax_key(), x_train)
 
     optimizer = optax.adamw(model.lr, weight_decay=model.weight_decay)
     opt_state = optimizer.init(params)
@@ -431,8 +421,6 @@ def train_ellipsoid(
 
     x_np, y_np = np.array(x_train), np.array(y_train)
     steps = max(1, x_train.shape[0] // model.batch_size)
-
-    rng = np.random.default_rng(np_seed)
 
     for epoch in range(model.n_epochs):
         perm_train = rng.permutation(x_train.shape[0])

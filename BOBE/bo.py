@@ -1456,7 +1456,8 @@ class BOBE:
             self.results_manager.start_timing('MCMC Sampling')
             mc_samples = get_mc_samples(
                     self.gp, warmup_steps=self.num_hmc_warmup, num_samples=8*self.num_hmc_samples,
-                    thinning=self.hmc_thinning, method="NUTS")
+                    thinning=self.hmc_thinning, method="NUTS",
+                    np_rng=self.np_rng, rng_key=get_new_jax_key())
             self.results_manager.end_timing('MCMC Sampling')
             samples = mc_samples['x']
             weights = mc_samples['weights'] if 'weights' in mc_samples else np.ones(mc_samples['x'].shape[0])
