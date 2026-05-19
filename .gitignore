@@ -54,3 +54,5 @@ examples/.DS_Store
 *.html
 CosmoPosteriors.ipynb
 dist/
+.DS_Store
+examples/.DS_Store

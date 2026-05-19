@@ -8,6 +8,9 @@ import psutil
 import py21cmfast as p21c
 from powerbox.tools import get_power
 
+import glob
+import re
+
 import hashlib
 
 def theta_to_hash(theta):
@@ -240,6 +243,144 @@ def save_model_prediction_npz(filename, theta, z, k, model_ps, data_ps=None, sig
     np.savez(filename, **payload)
 
 
+
+def load_21cmfish_21cmsense_noise(
+    noise_dir,
+    mode="drift_mod",
+    prefix="Errlist_SplitCore_HERA350",
+):
+    """
+    Load 21cmFish 21cmSense noise files and return:
+        noise_k : (Nk,)
+        sigma   : (Nz, Nk)
+
+    Assumptions
+    -----------
+    - Each file corresponds to one k-bin.
+    - The last floating-point number in the filename is the k value.
+    - Each file contains one row of Nz noise values.
+    """
+    pattern = os.path.join(noise_dir, f"{prefix}.{mode}_*.txt")
+    files = sorted(glob.glob(pattern))
+    if not files:
+        raise FileNotFoundError(f"No files found matching {pattern}")
+
+    def extract_k(path):
+        name = os.path.basename(path)
+        m = re.search(r"_([0-9]+\.[0-9]+)\.txt$", name)
+        if m is None:
+            raise ValueError(f"Could not extract k value from filename: {name}")
+        return float(m.group(1))
+
+    noise_k = np.array([extract_k(f) for f in files], dtype=float)
+
+    cols = []
+    for f in files:
+        arr = np.loadtxt(f, ndmin=1)
+        cols.append(arr)
+
+    sigma = np.column_stack(cols)   # (Nz, Nk)
+    return noise_k, sigma
+
+
+def build_mock_dataset_from_21cmfish_noise(
+    fiducial_ps,
+    redshifts,
+    k_values,
+    noise_dir,
+    fish_redshifts,
+    mode="drift_mod",
+    prefix="Errlist_SplitCore_HERA350",
+    z_min=6.0,
+    z_max=30.0,
+    k_min=0.1,
+    k_max=1.0,
+):
+    """
+    Build the same dataset dict using 21cmFish 21cmSense noise.
+
+    Requires the likelihood (k, z) grid match the 21cmFish sensitivities grid exactly
+
+    Parameters
+    ----------
+    fiducial_ps: ndarray, shape (Nz, Nk_model)
+        Fiducial model power spectrum on the model grid
+
+    redshifts: ndarray, shape (Nz, )
+        Model redshift grid corresponding to fiducial_ps
+    
+    k_values: ndarray, shape (Nk_model,)
+        Model k grid corresponding to fiducial_ps
+    
+    noise_dir: str
+        Directory containing 21cmFish 21cmSense noise files
+    
+    fish_redshifts: ndarray, shape (Nz_fish,)
+        Redshift grid corresponding to the rows of the 21cmFish noise files
+    
+    require_exact_grid_match: bool
+        If True, require exact agreement of masked z and k grids
+
+    """
+    noise_k, sigma_full = load_21cmfish_21cmsense_noise(
+        noise_dir=noise_dir,
+        mode=mode,
+        prefix=prefix,
+    )
+
+    fish_redshifts = np.asarray(fish_redshifts, dtype=float)
+
+
+    if fiducial_ps.shape != (len(redshifts), len(k_values)):
+        raise ValueError(
+            f"fiducial_ps shape {fiducial_ps.shape} does not match "
+            f"(Nz, Nk)=({len(redshifts)}, {len(k_values)})"
+        )
+    if sigma_full.shape != (len(fish_redshifts), len(noise_k)):
+        raise ValueError(
+            f"21cmFish noise shape {sigma_full.shape} does not match "
+            f"(Nz_fish, Nk_fish)=({len(fish_redshifts)}, {len(noise_k)})"             
+        )
+
+    redshift_mask_model = (redshifts > z_min) & (redshifts < z_max)
+    k_mask_model = (k_values > k_min) & (k_values < k_max)
+
+    redshift_mask_fish = (fish_redshifts > z_min) & (fish_redshifts < z_max)
+    k_mask_fish = (noise_k > k_min) & (noise_k < k_max)
+
+    z_like_model = redshifts[redshift_mask_model]
+    k_like_model = k_values[k_mask_model]
+    ps_like = fiducial_ps[np.ix_(redshift_mask_model, k_mask_model)]
+
+    z_like_fish = redshifts[redshift_mask_fish]
+    k_like_fish = k_values[k_mask_fish]
+    sigma_like = fiducial_ps[np.ix_(redshift_mask_fish, k_mask_fish)]
+
+    if len(z_like_model) != len(z_like_fish) or not np.allclose(z_like_model, z_like_fish, rtol=0, atol=1e-8):
+        raise ValueError(
+            "Model redshift grid does not match the 21cmFish redshift grid "
+            "after masking. You must use the same z bins"
+        )
+    
+    if len(k_like_model) != len(k_like_fish) or not np.allclose(k_like_model, k_like_fish, rtol=0, atol=1e-8):
+        raise ValueError(
+            "Model k grid does not match the 21cmFish redshift grid "
+            "after masking. You must use the same k bins"
+        )
+
+    valid_mask = np.isfinite(ps_like) & np.isfinite(sigma_like) & (sigma_like > 0)
+
+    return {
+        "redshift_mask": redshift_mask_model,
+        "k_mask": k_mask_model,
+        "z": z_like_model,
+        "k": k_like_model,
+        "ps_fid": ps_like,
+        "sigma": sigma_like,
+        "mask": valid_mask,
+        "noise_k": noise_k,
+    }
+
 @dataclass
 class Likelihood21cmFAST:
     """
@@ -250,6 +391,11 @@ class Likelihood21cmFAST:
     - Gaussian likelihood with diagonal covariance
     - by default the likelihood uses only the chi^2 term, not the Gaussian normalization
     - masking in z and k is fixed and built once during initialization
+
+    Supports either:
+    - Fixed sensitivty table
+    - A 21cmFish 21cmSense directory with explicit redshift/k alignment checks
+
     """
     fiducial_path: str
     sensitivity_path: str
@@ -258,8 +404,16 @@ class Likelihood21cmFAST:
     random_seed: int = 1234
     include_norm: bool = False
     debug_output_file: str | None = None
+    prediction_cache_dir: str | None = None
     param_bounds: np.ndarray | None = None
     nsigma_bounds: float = 5.0
+
+    # Sensitivity Options
+    sensitivity_kind: str = "table" # table or 21cmfish
+    fish_mode: str = "drift_mod"
+    fish_prefix: str = "Errlist_SplitCore_HERA350"
+    fish_redshifts: np.ndarray | None = None
+    #require_exact_k_match: bool = False
 
     def __post_init__(self):
         self.param_names = PARAMETER_NAMES
@@ -272,13 +426,27 @@ class Likelihood21cmFAST:
             self.param_bounds = np.asarray(self.param_bounds, dtype=float)
             if self.param_bounds.shape != (2, 8):
                 raise ValueError(f"param_bounds must have shape (2, 8), got {self.param_bounds.shape}")
+        
+        if self.prediction_cache_dir is not None:
+            os.makedirs(self.prediction_cache_dir, exist_ok=True)
 
         self._build_dataset()
         self._build_base_inputs()
         self.cache = p21c.OutputCache(self.cache_dir)
 
     def _build_dataset(self):
-        """Build the fixed masked data vector from the stored fiducial lightcone."""
+        """
+        Build the fixed masked data vector from the stored fiducial lightcone.
+
+        Sensitivity backend options
+        ---------------------------
+        sensitivity_kind = "table"
+            sensitivity_path is interpreted as a single text file with shape (Nz, Nk_full)
+
+        sensitivity_kind = "21cmfish"
+            sensitivity_path is interpreted as a directory containing 21cmFish
+            21cmSense files such as Errlist_SplitCore_HERA350.drift_mod_0.054.txt
+        """
         lightcone_fiducial = p21c.LightCone.from_file(path=self.fiducial_path)
         self.chunk_idx = chunk_indices(lightcone_fiducial, CHUNK_Z_LIST)
 
@@ -293,19 +461,53 @@ class Likelihood21cmFAST:
 
         fiducial_ps = np.array([chunk["delta"] for chunk in data_fid])
         fiducial_k = data_fid[0]["k"]
-        sensitivity = np.loadtxt(self.sensitivity_path)[:-2, :]
 
-        redshift_mask = (redshifts > Z_MIN) & (redshifts < Z_MAX)
-        k_mask = (fiducial_k > K_MIN) & (fiducial_k < K_MAX)
+        if self.sensitivity_kind == "table":
+            sensitivity = np.loadtxt(self.sensitivity_path)[:-2, :]
 
-        self.z = redshifts[redshift_mask]
-        self.k = fiducial_k[k_mask]
-        self.data_ps = fiducial_ps[np.ix_(redshift_mask, k_mask)]
-        self.sigma_ps = sensitivity[np.ix_(redshift_mask, k_mask)]
-        self.mask = np.isfinite(self.data_ps) & np.isfinite(self.sigma_ps) & (self.sigma_ps > 0)
+            redshift_mask = (redshifts > Z_MIN) & (redshifts < Z_MAX)
+            k_mask = (fiducial_k > K_MIN) & (fiducial_k < K_MAX)
 
-        self.redshift_mask = redshift_mask
-        self.k_mask = k_mask
+            self.z = redshifts[redshift_mask]
+            self.k = fiducial_k[k_mask]
+            self.data_ps = fiducial_ps[np.ix_(redshift_mask, k_mask)]
+            self.sigma_ps = sensitivity[np.ix_(redshift_mask, k_mask)]
+            self.mask = np.isfinite(self.data_ps) & np.isfinite(self.sigma_ps) & (self.sigma_ps > 0)
+
+            self.redshift_mask = redshift_mask
+            self.k_mask = k_mask
+
+        elif self.sensitivity_kind == "21cmfish":
+            dataset = build_mock_dataset_from_21cmfish_noise(
+                fiducial_ps=fiducial_ps,
+                redshifts=redshifts,
+                k_values=fiducial_k,
+                noise_dir=self.sensitivity_path,
+                fish_redshifts=self.fish_redshifts,
+                mode=self.fish_mode,
+                prefix=self.fish_prefix,
+                z_min=Z_MIN,
+                z_max=Z_MAX,
+                k_min=K_MIN,
+                k_max=K_MAX,
+                #require_exact_k_match=self.require_exact_k_match,
+            )
+
+            self.z = dataset["z"]
+            self.k = dataset["k"]
+            self.data_ps = dataset["ps_fid"]
+            self.sigma_ps = dataset["sigma"]
+            self.mask = dataset["mask"]
+            self.redshift_mask = dataset["redshift_mask"]
+            self.k_mask = dataset["k_mask"]
+            self.noise_k = dataset["noise_k"]
+            self.noise_redshifts = dataset["noise_redshifts"]
+
+        else:
+            raise ValueError(
+                f"Unknown sensitivity_kind '{self.sensitivity_kind}'. "
+                "Use 'table' or '21cmfish'."
+            )
 
     def _build_base_inputs(self):
         """Build the fixed baseline 21cmFAST input object."""
