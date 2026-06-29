@@ -11,25 +11,26 @@ from getdist import MCSamples, plots
 import numpy as np
 from dynesty import DynamicNestedSampler
 
-mean_r = 0.2
-scale = 0.02
 
 def loglike(X):
-    r2 = (X[0]-0.5)**2 + (X[1]-0.5)**2
-    r = np.sqrt(r2)
-    return -0.5*((r-mean_r)/scale)**2
+    # X is a N x DIM shaped tensor, output is N tensor
+    mean = np.array(0.5)
+    sigma = np.array(0.1)
+    return -0.5*np.sum((X-mean)**2/sigma**2, axis=-1)
+    
 
 def prior_transform(x):
     return x
 
 def main():
+
     # Problem setup
-    kernel_name='spherical_linear'
+    kernel_name='rbf'
     ndim = 2
-    param_list = ['x1', 'x2']
-    param_labels = ['x_1', 'x_2']
-    param_bounds = np.array([[0, 1], [0, 1]]).T
-    likelihood_name = f'GaussianRing_{kernel_name}'
+    param_list   = [f"x{i+1}" for i in range(ndim)]
+    param_labels = [rf"x_{{{i+1}}}" for i in range(ndim)]
+    param_bounds = np.tile(np.array([[0, 1.0]]), (ndim, 1)).T
+    likelihood_name = f'Gaussian_{ndim}D_{kernel_name}'
     
     start = time.time()
     print("Starting BOBE run...")
@@ -42,30 +43,32 @@ def main():
         param_labels=param_labels,
         likelihood_name=likelihood_name,
         verbosity='INFO',
-        n_sobol_init=8,
+        n_sobol_init=2,
         optimizer='scipy',
         use_clf=False,
         seed=42,
         save_dir='./results/',
-        gp_kwargs={'kernel': kernel_name, 'noise': 1e-8},
         save=True,
+        gp_kwargs={'kernel': kernel_name},#, 'noise': 1e-8, 'groups': [[0], [1], [2], [3], [4]]},
+        resume=False,
+        #resume_file=f"./results/{likelihood_name}"
     )
     
     # Run optimization with convergence and run settings
     results = bobe.run(
         acq='wipstd',
-        min_evals=25,
-        max_evals=250,
-        max_gp_size=250,
+        min_evals=10,
+        max_evals=100,
+        max_gp_size=112,
         logz_threshold=5e-2,
         do_final_ns=True,
         fit_n_points=1,
         batch_size=1,
-        ns_n_points=4,
-        num_hmc_warmup=512,
+        ns_n_points=1,
+        num_hmc_warmup=256,
         num_hmc_samples=2048,
         mc_points_size=512,
-        num_chains=4,
+        num_chains=8,        
         convergence_n_iters=2,
     )
 

@@ -13,6 +13,7 @@ from jax.scipy.linalg import cho_solve, solve_triangular
 from .priors import build_prior_state, DSLPPrior
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple, Any, Dict
+from .transforms import PrincipalAxesTransform
 
 from .utils.log import get_logger
 
@@ -273,9 +274,25 @@ class Kernel(ABC):
         self.input_transform = None
     
     def _x(self, x):
-        return x if self.input_transform is None else self.input_transform.forward(x)
+        if self.input_transform is None or not self.input_transform.is_active:
+            return x
+        return self.input_transform.forward(x)
     
     def configure_hyperparam_optimisation(self):
+        # If using a transform-aware default, refresh bounds here
+        # if "lengthscales" not in self.bounds_spec or self.input_transform is not None:
+        #     self.bounds_spec["lengthscales"] = self.default_lengthscale_bounds()
+        # else:
+        # # only refresh automatically if the transform actually changes scale
+        #     t = self.input_transform
+        #     if (
+        #         t is not None
+        #         and getattr(t, "is_active", False)
+        #         and isinstance(t, PrincipalAxesTransform)
+        #         and t.mode == "whiten"
+        #     ):
+        #         self.bounds_spec["lengthscales"] = self.default_lengthscale_bounds()
+
         fields = self.base_hyperparams() + (self.prior.extra_hyperparams(self) if self.prior is not None else [])
         self.hp_layout = HyperParamLayout(fields)
         self.hyperparam_names = self.hp_layout.names()
@@ -307,6 +324,27 @@ class Kernel(ABC):
         if self.prior is None:
             return 0.0
         return self.prior.logprior(**parsed)
+
+    # def default_lengthscale_bounds(self, lower_factor=0.1, upper_factor=5.0):
+    #     """
+    #     Returns natural-space bounds for lengthscales.
+    #     If an active PrincipalAxesTransform is attached, define bounds in the
+    #     transformed coordinate system using its axis scales.
+    #     Otherwise fall back to existing scalar bounds if present.
+    #     """
+    #     t = self.input_transform
+    #     if t is not None and getattr(t, "is_active", False):
+    #         if isinstance(t, PrincipalAxesTransform): 
+    #             if t.mode == "whiten":
+    #                 return t.recommended_lengthscale_bounds(
+    #                     lower_factor=lower_factor,
+    #                     upper_factor=upper_factor,
+    #                 )
+    #     # fallback to user-provided/global bounds
+    #     b = self.bounds_spec.get("lengthscales", None)
+    #     if b is None:
+    #         raise ValueError("No bounds provided for 'lengthscales'")
+    #     return jnp.array(b)
         
     
     def build_posterior_cache(self, train_x: jnp.ndarray, train_y: jnp.ndarray) -> None:
@@ -598,10 +636,10 @@ class SphericalLinearKernel(Kernel):
         # bounds
         self.mins = None
         self.maxs = None
-        self.centers = None
+        self.centres = None
         self.ndim = self.lengthscales.shape[0]
         input_bounds = self.hp_init.get("input_bounds", (0.0, 1.0))
-        self.mins, self.maxs, self.centers = self.ensure_bounds(input_bounds, self.ndim, dtype=jnp.float64)
+        self.mins, self.maxs, self.centres = self.ensure_bounds(input_bounds, self.ndim, dtype=jnp.float64)
 
         # posterior state (set by fit)
         self.Phi = None
@@ -727,7 +765,7 @@ class SphericalLinearKernel(Kernel):
     def ensure_bounds(self, bounds, D: int, dtype=jnp.float64):
         """
         bounds: either (min, max) or sequence of (min_d, max_d)
-        returns: mins, maxs, centers as (D,)
+        returns: mins, maxs, centres as (D,)
         """
         if isinstance(bounds, (float, int)):
             raise TypeError("bounds must be (min, max) or array-like of shape (D,2); got scalar.")
@@ -741,8 +779,8 @@ class SphericalLinearKernel(Kernel):
                 raise ValueError(f"bounds must have shape (D,2) with D={D}; got {b.shape}.")
             mins = b[:, 0]
             maxs = b[:, 1]
-        centers = 0.5 * (mins + maxs)
-        return mins, maxs, centers
+        centres = 0.5 * (mins + maxs)
+        return mins, maxs, centres
 
     
     def spherical_linear_features(self, X: jnp.ndarray) -> jnp.ndarray:
@@ -756,8 +794,8 @@ class SphericalLinearKernel(Kernel):
         global_ls = jax.nn.sigmoid(self.raw_global_lengthscale)
         global_ls_eff = jnp.sqrt(global_ls * max_sq_norm)
 
-        # center and scale
-        X1 = (X - self.centers) / lengthscale
+        # centre and scale
+        X1 = (X - self.centres) / lengthscale
         X1 = X1 / global_ls_eff
 
         # project onto sphere

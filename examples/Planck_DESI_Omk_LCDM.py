@@ -12,10 +12,13 @@ import seaborn as sns
 from getdist import MCSamples, plots, loadMCSamples
 import numpy as np
 
+
+samples_x = loadMCSamples('./results/LCDM_Omk/Best/Planck_DESI_Omk_LCDM_z025')
+
 def main():
     # Set up the cosmological likelihood
     cobaya_input_file = './cosmo_input/LCDM_Planck_DESI_Omk.yaml'
-    likelihood_name = 'Planck_DESI_Omk_LCDM_z025'
+    likelihood_name = 'Planck_DESI_Omk_LCDM_rotated_z025'
     
     start = time.time()
     print("Starting BOBE run...")
@@ -33,26 +36,27 @@ def main():
         n_cobaya_init=16,
         n_sobol_init=32,
         optimizer='scipy',
-        gp_kwargs={'lengthscale_bounds': [1e-2,5.]},
+        #gp_kwargs={'lengthscale_bounds': [1e-2,5.]},
         use_clf=True,
         clf_type='svm',
         seed=42,
+        gp_kwargs={'rotation_samples': samples_x.samples, 'rotation_logwt': None, 'rotation_logl': samples_x.loglikes, 'learn_rotation': False, 'rotation_top_frac': 1.0, 'WIPStd_rotation_threshold': -1},
     )
     
     results = bobe.run(
         acq='wipstd',
-        min_evals=750,
+        min_evals=500,
         max_evals=2000,
         max_gp_size=1800,
         convergence_n_iters=2,
-        fit_n_points=10,
+        fit_n_points=1,
         batch_size=5,
         ns_n_points=10,
-        num_hmc_warmup=512,
+        num_hmc_warmup=1024,
         num_hmc_samples=4096,
         mc_points_size=512,
-        num_chains=6,
-        logz_threshold=0.25,
+        num_chains=10,
+        logz_threshold=0.5,
         do_final_ns=True,
     )
 

@@ -96,10 +96,21 @@ class MPI_Pool:
             
             try:
                 if task_type == self.TASK_OBJECTIVE_EVAL:
-                    # Evaluate likelihood at a point
-                    point, task_index = data
-                    result = self._likelihood(point)
-                    self.comm.send((result, task_index), dest=0)
+                    # data is a list of (point, task_index) pairs in static mode
+                    if isinstance(data, list):
+                        chunk_results = []
+                        for point, task_index in data:
+                            try:
+                                result = self._likelihood(point)
+                                chunk_results.append((result, task_index))
+                            except Exception as e:
+                                chunk_results.append(("error", str(e), task_index))
+                        self.comm.send(chunk_results, dest=0)
+                    else:
+                        # Original single task behaviour for dynamic mode.
+                        point, task_index = data
+                        result = self._likelihood(point)
+                        self.comm.send((result, task_index), dest=0)
                     
                 elif task_type == self.TASK_GP_FIT:
                     # Fit GP with given starting points
@@ -141,6 +152,72 @@ class MPI_Pool:
                 self.comm.send(("error", str(e), task_index), dest=0)
         
         return
+
+    def _static_distribute(self, tasks: List[Any], task_type: int, function: callable) -> List[Any]:
+        """
+        MASTER-ONLY METHOD: Distributes tasks to workers using static scheduling.
+
+        Unlike _dynamic_distribute, rank 0 alos participates.
+        Tasks are split once at the start and each rank processes its fixed chunk.
+
+        Parameters
+        ----------
+        task: list
+            List of task data to distribute
+        task_type: int
+            Type of task (TASK_OBJECTIVE_EVAL, TASK_GP_FIT, etc..).
+        function: callable
+            Local callable used by the master for its own chunk.
+
+        Returns
+        -------
+        list
+            Results form all tasks in the same order as input tasks
+        """
+
+        if not self.is_main_process or not self.is_mpi:
+            raise RuntimeError("_static_distribute is designed for the master process in MPI mode.")
+        
+        n_tasks = len(tasks)
+        if n_tasks == 0:
+            return []
+        
+        results = [None] * n_tasks
+
+        # Pair each task with its original index
+        indexed_tasks = [(task, i) for i, task in enumerate(tasks)]
+
+        # Static split across all ranks, including master
+        chunks = [indexed_tasks[r::self.size] for r in range(self.size)]
+
+        # Send worker chunks
+        for worker_rank in range(1, self.size):
+            self.comm.send((task_type, chunks[worker_rank]), dest=worker_rank)
+
+        # Master does its own chunk locally
+        for task, original_index in chunks[0]:
+            try:
+                result = function(task)
+            except Exception as e:
+                log.error(f"Master failed on task {original_index}: {e}")
+                raise RuntimeError(f"Master failed: {e}")
+            results[original_index] = result
+
+        # Gather worker results
+        for worker_rank in range(1, self.size):
+            response = self.comm.recv(source=worker_rank)
+
+            # Expect a list of (result, original_index) tuples
+            for item in response:
+                if len(item) == 3 and item[0] == "error":
+                    _, msg, original_index = item
+                    log.error(f"Worker {worker_rank} failed on task {original_index}: {msg}")
+                    raise RuntimeError(f"Worker {worker_rank} failed: {msg}")
+                
+                result, original_index = item
+                results[original_index] = result
+
+        return results
 
     def _dynamic_distribute(self, tasks: List[Any], task_type: int) -> List[Any]:
         """
@@ -234,7 +311,8 @@ class MPI_Pool:
             # Serial execution if not in MPI mode
             results = [function(task) for task in tasks]
         else:
-            results = self._dynamic_distribute(tasks, self.TASK_OBJECTIVE_EVAL)
+            #results = self._dynamic_distribute(tasks, self.TASK_OBJECTIVE_EVAL)
+            results = self._static_distribute(tasks, self.TASK_OBJECTIVE_EVAL, function)
 
         return np.array(results)
 

@@ -1356,6 +1356,20 @@ class BOBE:
             self.update_gp(new_pts_u, new_vals, step = ii)
             self.results_manager.update_best_loglike(ii, self.best_f)
 
+            if (
+                getattr(self.gp.kernel, "input_transform", None) is not None
+                #and self.gp.kernel.input_transform.learn_rotation
+                and not self.gp.kernel.input_transform.is_active
+                and acq_vals[-1] <= self.gp.WIPStd_rotation_threshold
+            ):
+                log.info("Installing Rotation")
+                info = self.gp.kernel.input_transform.update()
+
+                if info["did_update"]:
+                    log.info("Rotation Updated")
+                    #self.gp.kernel.build_posterior_cache(self.gp.train_x, self.gp.train_y)
+                    self.pool.gp_fit(self.gp, n_restarts=8, maxiters=1000, rng=self.np_rng, use_pool=True)
+
             # Check convergence and update MCMC samples
             if ns_flag and (acq_vals[-1] <= self.logz_threshold):
                 self.results_manager.start_timing('Nested Sampling')

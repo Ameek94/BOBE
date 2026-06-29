@@ -7,66 +7,49 @@ from BOBE.utils.core import renormalise_log_weights, scale_from_unit
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns # optional for improved plot aesthetics
-from getdist import MCSamples, plots
+from getdist import MCSamples, plots, loadMCSamples
 import numpy as np
-from dynesty import DynamicNestedSampler
-
-mean_r = 0.2
-scale = 0.02
-
-def loglike(X):
-    r2 = (X[0]-0.5)**2 + (X[1]-0.5)**2
-    r = np.sqrt(r2)
-    return -0.5*((r-mean_r)/scale)**2
-
-def prior_transform(x):
-    return x
 
 def main():
-    # Problem setup
-    kernel_name='spherical_linear'
-    ndim = 2
-    param_list = ['x1', 'x2']
-    param_labels = ['x_1', 'x_2']
-    param_bounds = np.array([[0, 1], [0, 1]]).T
-    likelihood_name = f'GaussianRing_{kernel_name}'
-    
+
+    # Set up the cosmological likelihood
+    cobaya_input_file = 'cosmo_input/LCDM_lite_wiggles.yaml'
+    likelihood_name = f'Planck_lite_LCDM_wiggles_3D_z0025'
+
     start = time.time()
     print("Starting BOBE run...")
 
-    # Initialize BOBE instance
+    # Pass Cobaya YAML file path directly to BOBE
     bobe = BOBE(
-        loglikelihood=loglike,
-        param_list=param_list,
-        param_bounds=param_bounds,
-        param_labels=param_labels,
+        loglikelihood=cobaya_input_file,
         likelihood_name=likelihood_name,
-        verbosity='INFO',
-        n_sobol_init=8,
-        optimizer='scipy',
-        use_clf=False,
-        seed=42,
-        save_dir='./results/',
-        gp_kwargs={'kernel': kernel_name, 'noise': 1e-8},
+        confidence_for_unbounded=0.9999995,
+        resume=False,
+        resume_file=f'./results/LCDM_Lite_Wiggles/{likelihood_name}',
+        save_dir='./results/LCDM_Lite_Wiggles/',
         save=True,
+        verbosity='INFO',
+        n_cobaya_init=8, 
+        n_sobol_init=8,
+        use_clf=False,
+        clf_type='svm',
+        minus_inf=-1e5,
+        seed=10,
     )
     
-    # Run optimization with convergence and run settings
     results = bobe.run(
         acq='wipstd',
-        min_evals=25,
-        max_evals=250,
-        max_gp_size=250,
-        logz_threshold=5e-2,
-        do_final_ns=True,
-        fit_n_points=1,
-        batch_size=1,
-        ns_n_points=4,
+        min_evals=50, 
+        max_evals=300,
+        max_gp_size=400,
+        fit_n_points=1, 
+        ns_n_points=3,
+        batch_size=3,
         num_hmc_warmup=512,
-        num_hmc_samples=2048,
+        num_hmc_samples=2048, 
         mc_points_size=512,
-        num_chains=4,
-        convergence_n_iters=2,
+        logz_threshold=0.5,
+        do_final_ns=True,
     )
 
     end = time.time()
@@ -78,6 +61,10 @@ def main():
         likelihood = results['likelihood']
         results_manager = results['results_manager']
         samples = results['samples']
+        param_bounds = likelihood.param_bounds
+        param_list = likelihood.param_list
+        param_labels = likelihood.param_labels
+        ndim = len(param_list)
 
         manual_timing = end - start
 
@@ -90,24 +77,10 @@ def main():
         print("="*60)
         print(f"Manual timing: {manual_timing:.2f} seconds ({manual_timing/60:.2f} minutes)")
 
-
-        # Create Dynesty samples to compare against
-        dns_sampler =  DynamicNestedSampler(loglike,prior_transform,ndim=ndim,
-                                               sample='rwalk')
-
-        dns_sampler.run_nested(print_progress=True,dlogz_init=0.01) 
-        res = dns_sampler.results  
-        mean = res['logz'][-1]
-        logz_err = res['logzerr'][-1]
-        print(f"Mean logz from dynesty = {mean:.4f} +/- {logz_err:.4f}")
-
-        dns_samples = res['samples']
-        weights = renormalise_log_weights(res['logwt'])
-
-        reference_samples = MCSamples(samples=dns_samples, names=param_list, labels=param_labels,
-                                    weights=weights, 
-                                    ranges= dict(zip(param_list,param_bounds.T)))  
-
+        # reference_samples = loadMCSamples(
+        #     './cosmo_input/chains/Planck_lite_pchord',
+        #     # settings={'ignore_rows': 0.3, 'label': 'MCMC'}
+        # )
 
         # Create MCSamples from BOBE results
         sample_array = samples['x']
@@ -115,7 +88,7 @@ def main():
         BOBE_Samples = MCSamples(samples=sample_array, names=param_list, labels=param_labels,
                                     weights=weights_array, 
                                     ranges= dict(zip(param_list,param_bounds.T)))
-        
+
         # Create parameter samples plot
         print("Creating parameter samples plot...")
         sns.set_theme('notebook', 'ticks', palette='husl')
@@ -126,17 +99,17 @@ def main():
         g.settings.legend_fontsize = 16
         g.settings.axes_fontsize = 16
         g.settings.axes_labelsize = 16
-        g.triangle_plot([BOBE_Samples,reference_samples], filled=[True, False],
-                    contour_colors=['#006FED', 'black'], contour_lws=[1, 1.],
-                    legend_labels=['BOBE', 'Nested Sampler']) 
+        g.triangle_plot([BOBE_Samples], params=['log10lambda_feat', 'log10A_feat', 'phi'], #,reference_samples
+                        filled=[True, False],
+                    contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
+                    legend_labels=['BOBE', 'Nested Sampling'],) 
         # add scatter points for gp training data
         points = scale_from_unit(gp.train_x, param_bounds)
         for i in range(ndim):
-            # ax = g.subplots[i,i]
             for j in range(i+1, ndim):
                 ax = g.subplots[j, i]
                 ax.scatter(points[:, i], points[:, j], alpha=0.75, color='red', s=4)
-        g.export(f'./results/{likelihood.name}_samples.pdf')
+        g.export(f'./results/LCDM_Lite_Wiggles/{likelihood.name}_samples.pdf')
 
         # Print timing analysis
         print("DETAILED TIMING ANALYSIS")
@@ -161,7 +134,7 @@ def main():
         ax.set_yscale('log')
         ax.set_xlabel(r'Iteration')
         ax.set_ylabel(r'Acquisition Value')
-        plt.savefig(f"./results/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
+        plt.savefig(f"./results/LCDM_Lite_Wiggles/{likelihood.name}_acquisition.pdf", bbox_inches='tight')
 
 if __name__ == "__main__":
     main()

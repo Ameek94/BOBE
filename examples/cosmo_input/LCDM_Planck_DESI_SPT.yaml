@@ -1,0 +1,549 @@
+theory:
+  camb:
+    extra_args:
+      AccuracyBoost: 1
+      bbn_predictor: PArthENoPE_880.2_standard.dat
+      halofit_version: mead2020
+      lAccuracyBoost: 1
+      lSampleBoost: 1
+      lens_margin: 1250
+      lens_potential_accuracy: 4
+      lmax: 6000
+      mnu: 0.06
+      nnu: 3.044
+      num_massive_neutrinos: 1
+      dark_energy_model: fluid
+      theta_H0_range:
+        - 40
+        - 100
+
+likelihood:
+  candl_like:
+    additional_args: {}
+    clear_internal_priors: true
+    data_set_file: !!python/name:spt_candl_data.SPT3G_D1_TnE ''
+    external: !!python/name:candl.interface.CandlCobayaLikelihood ''
+    feedback: true
+    wrapper: null
+
+  planck_2018_lowl.TT: null
+  planck_2018_lowl.EE: null
+  planck_NPIPE_highl_CamSpec.TTTEEE: null
+  planck_2018_lensing.native: null
+  bao.desi_dr2.desi_bao_all: null
+
+output: chains/SPT3G_D1_TnE_Planck_full_polychord
+
+params:
+  EE_PolGalDust_Alpha:
+    latex: \alpha_{\rm PolGalDust}^{\rm EE }
+    prior:
+      max: -1.0
+      min: -5.0
+    ref: -2.4168015133765848
+
+  EE_PolGalDust_Amp:
+    latex: A_{\rm PolGalDust}^{\rm EE }
+    prior:
+      max: 10.0
+      min: 0.0
+    ref: 0.05699852696787985
+
+  EE_PolGalDust_Beta:
+    latex: \beta_{\rm PolGalDust}^{\rm EE }
+    prior:
+      max: 2.0
+      min: 1.0
+    ref: 1.5081006277777447
+
+  Ecal_ext150:
+    latex: E_{\rm cal}^{\rm ext}
+    prior:
+      max: 1.2
+      min: 0.8
+    ref: 1.0096200923085388
+
+  Ecal_rel220:
+    latex: E_{\rm cal}^{\rm rel;220}
+    prior:
+      max: 1.2
+      min: 0.8
+    ref: 0.9956889292218284
+
+  Ecal_rel90:
+    latex: E_{\rm cal}^{\rm rel;90}
+    prior:
+      max: 1.2
+      min: 0.8
+    ref: 0.9986226815717356
+
+  Kappa:
+    latex: \kappa
+    prior:
+      max: 0.05
+      min: -0.05
+    ref: 4.877458809121052e-06
+
+  T2P2_150:
+    latex: \epsilon^2_{\rm T2P;150}
+    prior:
+      max: 1.0
+      min: -1.0
+    ref: -0.014640193719050228
+
+  T2P2_220:
+    latex: \epsilon^2_{\rm T2P;220}
+    prior:
+      max: 1.0
+      min: -1.0
+    ref: -0.02843082802353394
+
+  T2P2_90:
+    latex: \epsilon^2_{\rm T2P;90}
+    prior:
+      max: 1.0
+      min: -1.0
+    ref: -0.006901264844123428
+
+  TE_PolGalDust_Alpha:
+    latex: \alpha_{\rm PolGalDust}^{\rm TE }
+    prior:
+      max: -1.0
+      min: -5.0
+    ref: -2.4336574063512777
+
+  TE_PolGalDust_Amp:
+    latex: A_{\rm PolGalDust}^{\rm TE }
+    prior:
+      max: 10.0
+      min: 0.0
+    ref: 0.10359042604110852
+
+  TE_PolGalDust_Beta:
+    latex: \beta_{\rm PolGalDust}^{\rm TE }
+    prior:
+      max: 2.0
+      min: 1.0
+    ref: 1.5116017911414021
+
+  TT_CIBClustering_Alpha:
+    latex: \alpha_{\rm CIBClustering}^{\rm TT }
+    prior:
+      max: 2.0
+      min: 0.0
+    ref: 0.514063166365708
+
+  TT_CIB_150x150:
+    latex: A^{\rm CIB}_{150\times 150}
+    prior:
+      max: 200.0
+      min: 0.0
+    ref: 1.8755978848053552
+
+  TT_CIB_150x220:
+    latex: A^{\rm CIB}_{150\times 220}
+    prior:
+      max: 200.0
+      min: 0.0
+    ref: 7.5048931910914956
+
+  TT_CIB_220x220:
+    latex: A^{\rm CIB}_{220\times 220}
+    prior:
+      max: 200.0
+      min: 0.0
+    ref: 35.42066847355289
+
+  TT_GalCirrus_Alpha:
+    latex: \alpha_{\rm GalCirrus}^{\rm TT }
+    prior:
+      max: -1.0
+      min: -5.0
+    ref: -2.530208854730539
+
+  TT_GalCirrus_Amp:
+    latex: A_{\rm GalCirrus}^{\rm TT }
+    prior:
+      max: 50.0
+      min: 0.0
+    ref: 1.985474379353584
+
+  TT_GalCirrus_Beta:
+    latex: \beta_{\rm GalCirrus}^{\rm TT }
+    prior:
+      max: 2.0
+      min: 1.0
+    ref: 1.480057747327629
+
+  TT_Poisson_150x150:
+    latex: A^{\rm TT;Poisson}_{150\times 150}
+    prior:
+      max: 200.0
+      min: 0.0
+    ref: 11.872619988472335
+
+  TT_Poisson_150x220:
+    latex: A^{\rm TT;Poisson}_{150\times 220}
+    prior:
+      max: 200.0
+      min: 0.0
+    ref: 32.07434864862036
+
+  TT_Poisson_220x220:
+    latex: A^{\rm TT;Poisson}_{220\times 220}
+    prior:
+      max: 200.0
+      min: 0.0
+    ref: 95.02467452315211
+
+  TT_Poisson_90x150:
+    latex: A^{\rm TT;Poisson}_{90\times 150}
+    prior:
+      max: 200.0
+      min: 0.0
+    ref: 8.61952796282032
+
+  TT_Poisson_90x220:
+    latex: A^{\rm TT;Poisson}_{90\times 220}
+    prior:
+      max: 200.0
+      min: 0.0
+    ref: 16.63736541350286
+
+  TT_Poisson_90x90:
+    latex: A^{\rm TT;Poisson}_{90\times 90}
+    prior:
+      max: 200.0
+      min: 0.0
+    ref: 10.697261369590473
+
+  TT_kSZ_Amp:
+    latex: A_{\rm kSZ}
+    prior:
+      max: 50.0
+      min: 0.0
+    ref: 2.3025333954649527
+
+  TT_tSZ_Amp:
+    latex: A_{\rm tSZ}
+    prior:
+      max: 50.0
+      min: 0.0
+    ref: 0.939226633133669
+
+  Tcal_ext150:
+    latex: T_{\rm cal}^{\rm ext}
+    prior:
+      max: 1.2
+      min: 0.8
+    proposal: 5.0e-05
+    ref: 1.0002829087744192
+
+  Tcal_rel220:
+    latex: T_{\rm cal}^{\rm rel;220}
+    prior:
+      max: 1.2
+      min: 0.8
+    proposal: 5.0e-05
+    ref: 1.0086625222429995
+
+  Tcal_rel90:
+    latex: T_{\rm cal}^{\rm rel;90}
+    prior:
+      max: 1.2
+      min: 0.8
+    proposal: 5.0e-05
+    ref: 1.0002057473508388
+
+  beta_1:
+    latex: \beta_1
+    prior:
+      max: 5.0
+      min: -5.0
+    ref: -0.45016583748734634
+
+  beta_2:
+    latex: \beta_2
+    prior:
+      max: 5.0
+      min: -5.0
+    ref: -0.6286753829117221
+
+  beta_3:
+    latex: \beta_3
+    prior:
+      max: 5.0
+      min: -5.0
+    ref: 0.48764987966697554
+
+  beta_4:
+    latex: \beta_4
+    prior:
+      max: 5.0
+      min: -5.0
+    ref: -0.8644823173092157
+
+  beta_5:
+    latex: \beta_5
+    prior:
+      max: 5.0
+      min: -5.0
+    ref: -0.037168925950716754
+
+  beta_6:
+    latex: \beta_6
+    prior:
+      max: 5.0
+      min: -5.0
+    ref: -1.1023662943162276
+
+  beta_7:
+    latex: \beta_7
+    prior:
+      max: 5.0
+      min: -5.0
+    ref: 0.12926663836645239
+
+  beta_8:
+    latex: \beta_8
+    prior:
+      max: 5.0
+      min: -5.0
+    ref: -0.3697908684339112
+
+  beta_9:
+    latex: \beta_9
+    prior:
+      max: 5.0
+      min: -5.0
+    ref: 0.21868843569596694
+
+  beta_pol_150:
+    latex: \beta_{\rm pol;150}
+    prior:
+      max: 1.0
+      min: 0.0
+    ref: 0.6158363026993121
+
+  beta_pol_220:
+    latex: \beta_{\rm pol;220}
+    prior:
+      max: 1.0
+      min: 0.0
+    ref: 0.6149421853281525
+
+  beta_pol_90:
+    latex: \beta_{\rm pol;90}
+    prior:
+      max: 1.0
+      min: 0.0
+    ref: 0.48319396965451367
+
+  A_planck:
+    prior:
+      dist: norm
+      loc: 1
+      scale: 0.0025
+    ref:
+      dist: norm
+      loc: 1
+      scale: 0.002
+    proposal: 0.0005
+    latex: y_\mathrm{cal}
+    renames: calPlanck
+
+  amp_143:
+    prior:
+      dist: uniform
+      min: 0
+      max: 50
+    ref:
+      dist: norm
+      loc: 1.778787048e+01
+      scale: 1
+    latex: A^{\rm power}_{143}
+    proposal: 1
+
+  amp_217:
+    prior:
+      dist: uniform
+      min: 0
+      max: 50
+    ref:
+      dist: norm
+      loc: 1.163383768e+01
+      scale: 1
+    latex: A^{\rm power}_{217}
+    proposal: 1
+
+  amp_143x217:
+    prior:
+      dist: uniform
+      min: 0
+      max: 50
+    ref:
+      dist: norm
+      loc: 8.542669523e+00
+      scale: 1
+    latex: A^{\rm power}_{143\times217}
+    proposal: 1
+
+  n_143:
+    prior:
+      dist: uniform
+      min: 0
+      max: 5
+    ref:
+      dist: norm
+      loc: 1.058733547e+00
+      scale: 0.2
+    latex: \gamma^{\rm power}_{143}
+    proposal: 0.2
+
+  n_217:
+    prior:
+      dist: uniform
+      min: 0
+      max: 5
+    ref:
+      dist: norm
+      loc: 1.546673841e+00
+      scale: 0.2
+    latex: \gamma^{\rm power}_{217}
+    proposal: 0.2
+
+  n_143x217:
+    prior:
+      dist: uniform
+      min: 0
+      max: 5
+    ref:
+      dist: norm
+      loc: 1.729442742e+00
+      scale: 0.2
+    latex: \gamma^{\rm power}_{143\times217}
+    proposal: 0.2
+
+  calTE:
+    prior:
+      dist: norm
+      loc: 1
+      scale: 0.01
+    ref:
+      dist: norm
+      loc: 1
+      scale: 0.01
+    proposal: 0.01
+    latex: c_{TE}
+
+  calEE:
+    prior:
+      dist: norm
+      loc: 1
+      scale: 0.01
+    ref:
+      dist: norm
+      loc: 1
+      scale: 0.01
+    proposal: 0.01
+    latex: c_{EE}
+
+  As:
+    value: 'lambda logA: 1e-10*np.exp(logA)'
+    derived: false
+    latex: A_\mathrm{s}
+
+  logA:
+    drop: true
+    latex: \log(10^{10} A_\mathrm{s})
+    prior:
+      max: 5.0
+      min: 1.0
+    ref: 3.0563293664848805
+
+  ns:
+    latex: n_\mathrm{s}
+    prior:
+      max: 2.0
+      min: 0.2
+    ref: 0.948760147539579
+
+  ombh2:
+    latex: \Omega_\mathrm{b} h^2
+    prior:
+      max: 0.1
+      min: 0.0
+    ref: 0.022205552241797096
+
+  omch2:
+    latex: \Omega_\mathrm{c} h^2
+    prior:
+      max: 0.99
+      min: 0.0
+    ref: 0.12215852992670449
+
+  tau:
+    latex: \tau_\mathrm{reio}
+    prior:
+      dist: norm
+      loc: 0.051
+      scale: 0.006
+    proposal: 0.003
+    ref: 0.051
+
+  theta_MC_100:
+    latex: 100\theta_\mathrm{MC}
+    prior:
+      max: 10
+      min: 0.5
+    proposal: 0.0004
+    ref: 1.0406702861604324
+    renames: theta
+    drop: true
+
+  cosmomc_theta:
+    value: 'lambda theta_MC_100: 1.e-2*theta_MC_100'
+    derived: false
+
+  w: -1.
+  omk: 0.
+
+prior:
+  gaussian_EE_PolGalDust_Alpha: 'lambda EE_PolGalDust_Alpha: stats.norm.logpdf(EE_PolGalDust_Alpha, loc=-2.42, scale=0.04)'
+  gaussian_EE_PolGalDust_Amp: 'lambda EE_PolGalDust_Amp: stats.norm.logpdf(EE_PolGalDust_Amp, loc=0.05, scale=0.022)'
+  gaussian_EE_PolGalDust_Beta: 'lambda EE_PolGalDust_Beta: stats.norm.logpdf(EE_PolGalDust_Beta, loc=1.51, scale=0.04)'
+  gaussian_Kappa: 'lambda Kappa: stats.norm.logpdf(Kappa, loc=0.0, scale=0.00045)'
+  gaussian_T2P2_150: 'lambda T2P2_150: stats.norm.logpdf(T2P2_150, loc=-0.011941, scale=0.002103)'
+  gaussian_T2P2_220: 'lambda T2P2_220: stats.norm.logpdf(T2P2_220, loc=-0.022684, scale=0.006641)'
+  gaussian_T2P2_90: 'lambda T2P2_90: stats.norm.logpdf(T2P2_90, loc=-0.00649, scale=0.001054)'
+  gaussian_TE_PolGalDust_Alpha: 'lambda TE_PolGalDust_Alpha: stats.norm.logpdf(TE_PolGalDust_Alpha, loc=-2.42, scale=0.04)'
+  gaussian_TE_PolGalDust_Amp: 'lambda TE_PolGalDust_Amp: stats.norm.logpdf(TE_PolGalDust_Amp, loc=0.12, scale=0.051)'
+  gaussian_TE_PolGalDust_Beta: 'lambda TE_PolGalDust_Beta: stats.norm.logpdf(TE_PolGalDust_Beta, loc=1.51, scale=0.04)'
+  gaussian_TT_CIBClustering_Alpha: 'lambda TT_CIBClustering_Alpha: stats.norm.logpdf(TT_CIBClustering_Alpha, loc=0.53, scale=0.1)'
+  gaussian_TT_GalCirrus_Alpha: 'lambda TT_GalCirrus_Alpha: stats.norm.logpdf(TT_GalCirrus_Alpha, loc=-2.53, scale=0.05)'
+  gaussian_TT_GalCirrus_Amp: 'lambda TT_GalCirrus_Amp: stats.norm.logpdf(TT_GalCirrus_Amp, loc=1.88, scale=0.96)'
+  gaussian_TT_GalCirrus_Beta: 'lambda TT_GalCirrus_Beta: stats.norm.logpdf(TT_GalCirrus_Beta, loc=1.48, scale=0.02)'
+  gaussian_TT_kSZ_Amp: 'lambda TT_kSZ_Amp: stats.norm.logpdf(TT_kSZ_Amp, loc=3.7287, scale=4.644)'
+  gaussian_TT_tSZ_Amp: 'lambda TT_tSZ_Amp: stats.norm.logpdf(TT_tSZ_Amp, loc=3.2279, scale=2.3764)'
+  gaussian_Tcal_ext150: 'lambda Tcal_ext150: stats.norm.logpdf(Tcal_ext150, loc=1.0, scale=0.0036)'
+  gaussian_beta_1: 'lambda beta_1: stats.norm.logpdf(beta_1, loc=0.0, scale=1.0)'
+  gaussian_beta_2: 'lambda beta_2: stats.norm.logpdf(beta_2, loc=0.0, scale=1.0)'
+  gaussian_beta_3: 'lambda beta_3: stats.norm.logpdf(beta_3, loc=0.0, scale=1.0)'
+  gaussian_beta_4: 'lambda beta_4: stats.norm.logpdf(beta_4, loc=0.0, scale=1.0)'
+  gaussian_beta_5: 'lambda beta_5: stats.norm.logpdf(beta_5, loc=0.0, scale=1.0)'
+  gaussian_beta_6: 'lambda beta_6: stats.norm.logpdf(beta_6, loc=0.0, scale=1.0)'
+  gaussian_beta_7: 'lambda beta_7: stats.norm.logpdf(beta_7, loc=0.0, scale=1.0)'
+  gaussian_beta_8: 'lambda beta_8: stats.norm.logpdf(beta_8, loc=0.0, scale=1.0)'
+  gaussian_beta_9: 'lambda beta_9: stats.norm.logpdf(beta_9, loc=0.0, scale=1.0)'
+
+resume: true
+
+sampler:
+  polychord:
+    path: global
+    nlive: 25d
+    num_repeats: 2d
+    do_clustering: true
+    precision_criterion: 0.01
+
+timing: true

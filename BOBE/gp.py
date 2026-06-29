@@ -9,18 +9,20 @@ log = get_logger("gp")
 from .optim import optimize_optax, optimize_scipy
 from .utils.seed import get_numpy_rng
 from .kernels import RBFKernel, MaternKernel, SphericalLinearKernel, AdditiveKernel
-from .transforms import FisherPrincipalAxesTransform
+from .transforms import PrincipalAxesTransform
 
 safe_noise_floor = 1e-12
 
 class GP:
     
     def __init__(self,train_x,train_y,noise=1e-8,kernel="rbf",optimizer="scipy",optimizer_options={},
-                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.01, 25],lengthscales=None, kernel_variance=None,
+                 kernel_variance_bounds = [1e-4, 1e8],lengthscale_bounds = [0.1, 15.],lengthscales=None, kernel_variance=None,
                  kernel_variance_prior=None, lengthscale_prior="DSLP", tausq=None, tausq_bounds=[1e-4,1e4], 
                  raw_coeffs=None, raw_coeff_bounds=[-6, 6], raw_global_lengthscale=None, raw_global_lengthscale_bounds=[-1.5, 1.5], 
                  groups=None, enable_group_outputscale=False,
-                 rotation_matrix=None, rotation_center=None,
+                 rotation_matrix=None, rotation_centre=None,  rotation_is_fisher=False, 
+                 rotation_samples=None, rotation_logwt=None, rotation_logl=None, rotation_top_frac=1.0,
+                 learn_rotation=False, WIPStd_rotation_threshold=1.0,
                  param_names: List[str] = None):
         """
         Initialize the Gaussian Process model.
@@ -125,12 +127,47 @@ class GP:
         # Instantiate kernel objects
         self.kernel = kernel_classes[self.kernel_name](kernel_init, self.noise)
 
-        if rotation_center is not None or rotation_matrix is not None:
-            if rotation_matrix is None or rotation_center is None:
-                raise ValueError("Must provide both rotation_matrix and rotation_center, or neither")
-            tform = FisherPrincipalAxesTransform(rotation_matrix=rotation_matrix, rotation_center=rotation_center, mode='rotate')
+        
+        tform = None if (
+            rotation_matrix is None 
+            and rotation_samples is None 
+            and not learn_rotation
+            ) else PrincipalAxesTransform(
+                rotation_matrix=rotation_matrix, 
+                rotation_centre=rotation_centre, 
+                rotation_is_fisher=rotation_is_fisher, 
+                rotation_samples=rotation_samples, 
+                rotation_logwt=rotation_logwt, 
+                rotation_logl=rotation_logl,
+                rotation_top_frac=rotation_top_frac,
+                mode='rotate', 
+                learn_rotation=learn_rotation)
+
+        self.WIPStd_rotation_threshold = WIPStd_rotation_threshold
+
+        
+        if tform is not None:
             self.kernel.set_input_transform(tform)
-            log.info(self.kernel.input_transform)
+            if self.WIPStd_rotation_threshold < 0 and not tform.is_active:
+                tform.update()
+            if tform.is_active:
+                msg = "with active user-defined rotation"
+            elif tform.rotation_matrix is not None and tform.rotation_centre is not None:
+                msg = "with stored rotation matrix (inactive until triggered)"
+            elif tform.samples is not None:
+                msg = "with stored rotation samples (inactive until triggered)"
+            elif tform.learn_rotation:
+                msg = "as identity (will learn rotation)"
+            else:
+                msg = "as identity"
+            log.info(
+                f"Initialised PrincipalAxesTransform with mode {self.kernel.input_transform.mode} "
+                #f"{'with user defined rotation' if tform.is_active else 'as identity (will learn rotation' if tform.learn_rotation else 'as identity'}"
+                f"{msg}"
+            )
+        else:
+            log.info("No rotation or learning")
+
        
         # Setup optimizer
         self.optimizer_method = optimizer
@@ -215,21 +252,21 @@ class GP:
 
         log.info(f"Best MLL:  {-best_loss}")
 
-        # ---- DEBUG: probe variance diagnostic ----
-        if not hasattr(self, "_debug_X_probe"):
-            key = jax.random.PRNGKey(123)
-            self._debug_X_probe = jax.random.uniform(key, (256, self.ndim))
+        # # ---- DEBUG: probe variance diagnostic ----
+        # if not hasattr(self, "_debug_X_probe"):
+        #     key = jax.random.PRNGKey(123)
+        #     self._debug_X_probe = jax.random.uniform(key, (256, self.ndim))
 
-        v = self.predict_var_batched(self._debug_X_probe)
+        # v = self.predict_var_batched(self._debug_X_probe)
 
-        log.info(
-            f"[probe] n_train={self.train_x.shape[0]} "
-            f"mean={float(jnp.mean(v)):.3e} "
-            f"median={float(jnp.median(v)):.3e} "
-            f"max={float(jnp.max(v)):.3e}"
-        )
-        if self.kernel.input_transform is not None and hasattr(self.kernel.input_transform, "rotation_matrix") and hasattr(self.kernel.input_transform, "rotation_center"):
-            self.kernel.input_transform.update(rotation_matrix=self.kernel.input_transform.rotation_matrix, rotation_center=self.kernel.input_transform.rotation_center, gp=self)
+        # log.info(
+        #     f"[probe] n_train={self.train_x.shape[0]} "
+        #     f"mean={float(jnp.mean(v)):.3e} "
+        #     f"median={float(jnp.median(v)):.3e} "
+        #     f"max={float(jnp.max(v)):.3e}"
+        # )
+        # if self.kernel.input_transform is not None and hasattr(self.kernel.input_transform, "rotation_matrix") and hasattr(self.kernel.input_transform, "rotation_centre"):
+        #     self.kernel.input_transform.update(rotation_matrix=self.kernel.input_transform.rotation_matrix, rotation_centre=self.kernel.input_transform.rotation_centre, gp=self)
         self.kernel.build_posterior_cache(self.train_x, self.train_y)
 
         # Return the result in the format the pool expects
@@ -438,12 +475,18 @@ class GP:
         tstate = state.get("input_transform_state", None)
         if tstate is not None:
             ttype = tstate.get("type", None)
-            if ttype == "FisherPrincipalAxesTransform":
-                from .transforms import FisherPrincipalAxesTransform
-                tform = FisherPrincipalAxesTransform.from_state_dict(tstate)
+            if ttype == "PrincipalAxesTransform":
+                from .transforms import PrincipalAxesTransform
+                tform = PrincipalAxesTransform.from_state_dict(tstate)
             else:
                 raise ValueError(f"Unknown transform type in state dict: {ttype}")
             gp.kernel.set_input_transform(tform)
+
+            log.info(
+                f"Restored input transform from state_dict: "
+                f"{'active' if tform.is_active else 'inactive'}"
+                f"{' (learn_rotation)' if tform.learn_rotation else ''}"
+            )
 
 
         gp.kernel.build_posterior_cache(gp.train_x, gp.train_y)

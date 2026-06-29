@@ -11,25 +11,24 @@ from getdist import MCSamples, plots
 import numpy as np
 from dynesty import DynamicNestedSampler
 
-mean_r = 0.2
-scale = 0.02
-
-def loglike(X):
-    r2 = (X[0]-0.5)**2 + (X[1]-0.5)**2
-    r = np.sqrt(r2)
-    return -0.5*((r-mean_r)/scale)**2
+def loglike(X): 
+    scale_fac = 4.
+    scale = scale_fac*np.pi
+    pow = 3
+    
+    y = 2 + np.cos(scale*X[...,0])*np.cos(scale*X[...,1]) 
+    return y**(pow)
 
 def prior_transform(x):
-    return x
+     return x
 
 def main():
     # Problem setup
-    kernel_name='spherical_linear'
     ndim = 2
     param_list = ['x1', 'x2']
     param_labels = ['x_1', 'x_2']
     param_bounds = np.array([[0, 1], [0, 1]]).T
-    likelihood_name = f'GaussianRing_{kernel_name}'
+    likelihood_name = f'Eggbox'
     
     start = time.time()
     print("Starting BOBE run...")
@@ -42,31 +41,31 @@ def main():
         param_labels=param_labels,
         likelihood_name=likelihood_name,
         verbosity='INFO',
-        n_sobol_init=8,
+        n_sobol_init=64,
         optimizer='scipy',
         use_clf=False,
-        seed=42,
+        seed=100,
         save_dir='./results/',
-        gp_kwargs={'kernel': kernel_name, 'noise': 1e-8},
         save=True,
+        gp_kwargs={'optimizer_options': {'maxiter': 5000, 'n_restarts': 10}}
     )
     
     # Run optimization with convergence and run settings
     results = bobe.run(
         acq='wipstd',
-        min_evals=25,
-        max_evals=250,
-        max_gp_size=250,
-        logz_threshold=5e-2,
+        min_evals=300,
+        max_evals=2016,
+        max_gp_size=2016,
+        logz_threshold=9e-4,
         do_final_ns=True,
         fit_n_points=1,
         batch_size=1,
-        ns_n_points=4,
+        ns_n_points=1,
         num_hmc_warmup=512,
-        num_hmc_samples=2048,
+        num_hmc_samples=1024,
         mc_points_size=512,
-        num_chains=4,
-        convergence_n_iters=2,
+        num_chains=5,
+        convergence_n_iters=10,
     )
 
     end = time.time()
@@ -127,7 +126,7 @@ def main():
         g.settings.axes_fontsize = 16
         g.settings.axes_labelsize = 16
         g.triangle_plot([BOBE_Samples,reference_samples], filled=[True, False],
-                    contour_colors=['#006FED', 'black'], contour_lws=[1, 1.],
+                    contour_colors=['#006FED', 'black'], contour_lws=[1, 1.5],
                     legend_labels=['BOBE', 'Nested Sampler']) 
         # add scatter points for gp training data
         points = scale_from_unit(gp.train_x, param_bounds)

@@ -21,12 +21,14 @@ class GPwithClassifier(GP):
                  clf_threshold=250., gp_threshold=500.,
                  noise=1e-8, kernel="rbf", 
                  optimizer="scipy", optimizer_options={},
-                 kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.01, 10.],
+                 kernel_variance_bounds=[1e-4, 1e8], lengthscale_bounds=[0.1, 15.],
                  tausq=None, tausq_bounds=[1e-4, 1e4],
                  kernel_variance_prior=None, lengthscale_prior=None, 
                  lengthscales=None, kernel_variance=1.0,
                  groups=None, enable_group_outputscale=False,
-                 rotation_matrix=None, rotation_center=None,
+                 rotation_matrix=None, rotation_centre=None,  rotation_is_fisher=False, 
+                 rotation_samples=None, rotation_logwt=None, rotation_logl=None, rotation_top_frac=1.0,
+                 learn_rotation=False, WIPStd_rotation_threshold=1.0,
                  param_names=None,
                  train_clf_on_init=True,  # Prevent retraining on copy
                  ):
@@ -113,7 +115,14 @@ class GPwithClassifier(GP):
             'groups': groups,
             'enable_group_outputscale': enable_group_outputscale,
             'rotation_matrix': rotation_matrix,
-            'rotation_center': rotation_center,
+            'rotation_centre': rotation_centre,
+            'rotation_samples': rotation_samples,
+            'rotation_logwt': rotation_logwt,
+            'rotation_logl': rotation_logl,
+            'rotation_top_frac': rotation_top_frac,
+            'learn_rotation': learn_rotation, 
+            'rotation_is_fisher': rotation_is_fisher, 
+            'WIPStd_rotation_threshold': WIPStd_rotation_threshold,
         }
                     
         super().__init__(**gp_init_kwargs)
@@ -374,12 +383,18 @@ class GPwithClassifier(GP):
         tstate = state.get("input_transform_state", None)
         if tstate is not None:
             ttype = tstate.get("type", None)
-            if ttype == "FisherPrincipalAxesTransform":
-                from .transforms import FisherPrincipalAxesTransform
-                tform = FisherPrincipalAxesTransform.from_state_dict(tstate)
+            if ttype == "PrincipalAxesTransform":
+                from .transforms import PrincipalAxesTransform
+                tform = PrincipalAxesTransform.from_state_dict(tstate)
             else:
                 raise ValueError(f"Unknown transform type in state dict: {ttype}")
             gp_clf.kernel.set_input_transform(tform)
+
+            log.info(
+                f"Restored input transform from state_dict: "
+                f"{'active' if tform.is_active else 'inactive'}"
+                f"{' (learn_rotation)' if tform.learn_rotation else ''}"
+            )
 
         gp_clf.kernel.build_posterior_cache(gp_clf.train_x, gp_clf.train_y)
         
